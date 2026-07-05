@@ -2,10 +2,14 @@
 import { API_BACKEND_URL } from '@/config/getEnvVariables';
 import Pagination from '@/shared/ui/pagination/Pagination';
 import React, { useState, useEffect, useCallback } from 'react';
+import toast from 'react-hot-toast';
+
 
 /* ======================== CONSTANTS ======================== */
 
+
 const FIELD_DEFINITIONS_API = `${API_BACKEND_URL}/stock/field-definitions`;
+
 
 const INPUT_TYPES = [
   { value: 'text', label: 'Text' },
@@ -20,15 +24,23 @@ const INPUT_TYPES = [
   { value: 'color', label: 'Color' },
 ];
 
+
 const DROPDOWN_TYPES = ['dropdown', 'multi_select'];
 
+
+// Requirement 1: dropdown-only status filter, no "All" option
 const STATUS_FILTERS = [
   { value: 'active', label: 'Active' },
   { value: 'inactive', label: 'Inactive' },
-  { value: 'all', label: 'All statuses' },
 ];
 
+
 const DEFAULT_ITEMS_PER_PAGE = 10;
+
+
+// Requirement 5: max characters shown inline before "...more" kicks in
+const TRUNCATE_LIMIT = 30;
+
 
 const EMPTY_FORM = {
   code: '',
@@ -37,9 +49,27 @@ const EMPTY_FORM = {
   optionsSource: '',
   isRequired: false,
   isFilterable: false,
+  order: 0,
 };
 
+
+// Requirement 3: dynamic table column definitions — single source of truth.
+// Add/remove/toggle `show` here to control rendered columns; no hardcoding elsewhere.
+const FIELD_TABLE_COLUMNS = [
+  { key: 'order', label: 'Order', show: true, render: (item) => <span className="text-sm text-slate-500 font-mono">{item.order}</span> },
+  { key: 'code', label: 'Code', show: true, render: (item) => <TruncatedText label="Code" value={item.code} className="text-slate-700" mono /> },
+  { key: 'label', label: 'Label', show: true, render: (item) => <TruncatedText label="Label" value={item.label} className="font-medium text-slate-900" /> },
+  { key: 'inputType', label: 'Input type', show: true, render: (item) => <InputTypeTag value={item.inputType} /> },
+  { key: 'optionsSource', label: 'Options source', show: true, render: (item) => <TruncatedText label="Options source" value={item.optionsSource} className="text-slate-400" mono /> },
+  { key: 'isRequired', label: 'Required', show: true, render: (item) => <BooleanDot value={item.isRequired} /> },
+  // { key: 'isFilterable', label: 'Filterable', show: true, render: (item) => <BooleanDot value={item.isFilterable} /> },
+  { key: 'isActive', label: 'Status', show: true, render: (item) => <StatusBadge isActive={item.isActive} /> },
+  { key: 'actions', label: 'Action', show: true, render: null }, // rendered separately (icon buttons)
+];
+
+
 /* ======================== API FUNCTIONS ======================== */
+
 
 // NOTE: the backend only exposes a single `showInactive` boolean
 // (false => active only, true => everything). There is no
@@ -52,6 +82,7 @@ const getFieldDefinitions = async ({ page, limit, search, inputType, showInactiv
   if (inputType) params.set('inputType', inputType);
   if (showInactive) params.set('showInactive', 'true');
 
+
   const response = await fetch(`${FIELD_DEFINITIONS_API}?${params.toString()}`, {
     method: 'GET',
     credentials: 'include',
@@ -59,6 +90,7 @@ const getFieldDefinitions = async ({ page, limit, search, inputType, showInactiv
   if (!response.ok) throw new Error('Failed to fetch field definitions');
   return response.json();
 };
+
 
 const createFieldDefinition = async (payload) => {
   const response = await fetch(FIELD_DEFINITIONS_API, {
@@ -72,6 +104,7 @@ const createFieldDefinition = async (payload) => {
   return data;
 };
 
+
 const updateFieldDefinition = async (id, payload) => {
   const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}`, {
     method: 'PUT',
@@ -84,6 +117,7 @@ const updateFieldDefinition = async (id, payload) => {
   return data;
 };
 
+
 const deleteFieldDefinition = async (id) => {
   const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}`, {
     method: 'DELETE',
@@ -93,6 +127,7 @@ const deleteFieldDefinition = async (id) => {
   if (!response.ok) throw new Error(data?.message || 'Failed to delete field definition');
   return data;
 };
+
 
 const restoreFieldDefinition = async (id) => {
   const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}/restore`, {
@@ -104,7 +139,9 @@ const restoreFieldDefinition = async (id) => {
   return data;
 };
 
+
 /* ======================== UTILITY FUNCTIONS ======================== */
+
 
 const mapFieldDefinitionResponse = (item) => ({
   id: item._id,
@@ -115,14 +152,19 @@ const mapFieldDefinitionResponse = (item) => ({
   isRequired: !!item.isRequired,
   isFilterable: !!item.isFilterable,
   isActive: item.isActive !== false,
+  order: item.order ?? 0,
 });
 
+
 const isDropdownType = (inputType) => DROPDOWN_TYPES.includes(inputType);
+
 
 const getInputTypeLabel = (value) =>
   INPUT_TYPES.find((t) => t.value === value)?.label || value;
 
+
 /* ======================== ICONS (inline, no extra deps) ======================== */
+
 
 const Icon = {
   search: (
@@ -172,9 +214,16 @@ const Icon = {
       <path d="M12 8v5M12 16h.01M3.5 18 12 3.5 20.5 18a1.5 1.5 0 0 1-1.3 2.25H4.8A1.5 1.5 0 0 1 3.5 18Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   ),
+  chevronDown: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+      <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
 };
 
+
 /* ======================== UI HELPER COMPONENTS ======================== */
+
 
 const StatusBadge = ({ isActive }) => (
   <span
@@ -189,6 +238,7 @@ const StatusBadge = ({ isActive }) => (
   </span>
 );
 
+
 const BooleanDot = ({ value }) => (
   <span
     className={`inline-flex items-center gap-1.5 text-xs font-medium ${
@@ -200,11 +250,50 @@ const BooleanDot = ({ value }) => (
   </span>
 );
 
+
 const InputTypeTag = ({ value }) => (
   <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono bg-slate-100 text-slate-600">
     {getInputTypeLabel(value)}
   </span>
 );
+
+
+// Requirement 5: truncates any string longer than TRUNCATE_LIMIT and shows
+// an inline "...more" trigger that opens a popup with the full value.
+const TruncatedText = ({ label, value, className = '', mono = false }) => {
+  const [open, setOpen] = useState(false);
+
+  if (!value) return <span className="text-sm text-slate-300">—</span>;
+
+  const isLong = value.length > TRUNCATE_LIMIT;
+  const displayValue = isLong ? value.slice(0, TRUNCATE_LIMIT) : value;
+
+  return (
+    <>
+      <span className={`text-sm ${mono ? 'font-mono' : ''} ${className}`}>
+        {displayValue}
+        {isLong && (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="ml-1 font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+          >
+            ...more
+          </button>
+        )}
+      </span>
+
+      {open && (
+        <Modal title={label} onClose={() => setOpen(false)} maxWidth="max-w-md">
+          <p className={`text-sm text-slate-700 whitespace-pre-wrap break-words ${mono ? 'font-mono' : ''}`}>
+            {value}
+          </p>
+        </Modal>
+      )}
+    </>
+  );
+};
+
 
 const IconButton = ({ onClick, label, tone = 'slate', children }) => {
   const tones = {
@@ -218,14 +307,15 @@ const IconButton = ({ onClick, label, tone = 'slate', children }) => {
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors ${tones[tone]}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-all duration-150 ${tones[tone]}`}
     >
       {children}
     </button>
   );
 };
 
-const LoadingRows = ({ columns = 8, rows = 6 }) => (
+
+const LoadingRows = ({ columns = 9, rows = 6 }) => (
   <>
     {Array.from({ length: rows }).map((_, r) => (
       <tr key={r}>
@@ -239,9 +329,10 @@ const LoadingRows = ({ columns = 8, rows = 6 }) => (
   </>
 );
 
-const EmptyState = ({ onCreateClick }) => (
+
+const EmptyState = ({ colSpan, onCreateClick }) => (
   <tr>
-    <td colSpan={8} className="px-6 py-16">
+    <td colSpan={colSpan} className="px-6 py-16">
       <div className="flex flex-col items-center text-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-50 text-slate-300">
           {Icon.empty}
@@ -250,7 +341,7 @@ const EmptyState = ({ onCreateClick }) => (
         <p className="mt-1 text-sm text-slate-400">Adjust your filters, or add a new field to get started.</p>
         <button
           onClick={onCreateClick}
-          className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-slate-800 shadow-sm transition-colors"
         >
           {Icon.plus} Add field
         </button>
@@ -259,9 +350,10 @@ const EmptyState = ({ onCreateClick }) => (
   </tr>
 );
 
-const ErrorState = ({ message, onRetry }) => (
+
+const ErrorState = ({ colSpan, message, onRetry }) => (
   <tr>
-    <td colSpan={8} className="px-6 py-16">
+    <td colSpan={colSpan} className="px-6 py-16">
       <div className="flex flex-col items-center text-center">
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-500">
           {Icon.alert}
@@ -270,7 +362,7 @@ const ErrorState = ({ message, onRetry }) => (
         <p className="mt-1 max-w-sm text-sm text-slate-400">{message}</p>
         <button
           onClick={onRetry}
-          className="mt-4 rounded-md border border-slate-200 px-3.5 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="mt-4 rounded-md border border-slate-200 px-3.5 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
         >
           Try again
         </button>
@@ -279,7 +371,9 @@ const ErrorState = ({ message, onRetry }) => (
   </tr>
 );
 
+
 /* ======================== HEADER COMPONENT ======================== */
+
 
 const Header = ({ totalItems, onCreateClick }) => (
   <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between mb-6">
@@ -292,17 +386,20 @@ const Header = ({ totalItems, onCreateClick }) => (
     </div>
     <button
       onClick={onCreateClick}
-      className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800 transition-colors"
+      className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800 hover:shadow-md transition-all duration-150"
     >
       {Icon.plus} Add field
     </button>
   </div>
 );
 
+
 /* ======================== FILTER BAR COMPONENT ======================== */
 
+
+// Requirement 1: status is now a plain <select> dropdown (Active / Inactive only)
 const FilterBar = ({ search, onSearchChange, inputTypeFilter, onInputTypeFilterChange, statusFilter, onStatusFilterChange }) => (
-  <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 mb-4 sm:flex-row sm:items-center">
+  <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 mb-4 shadow-sm sm:flex-row sm:items-center">
     <div className="relative flex-1 min-w-[200px]">
       <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
         {Icon.search}
@@ -312,14 +409,15 @@ const FilterBar = ({ search, onSearchChange, inputTypeFilter, onInputTypeFilterC
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
         placeholder="Search by code or label"
-        className="w-full rounded-md border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300"
+        className="w-full rounded-md border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-colors"
       />
     </div>
+
 
     <select
       value={inputTypeFilter}
       onChange={(e) => onInputTypeFilterChange(e.target.value)}
-      className="rounded-md border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300"
+      className="rounded-md border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-colors"
     >
       <option value="">All input types</option>
       {INPUT_TYPES.map((t) => (
@@ -327,101 +425,110 @@ const FilterBar = ({ search, onSearchChange, inputTypeFilter, onInputTypeFilterC
       ))}
     </select>
 
-    <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
-      {STATUS_FILTERS.map((s) => (
-        <button
-          key={s.value}
-          onClick={() => onStatusFilterChange(s.value)}
-          className={`px-3 py-1.5 text-sm font-medium rounded-[5px] transition-colors ${
-            statusFilter === s.value
-              ? 'bg-white text-slate-900 shadow-sm'
-              : 'text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          {s.label}
-        </button>
-      ))}
+
+    <div className="relative">
+      <select
+        value={statusFilter}
+        onChange={(e) => onStatusFilterChange(e.target.value)}
+        className="appearance-none rounded-md border border-slate-200 bg-slate-50 py-2 pl-3 pr-8 text-sm font-medium text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-colors"
+      >
+        {STATUS_FILTERS.map((s) => (
+          <option key={s.value} value={s.value}>{s.label}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
+        {Icon.chevronDown}
+      </span>
     </div>
   </div>
 );
+
 
 /* ======================== TABLE ROW COMPONENT ======================== */
 
-const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
-  <tr className="group border-b border-slate-100 last:border-0 hover:bg-slate-50/70">
-    <td className="px-5 py-3.5">
-      <span className="text-sm font-mono text-slate-700">{item.code}</span>
-    </td>
-    <td className="px-5 py-3.5 text-sm font-medium text-slate-900">{item.label}</td>
-    <td className="px-5 py-3.5"><InputTypeTag value={item.inputType} /></td>
-    <td className="px-5 py-3.5 text-sm text-slate-400">
-      {item.optionsSource || <span className="text-slate-300">—</span>}
-    </td>
-    <td className="px-5 py-3.5"><BooleanDot value={item.isRequired} /></td>
-    <td className="px-5 py-3.5"><BooleanDot value={item.isFilterable} /></td>
-    <td className="px-5 py-3.5"><StatusBadge isActive={item.isActive} /></td>
-    <td className="px-5 py-3.5">
-      <div className="flex items-center justify-end gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
-        <IconButton onClick={() => onView(item)} label="View">{Icon.eye}</IconButton>
-        <IconButton onClick={() => onEdit(item)} label="Edit" tone="indigo">{Icon.edit}</IconButton>
-        {item.isActive ? (
-          <IconButton onClick={() => onDelete(item)} label="Delete" tone="red">{Icon.trash}</IconButton>
-        ) : (
-          <IconButton onClick={() => onRestore(item)} label="Restore" tone="emerald">{Icon.restore}</IconButton>
-        )}
-      </div>
-    </td>
+
+// Requirement 3: renders only columns visible in FIELD_TABLE_COLUMNS
+const TableRow = ({ item, columns, onView, onEdit, onDelete, onRestore }) => (
+  <tr className="group border-b border-slate-100 last:border-0 hover:bg-slate-50/70 transition-colors">
+    {columns.map((col) =>
+      col.key === 'actions' ? (
+        <td key={col.key} className="px-5 py-3.5">
+          <div className="flex items-center justify-end gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
+            <IconButton onClick={() => onView(item)} label="View">{Icon.eye}</IconButton>
+            <IconButton onClick={() => onEdit(item)} label="Edit" tone="indigo">{Icon.edit}</IconButton>
+            {item.isActive ? (
+              <IconButton onClick={() => onDelete(item)} label="Delete" tone="red">{Icon.trash}</IconButton>
+            ) : (
+              <IconButton onClick={() => onRestore(item)} label="Restore" tone="emerald">{Icon.restore}</IconButton>
+            )}
+          </div>
+        </td>
+      ) : (
+        <td key={col.key} className="px-5 py-3.5">{col.render(item)}</td>
+      )
+    )}
   </tr>
 );
 
+
 /* ======================== TABLE COMPONENT ======================== */
 
-const TABLE_HEADERS = ['Code', 'Label', 'Input type', 'Options source', 'Required', 'Filterable', 'Status', ''];
 
-const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore }) => (
-  <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
-    <div className="overflow-x-auto">
-      <table className="min-w-full">
-        <thead>
-          <tr className="border-b border-slate-200 bg-slate-50/60">
-            {TABLE_HEADERS.map((h) => (
-              <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {error ? (
-            <ErrorState message={error} onRetry={onRetry} />
-          ) : loading ? (
-            <LoadingRows />
-          ) : items.length === 0 ? (
-            <EmptyState onCreateClick={onCreateClick} />
-          ) : (
-            items.map((item) => (
-              <TableRow
-                key={item.id}
-                item={item}
-                onView={onView}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                onRestore={onRestore}
-              />
-            ))
-          )}
-        </tbody>
-      </table>
+const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore }) => {
+  // Requirement 3: derive visible columns from the constant — no hardcoded headers
+  const visibleColumns = FIELD_TABLE_COLUMNS.filter((c) => c.show);
+
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white overflow-hidden shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="min-w-full">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50/60">
+              {visibleColumns.map((col) => (
+                <th key={col.key} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  {col.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {error ? (
+              <ErrorState colSpan={visibleColumns.length} message={error} onRetry={onRetry} />
+            ) : loading ? (
+              <LoadingRows columns={visibleColumns.length} />
+            ) : items.length === 0 ? (
+              <EmptyState colSpan={visibleColumns.length} onCreateClick={onCreateClick} />
+            ) : (
+              items.map((item) => (
+                <TableRow
+                  key={item.id}
+                  item={item}
+                  columns={visibleColumns}
+                  onView={onView}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onRestore={onRestore}
+                />
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
-/* ======================== SLIDE-OVER PANEL COMPONENT ======================== */
 
-const SlideOver = ({ title, description, onClose, children }) => (
-  <div className="fixed inset-0 z-50">
-    <div onClick={onClose} className="absolute inset-0 bg-slate-900/40 backdrop-blur-[1px]" />
-    <div className="absolute right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl flex flex-col animate-[slideIn_0.2s_ease-out]">
+/* ======================== MODAL SHELL (reusable) ======================== */
+
+
+// Requirement 2 & 4: shared premium modal shell reused by the Add/Edit popup,
+// the Confirm popup, and now the TruncatedText "...more" popup
+const Modal = ({ title, description, onClose, children, maxWidth = 'max-w-lg' }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div onClick={onClose} className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]" />
+    <div className={`relative w-full ${maxWidth} rounded-xl bg-white shadow-2xl ring-1 ring-slate-900/5 flex flex-col max-h-[90vh] animate-[popIn_0.18s_ease-out]`}>
       <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
         <div>
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
@@ -429,18 +536,56 @@ const SlideOver = ({ title, description, onClose, children }) => (
         </div>
         <button
           onClick={onClose}
-          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
         >
           {Icon.close}
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
     </div>
-    <style>{`@keyframes slideIn { from { transform: translateX(16px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }`}</style>
+    <style>{`
+      @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes popIn { from { transform: scale(0.96) translateY(6px); opacity: 0 } to { transform: scale(1) translateY(0); opacity: 1 } }
+    `}</style>
   </div>
 );
 
+
+/* ======================== CONFIRM MODAL (Requirement 4) ======================== */
+
+
+const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 'Delete', onCancel, onConfirm, loading }) => {
+  if (!open) return null;
+  return (
+    <Modal title={title} onClose={onCancel} maxWidth="max-w-sm">
+      <div className="flex flex-col items-center text-center gap-3 py-1">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-500">
+          {Icon.alert}
+        </div>
+        <p className="text-sm text-slate-600">{message}</p>
+      </div>
+      <div className="flex justify-center gap-2 pt-6">
+        <button
+          onClick={onCancel}
+          className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onConfirm}
+          disabled={loading}
+          className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          {loading ? 'Deleting…' : confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+
 /* ======================== FORM FIELD COMPONENTS ======================== */
+
 
 const Field = ({ label, hint, error, children }) => (
   <div>
@@ -451,14 +596,18 @@ const Field = ({ label, hint, error, children }) => (
   </div>
 );
 
+
 const fieldInputClass =
-  'w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 disabled:bg-slate-50 disabled:text-slate-400';
+  'w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 disabled:bg-slate-50 disabled:text-slate-400 transition-colors';
+
 
 /* ======================== FORM COMPONENT ======================== */
+
 
 const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors }) => {
   const isEdit = mode === 'edit';
   const isView = mode === 'view';
+
 
   return (
     <div className="flex h-full flex-col">
@@ -474,7 +623,8 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           />
         </Field>
 
-        <Field label="Label" error={errors.label}>
+
+        <Field label="Label" hint="Must be unique across all fields." error={errors.label}>
           <input
             type="text"
             value={formData.label}
@@ -484,6 +634,19 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             className={fieldInputClass}
           />
         </Field>
+
+
+        <Field label="Order" hint="Controls display sequence in the table (lower shows first)." error={errors.order}>
+          <input
+            type="number"
+            value={formData.order}
+            disabled={isView}
+            onChange={(e) => onChange('order', e.target.value === '' ? '' : Number(e.target.value))}
+            placeholder="e.g. 1"
+            className={fieldInputClass}
+          />
+        </Field>
+
 
         <Field label="Input type">
           <select
@@ -498,6 +661,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           </select>
         </Field>
 
+
         {isDropdownType(formData.inputType) && (
           <Field label="Options source key" hint="Must match a key in STOCK_FIELD_OPTIONS constants." error={errors.optionsSource}>
             <input
@@ -510,6 +674,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             />
           </Field>
         )}
+
 
         <div className="flex flex-col gap-3 rounded-md border border-slate-100 bg-slate-50/60 p-3.5">
           <label className="flex items-center justify-between text-sm text-slate-700">
@@ -541,6 +706,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           </label>
         </div>
 
+
         {errors.general && (
           <div className="flex items-start gap-2 rounded-md bg-red-50 px-3 py-2.5 text-sm text-red-700">
             {Icon.alert}
@@ -549,10 +715,11 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
         )}
       </div>
 
+
       <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 mt-5 -mx-6 px-6">
         <button
           onClick={onCancel}
-          className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
         >
           {isView ? 'Close' : 'Cancel'}
         </button>
@@ -560,7 +727,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           <button
             onClick={onSubmit}
             disabled={submitting}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create field'}
           </button>
@@ -570,20 +737,25 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
   );
 };
 
+
 /* ======================== MAIN COMPONENT ======================== */
+
 
 const FieldDefinition = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+
   const [search, setSearch] = useState('');
   const [inputTypeFilter, setInputTypeFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' | 'all'
+  const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' — default Active (Req 1)
+
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_ITEMS_PER_PAGE);
   const [totalItems, setTotalItems] = useState(0);
+
 
   const [modalMode, setModalMode] = useState(null); // 'create' | 'edit' | 'view' | null
   const [formData, setFormData] = useState(EMPTY_FORM);
@@ -591,7 +763,14 @@ const FieldDefinition = () => {
   const [submitting, setSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState({});
 
+
+  // Requirement 4: confirm-delete popup state
+  const [confirmTarget, setConfirmTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+
   /* ----- Data fetching ----- */
+
 
   const loadFieldDefinitions = useCallback(async () => {
     setLoading(true);
@@ -607,11 +786,13 @@ const FieldDefinition = () => {
       let mapped = (response?.data || []).map(mapFieldDefinitionResponse);
       let total = response?.pagination?.total ?? mapped.length;
 
+
       // Backend has no "inactive only" filter — narrow it down client-side.
       if (statusFilter === 'inactive') {
         mapped = mapped.filter((f) => !f.isActive);
         total = mapped.length;
       }
+
 
       setItems(mapped);
       setTotalItems(total);
@@ -622,15 +803,19 @@ const FieldDefinition = () => {
     }
   }, [currentPage, itemsPerPage, search, inputTypeFilter, statusFilter]);
 
+
   useEffect(() => {
     loadFieldDefinitions();
   }, [loadFieldDefinitions]);
+
 
   useEffect(() => {
     setCurrentPage(1);
   }, [search, inputTypeFilter, statusFilter]);
 
+
   /* ----- Modal handlers ----- */
+
 
   const openCreateModal = () => {
     setFormData(EMPTY_FORM);
@@ -638,6 +823,7 @@ const FieldDefinition = () => {
     setActiveItemId(null);
     setModalMode('create');
   };
+
 
   const openEditModal = (item) => {
     setFormData({
@@ -647,11 +833,13 @@ const FieldDefinition = () => {
       optionsSource: item.optionsSource,
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
+      order: item.order ?? 0,
     });
     setFormErrors({});
     setActiveItemId(item.id);
     setModalMode('edit');
   };
+
 
   const openViewModal = (item) => {
     setFormData({
@@ -661,11 +849,13 @@ const FieldDefinition = () => {
       optionsSource: item.optionsSource,
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
+      order: item.order ?? 0,
     });
     setFormErrors({});
     setActiveItemId(item.id);
     setModalMode('view');
   };
+
 
   const closeModal = () => {
     setModalMode(null);
@@ -673,23 +863,31 @@ const FieldDefinition = () => {
     setFormErrors({});
   };
 
+
   const handleFormChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
+
   /* ----- Validation ----- */
+
 
   const validateForm = () => {
     const errors = {};
     if (!formData.code.trim()) errors.code = 'Code is required.';
     if (!formData.label.trim()) errors.label = 'Label is required.';
+    if (formData.order !== '' && Number.isNaN(Number(formData.order))) {
+      errors.order = 'Order must be a number.';
+    }
     if (isDropdownType(formData.inputType) && !formData.optionsSource.trim()) {
       errors.optionsSource = 'Options source key is required for dropdown / multi-select fields.';
     }
     return errors;
   };
 
+
   /* ----- CRUD handlers ----- */
+
 
   const handleSubmit = async () => {
     const errors = validateForm();
@@ -697,6 +895,7 @@ const FieldDefinition = () => {
       setFormErrors(errors);
       return;
     }
+
 
     setSubmitting(true);
     setFormErrors({});
@@ -707,59 +906,83 @@ const FieldDefinition = () => {
         optionsSource: isDropdownType(formData.inputType) ? formData.optionsSource.trim() : null,
         isRequired: formData.isRequired,
         isFilterable: formData.isFilterable,
+        order: formData.order === '' ? 0 : Number(formData.order),
       };
+
 
       if (modalMode === 'create') {
         payload.code = formData.code.trim();
         await createFieldDefinition(payload);
+        toast.success('Field definition created successfully.');
       } else if (modalMode === 'edit') {
         await updateFieldDefinition(activeItemId, payload);
+        toast.success('Field definition updated successfully.');
       }
+
 
       closeModal();
       await loadFieldDefinitions();
     } catch (err) {
-      setFormErrors({ general: err.message || 'Failed to save field definition.' });
+      const message = err.message || 'Failed to save field definition.';
+      setFormErrors({ general: message });
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDelete = async (item) => {
-    if (!window.confirm(`Delete field "${item.label}"? This can be restored later.`)) return;
+
+  // Requirement 4: opens custom confirm popup instead of window.confirm
+  const handleDeleteClick = (item) => setConfirmTarget(item);
+
+
+  const handleConfirmDelete = async () => {
+    if (!confirmTarget) return;
+    setDeleting(true);
     try {
-      await deleteFieldDefinition(item.id);
+      await deleteFieldDefinition(confirmTarget.id);
+      toast.success('Field definition deleted successfully.');
+      setConfirmTarget(null);
       await loadFieldDefinitions();
     } catch (err) {
-      window.alert(err.message || 'Failed to delete field definition.');
+      toast.error(err.message || 'Failed to delete field definition.');
+    } finally {
+      setDeleting(false);
     }
   };
+
 
   const handleRestore = async (item) => {
     try {
       await restoreFieldDefinition(item.id);
+      toast.success('Field definition restored successfully.');
       await loadFieldDefinitions();
     } catch (err) {
-      window.alert(err.message || 'Failed to restore field definition.');
+      toast.error(err.message || 'Failed to restore field definition.');
     }
   };
 
+
   /* ----- Render ----- */
+
 
   const modalTitle =
     modalMode === 'create' ? 'Add field definition'
     : modalMode === 'edit' ? 'Edit field definition'
     : 'Field definition details';
 
+
   const modalDescription =
     modalMode === 'create' ? 'Define a new dynamic attribute for products.'
     : modalMode === 'edit' ? 'Update label, type, and rules for this field.'
     : null;
 
+
   return (
     <div className="min-h-screen bg-slate-50/40 p-6">
       <div className="mx-auto max-w-6xl">
         <Header totalItems={totalItems} onCreateClick={openCreateModal} />
+
 
         <FilterBar
           search={search}
@@ -770,6 +993,7 @@ const FieldDefinition = () => {
           onStatusFilterChange={setStatusFilter}
         />
 
+
         <Table
           items={items}
           loading={loading}
@@ -778,9 +1002,10 @@ const FieldDefinition = () => {
           onCreateClick={openCreateModal}
           onView={openViewModal}
           onEdit={openEditModal}
-          onDelete={handleDelete}
+          onDelete={handleDeleteClick}
           onRestore={handleRestore}
         />
+
 
         {!error && totalItems > 0 && (
           <div className="mt-4">
@@ -798,8 +1023,10 @@ const FieldDefinition = () => {
         )}
       </div>
 
+
+      {/* Requirement 2: Add/Edit/View now uses the shared premium Modal popup */}
       {modalMode && (
-        <SlideOver title={modalTitle} description={modalDescription} onClose={closeModal}>
+        <Modal title={modalTitle} description={modalDescription} onClose={closeModal}>
           <Form
             mode={modalMode}
             formData={formData}
@@ -809,10 +1036,21 @@ const FieldDefinition = () => {
             submitting={submitting}
             errors={formErrors}
           />
-        </SlideOver>
+        </Modal>
       )}
+
+
+      {/* Requirement 4: reusable confirm modal for delete */}
+      <ConfirmModal
+        open={!!confirmTarget}
+        message="Are you sure you want to delete this field?"
+        onCancel={() => setConfirmTarget(null)}
+        onConfirm={handleConfirmDelete}
+        loading={deleting}
+      />
     </div>
   );
 };
+
 
 export default FieldDefinition;

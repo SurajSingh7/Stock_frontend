@@ -32,6 +32,13 @@ export const navCategories = [
         url: "/stock/master/product-definition",
         action: ["READ"],
       },
+       {
+        name: "Vendors",
+        path: "/stock/vendors",
+        moduleName: "vendor",
+        url: "/stock/vendors",
+        action: ["READ"],
+      },
     ],
   },
 ];
