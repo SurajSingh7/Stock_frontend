@@ -351,14 +351,14 @@ const VendorsComp = () => {
                       <td className="px-4 py-4">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
-                            onClick={() => router.push(`/vendors/${vendor._id}`)}
+                            onClick={() => router.push(`/stock/vendors/${vendor._id}`)}
                             title="View"
                             className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
                           >
                             <Eye className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => router.push(`/vendors/${vendor._id}/edit`)}
+                            onClick={() => router.push(`/stock/vendors/${vendor._id}/edit`)}
                             title="Edit"
                             className="p-2 rounded-lg hover:bg-gray-100 text-gray-500"
                           >

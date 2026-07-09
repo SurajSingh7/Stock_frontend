@@ -2,7 +2,7 @@
 
 import { useParams } from "next/navigation";
 
-import VendorForm from "@/components/stock/VendorForm";
+import VendorForm from "@/modules/stock/vendor/Vendorform";
 
 const page = () => {
   const { id } = useParams();
