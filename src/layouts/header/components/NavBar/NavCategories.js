@@ -3,23 +3,10 @@
 // FOR BACKEND MAPPING PART:
 // moduleName: "dsr", url: "/dsr", action: ["CREATE", "UPDATE", "READ"], exceptions: ["canViewAll"]
 
-
 import { SHOW_DEV } from "@/config/getEnvVariables";
 
-
 export const navCategories = [
-  {
-    category: "Vendor",
-    items: [
-       {
-        name: "Vendors List",
-        path: "/stock/vendors",
-        moduleName: "vendor",
-        url: "/stock/vendors",
-        action: ["READ"],
-      },
-    ],
-  },
+
   {
     category: "Quotation & Po",
     items: [
@@ -32,14 +19,26 @@ export const navCategories = [
       },
       {
         name: "Purchase Order(po)",
-        path: "/master/field-definition",
+        path: "/stock/purchase-orders",
         moduleName: "Stock Field Definition",
         url: "/stock/master/field-definition",
         action: ["READ"],
       },
     ],
   },
-    {
+  {
+    category: "Vendor",
+    items: [
+      {
+        name: "Vendors List",
+        path: "/stock/vendors",
+        moduleName: "vendor",
+        url: "/stock/vendors",
+        action: ["READ"],
+      },
+    ],
+  },
+  {
     category: "Approval",
     items: [
       {
@@ -49,18 +48,18 @@ export const navCategories = [
         url: "/stock/quotations/approval",
         action: ["READ"],
       },
-      {
-        name: "Purchase Order(po)",
-        path: "/master/field-definition",
-        moduleName: "Stock Field Definition",
-        url: "/stock/master/field-definition",
-        action: ["READ"],
-      },
     ],
   },
   {
     category: "Master",
     items: [
+      {
+        name: "Product Definition",
+        path: "/master/product-definition",
+        moduleName: "Stock Product Definition",
+        url: "/stock/master/product-definition",
+        action: ["READ"],
+      },
       {
         name: "Category",
         path: "/master/category",
@@ -73,20 +72,6 @@ export const navCategories = [
         path: "/master/field-definition",
         moduleName: "Stock Field Definition",
         url: "/stock/master/field-definition",
-        action: ["READ"],
-      },
-      {
-        name: "Product Definition",
-        path: "/master/product-definition",
-        moduleName: "Stock Product Definition",
-        url: "/stock/master/product-definition",
-        action: ["READ"],
-      },
-       {
-        name: "Vendors",
-        path: "/stock/vendors",
-        moduleName: "vendor",
-        url: "/stock/vendors",
         action: ["READ"],
       },
     ],
