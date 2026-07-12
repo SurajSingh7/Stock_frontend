@@ -271,7 +271,6 @@ const PurchaseOrderPage = () => {
   const [entities, setEntities] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [popup, setPopup] = useState(null);
@@ -289,6 +288,7 @@ const PurchaseOrderPage = () => {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
+  const [productOptions, setProductOptions] = useState([]);
 
   // debounce the search box so we don't fire a request per keystroke
   useEffect(() => {
@@ -330,10 +330,9 @@ const PurchaseOrderPage = () => {
         setEntities((j.data || []).filter((e) => e.isActive !== false && e.isShownOnDropDown !== false)); } catch {}
       try { const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
         const j = await r.json(); if (j.success) setVendors(j.data || []); } catch {}
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&limit=500`, { credentials: "include" });
+      // leaf categories that HAVE products — filtered server-side (?hasProducts=true)
+      try { const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
         const j = await r.json(); if (j.success) setCategories(j.data || []); } catch {}
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setProducts(j.data || []); } catch {}
     })();
   }, []);
 
@@ -341,15 +340,28 @@ const PurchaseOrderPage = () => {
 
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v._id, label: v.name })), [vendors]);
 
-  // only leaf categories that contain at least one product
-  const categoryOptions = useMemo(() => {
-    const withProducts = new Set(products.map((p) => String(p.categoryId)));
-    return categories
-      .filter((c) => withProducts.has(String(c._id)))
-      .map((c) => ({ value: c._id, label: c.name, path: c.displayPath || c.name }));
-  }, [categories, products]);
+  // already leaf + has-products (server-side); just show the leaf name, path via 👁
+  const categoryOptions = useMemo(
+    () => categories.map((c) => ({ value: c._id, label: c.name, path: c.displayPath || c.name })),
+    [categories]
+  );
 
-  const productOptions = useMemo(() => products.map((p) => ({ value: p._id, label: p.name })), [products]);
+  // Product filter = DEPENDENT dropdown. Options come from the backend, scoped to the
+  // selected category (GET /product-definitions?categoryId=...). No client-side filtering,
+  // and a large product master is never downloaded in full.
+  useEffect(() => {
+    (async () => {
+      try {
+        const url = categoryF
+          ? `${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryF}&limit=1000`
+          : `${API_BACKEND_URL}/stock/product-definitions?limit=1000`;
+        const r = await fetch(url, { credentials: "include" });
+        const j = await r.json();
+        if (j.success) setProductOptions((j.data || []).map((p) => ({ value: p._id, label: p.name })));
+        else setProductOptions([]);
+      } catch { setProductOptions([]); }
+    })();
+  }, [categoryF]);
   const entityOptions = useMemo(() => aliases.map((a) => ({ value: a, label: a })), [aliases]);
 
   // board already filtered by the backend
@@ -412,7 +424,7 @@ const PurchaseOrderPage = () => {
           </div>
           <SearchableSelect value={vendorF} onChange={(v) => { setVendorF(v); setPage(1); }} options={vendorOptions} placeholder="All Vendors" />
           <SearchableSelect
-            value={categoryF} onChange={(v) => { setCategoryF(v); setPage(1); }} options={categoryOptions} placeholder="All Categories"
+            value={categoryF} onChange={(v) => { setCategoryF(v); setProductF(""); setPage(1); }} options={categoryOptions} placeholder="All Categories"
             renderExtra={(o) => (
               <button type="button" title="View full path" onClick={(e) => { e.stopPropagation(); setPathModal(o); }}
                 className="shrink-0 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-indigo-600">👁</button>
