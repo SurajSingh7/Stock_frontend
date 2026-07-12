@@ -1,4 +1,4 @@
-import QuotationApprovalList from '@/modules/stock/quotations/list/QuotationApprovalList';
+import QuotationApprovalList from '@/modules/stock/quotations/approval/QuotationApprovalList';
 import React from 'react'
 
 const page = () => {

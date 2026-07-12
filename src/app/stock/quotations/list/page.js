@@ -1,4 +1,4 @@
-import QuotationApproval from '@/modules/stock/quotations/list/QuotationApproval';
+import QuotationApproval from '@/modules/stock/quotations/approval/QuotationApproval';
 import QuotationComp from '@/modules/stock/quotations/list/QuotationComp';
 import React from 'react'
 

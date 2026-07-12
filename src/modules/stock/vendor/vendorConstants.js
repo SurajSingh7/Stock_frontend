@@ -3,9 +3,10 @@
 // same posture as constants/stockFieldOptions.js (Section 11 of the spec).
 
 export const PAYMENT_TERMS = [
-  { label: "Due 30 Days", value: "DUE_30" },
-  { label: "Due 60 Days", value: "DUE_60" },
-  { label: "Immediate", value: "IMMEDIATE" },
+  { label: "Immediate Payment", value: "IMMEDIATE" },
+  { label: "Payment Within 30 Days", value: "NET_30" },
+  { label: "Payment Within 60 Days", value: "NET_60" },
+  { label: "Payment Within 90 Days", value: "NET_90" },
 ];
 
 /*
