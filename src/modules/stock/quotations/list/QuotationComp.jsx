@@ -328,7 +328,8 @@ const QuotationComp = () => {
     { key: STATUS.REJECTED, label: "Rejected", count: summary.REJECTED ?? 0 },
   ];
 
-  const dateLabel = status === STATUS.PENDING || status === "" ? "Submitted:" : "Decided:";
+  // const dateLabel = status === STATUS.PENDING || status === "" ? "Submitted:" : "Decided:";
+  const dateLabel = status === STATUS.PENDING || status === "" ? "From:" : "From:";
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">

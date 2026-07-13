@@ -23,6 +23,8 @@ import {
   Move,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import ProductDefinitionCatComp from "./ProductDefinitionCatComp";
+
 
 /* =============================================================================
    CONSTANTS
@@ -162,7 +164,7 @@ function isLeaf(type) {
 }
 
 function buildProductCreateUrl(categoryId) {
-  return `/products/create?categoryId=${categoryId}`;
+  return `/master/product-definition?redirect=category&categoryId=${categoryId}`;
 }
 
 // Walks a nested tree to find the full ancestry chain (id + name) down to targetId.
@@ -198,11 +200,10 @@ function TypeBadge({ type }) {
   const isLeafType = isLeaf(type);
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold shadow-sm ring-1 ring-inset ${
-        isLeafType
+      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold shadow-sm ring-1 ring-inset ${isLeafType
           ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
           : "bg-violet-50 text-violet-700 ring-violet-200"
-      }`}
+        }`}
     >
       {CATEGORY_TYPE_LABELS[type] ?? type}
     </span>
@@ -560,9 +561,8 @@ function MoveTreeNode({ node, depth = 0, currentId, onSelect }) {
           type="button"
           disabled={!isSelectable}
           onClick={() => isSelectable && onSelect(node._id)}
-          className={`flex items-center gap-2 text-sm rounded px-1 -mx-1 transition-colors ${
-            isSelectable ? "text-gray-700 hover:text-violet-600 hover:bg-gray-50 cursor-pointer" : "text-gray-300 cursor-not-allowed"
-          }`}
+          className={`flex items-center gap-2 text-sm rounded px-1 -mx-1 transition-colors ${isSelectable ? "text-gray-700 hover:text-violet-600 hover:bg-gray-50 cursor-pointer" : "text-gray-300 cursor-not-allowed"
+            }`}
         >
           {node.name}
         </button>
@@ -650,11 +650,10 @@ function Breadcrumb({ trail, onNavigate }) {
               type="button"
               disabled={isLast}
               onClick={() => onNavigate(idx)}
-              className={`flex items-center gap-1.5 transition-colors ${
-                isLast
+              className={`flex items-center gap-1.5 transition-colors ${isLast
                   ? "text-violet-600 font-semibold cursor-default"
                   : "text-gray-500 hover:text-gray-800"
-              }`}
+                }`}
             >
               {idx === 0 && <Home className="w-3.5 h-3.5" />}
               {crumb.name}
@@ -678,14 +677,12 @@ function TypeToggle({ type, disabledReason, onToggle, isToggling }) {
         type="button"
         disabled={!!disabledReason || isToggling}
         onClick={onToggle}
-        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shadow-inner disabled:cursor-not-allowed disabled:opacity-50 ${
-          isLeafType ? "bg-emerald-500" : "bg-gray-300"
-        }`}
+        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shadow-inner disabled:cursor-not-allowed disabled:opacity-50 ${isLeafType ? "bg-emerald-500" : "bg-gray-300"
+          }`}
       >
         <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-            isLeafType ? "translate-x-6" : "translate-x-1"
-          }`}
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${isLeafType ? "translate-x-6" : "translate-x-1"
+            }`}
         />
       </button>
       <span className={`text-xs font-semibold ${isLeafType ? "text-emerald-600" : "text-gray-400"}`}>Last</span>
@@ -923,11 +920,10 @@ function CategoryFormModal({ isOpen, onClose, onSubmit, isSubmitting, parentIsLe
               value={name}
               onChange={handleNameChange}
               placeholder="e.g. Phones"
-              className={`w-full px-3.5 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 transition-all shadow-sm ${
-                isNameTooLong
+              className={`w-full px-3.5 py-2.5 text-sm border rounded-xl focus:outline-none focus:ring-2 transition-all shadow-sm ${isNameTooLong
                   ? "border-red-300 focus:ring-red-500/20 focus:border-red-400"
                   : "border-gray-200 focus:ring-violet-500/20 focus:border-violet-300"
-              }`}
+                }`}
             />
             {isNameTooLong && (
               <p className="mt-1.5 text-xs text-red-500 flex items-center gap-1">
@@ -1383,9 +1379,13 @@ const Category = () => {
           <ErrorState message={error} onRetry={loadCurrentLevel} />
         </div>
       ) : children.length === 0 ? (
-        <div className="bg-white border border-gray-100 rounded-2xl shadow-md">
-          <EmptyState message="No child categories found." />
-        </div>
+        !isRoot && isLeaf(currentCategory?.type) && hasProducts ? (
+          <ProductDefinitionCatComp categoryId={currentCategory._id} />
+        ) : (
+          <div className="bg-white border border-gray-100 rounded-2xl shadow-md">
+            <EmptyState message="No child categories found." />
+          </div>
+        )
       ) : (
         <CategoryTable
           rows={children}
