@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { ArrowLeft, Check, X } from "lucide-react";
+import { ArrowLeft, Check, X, Pencil } from "lucide-react";
 import { leafOf, hasPath, ViewPathIcon, CategoryPathModal, money } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
@@ -178,14 +178,22 @@ const ReviewMode = ({ quotation, onDone }) => {
     const d = decisions[catId];
     if (!d?.sel) { setRowError((p) => ({ ...p, [catId]: "Pick one product and vendor first" })); return; }
     setRowError((p) => ({ ...p, [catId]: null }));
-    setDecision(catId, { status: DECISION.APPROVED });
+    setDecision(catId, { status: DECISION.APPROVED, locked: true });
   };
-  const reject = (catId) => { setRowError((p) => ({ ...p, [catId]: null })); setDecision(catId, { status: DECISION.REJECTED, sel: null }); };
+  const reject = (catId) => {
+    setRowError((p) => ({ ...p, [catId]: null }));
+    setDecision(catId, { status: DECISION.REJECTED, sel: null, locked: true });
+  };
+  // brings the Approve/Reject buttons back for this category so the
+  // decision can be changed, until the whole quotation is submitted
+  const changeDecision = (catId) => setDecision(catId, { locked: false });
 
   const allDecided = categories.every((c) => decisions[c.categoryId]?.status);
+  const allLocked = categories.every((c) => decisions[c.categoryId]?.status && decisions[c.categoryId]?.locked);
 
   const submit = async () => {
     if (!allDecided) { setError("Every category must be approved or rejected"); return; }
+    if (!allLocked) { setError("Finish changing decisions before submitting"); return; }
     const payload = categories.map((c) => {
       const d = decisions[c.categoryId];
       return d.status === DECISION.APPROVED
@@ -224,6 +232,7 @@ const ReviewMode = ({ quotation, onDone }) => {
 
       {categories.map((cat) => {
         const d = decisions[cat.categoryId] || {};
+        const isLocked = d.status && d.locked;
         const tone = d.status === DECISION.APPROVED ? "green" : d.status === DECISION.REJECTED ? "red" : "gray";
         const statusLabel = d.status === DECISION.APPROVED ? "Approved" : d.status === DECISION.REJECTED ? "Rejected" : "Pending";
         return (
@@ -237,7 +246,7 @@ const ReviewMode = ({ quotation, onDone }) => {
                     return (
                       <VendorLine
                         key={v.vendorId} v={v} selectable checked={!!checked}
-                        disabled={d.status === DECISION.REJECTED}
+                        disabled={isLocked}
                         onToggle={() => pickVendor(cat.categoryId, p.productDefinitionId, v.vendorId)}
                       />
                     );
@@ -249,29 +258,55 @@ const ReviewMode = ({ quotation, onDone }) => {
             {d.status === DECISION.REJECTED && (
               <input
                 type="text" value={d.remarks || ""} onChange={(e) => setDecision(cat.categoryId, { remarks: e.target.value })}
-                placeholder="Reason (optional)"
-                className="mb-2 mt-1 w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-rose-300 shadow-sm transition focus:border-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-100"
+                placeholder="Reason (optional)" disabled={isLocked}
+                className="mb-2 mt-1 w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-rose-300 shadow-sm transition focus:border-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-100 disabled:cursor-not-allowed disabled:bg-rose-50/40 disabled:text-slate-500"
               />
             )}
             {rowError[cat.categoryId] && <p className="mb-2 text-xs font-medium text-rose-600">{rowError[cat.categoryId]}</p>}
 
-            <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-4">
-              <span className="text-xs text-slate-500">Pick one product · one vendor</span>
-              <div className="flex gap-2">
-                <button
-                  type="button" onClick={() => reject(cat.categoryId)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3.5 py-1.5 text-sm font-medium text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+            {isLocked ? (
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-4">
+                <span
+                  className={`inline-flex items-center gap-1.5 text-sm font-semibold ${
+                    d.status === DECISION.APPROVED ? "text-emerald-700" : "text-rose-600"
+                  }`}
                 >
-                  <X className="h-3.5 w-3.5" /> Reject
-                </button>
+                  {d.status === DECISION.APPROVED ? (
+                    <>
+                      <Check className="h-4 w-4" /> Approved
+                    </>
+                  ) : (
+                    <>
+                      <X className="h-4 w-4" /> Rejected{d.remarks ? ` — ${d.remarks}` : ""}
+                    </>
+                  )}
+                </span>
                 <button
-                  type="button" onClick={() => approve(cat.categoryId)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                  type="button" onClick={() => changeDecision(cat.categoryId)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
                 >
-                  <Check className="h-3.5 w-3.5" /> Approve
+                  <Pencil className="h-3.5 w-3.5" /> Change
                 </button>
               </div>
-            </div>
+            ) : (
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-4">
+                <span className="text-xs text-slate-500">Pick one product · one vendor</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button" onClick={() => reject(cat.categoryId)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3.5 py-1.5 text-sm font-medium text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+                  >
+                    <X className="h-3.5 w-3.5" /> Reject
+                  </button>
+                  <button
+                    type="button" onClick={() => approve(cat.categoryId)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+                  >
+                    <Check className="h-3.5 w-3.5" /> Approve
+                  </button>
+                </div>
+              </div>
+            )}
           </CategoryCard>
         );
       })}
@@ -310,7 +345,7 @@ const ReviewMode = ({ quotation, onDone }) => {
               {allDecided ? "All categories decided" : "Every category must be decided before you can submit"}
             </span>
             <button
-              type="button" onClick={submit} disabled={!allDecided || submitting}
+              type="button" onClick={submit} disabled={!allDecided || !allLocked || submitting}
               className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting ? "Submitting\u2026" : "Submit approval"}

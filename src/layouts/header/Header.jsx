@@ -23,9 +23,9 @@ const Header = () => {
                     <div className="flex gap-2">
                         <div
                             className="text-lg font-bold cursor-pointer hover:text-orange-300 transition"
-                            onClick={() => (window.location.href = "/billing/account/pcd-closure")}
+                            onClick={() => (window.location.href = "/stock/purchase-orders")}
                         >
-                            Netra Account
+                            Netra Stock
                         </div>
                         <div
                             className="text-lg font-bold cursor-pointer hover:text-orange-300 transition" >
