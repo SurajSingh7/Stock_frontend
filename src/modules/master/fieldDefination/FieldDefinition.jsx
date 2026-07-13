@@ -2,14 +2,12 @@
 import { API_BACKEND_URL } from '@/config/getEnvVariables';
 import Pagination from '@/shared/ui/pagination/Pagination';
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
-
 
 /* ======================== CONSTANTS ======================== */
 
-
 const FIELD_DEFINITIONS_API = `${API_BACKEND_URL}/stock/field-definitions`;
-
 
 const INPUT_TYPES = [
   { value: 'text', label: 'Text' },
@@ -24,9 +22,7 @@ const INPUT_TYPES = [
   { value: 'color', label: 'Color' },
 ];
 
-
 const DROPDOWN_TYPES = ['dropdown', 'multi_select'];
-
 
 // Requirement 1: dropdown-only status filter, no "All" option
 const STATUS_FILTERS = [
@@ -34,13 +30,10 @@ const STATUS_FILTERS = [
   { value: 'inactive', label: 'Inactive' },
 ];
 
-
 const DEFAULT_ITEMS_PER_PAGE = 10;
-
 
 // Requirement 5: max characters shown inline before "...more" kicks in
 const TRUNCATE_LIMIT = 30;
-
 
 const EMPTY_FORM = {
   code: '',
@@ -52,6 +45,13 @@ const EMPTY_FORM = {
   order: 0,
 };
 
+/* ---------- Design tokens — SAME as VendorsComp ---------- */
+
+const inputCls =
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
+
+const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-700";
+const thRight = `${th} text-right`;
 
 // Requirement 3: dynamic table column definitions — single source of truth.
 // Add/remove/toggle `show` here to control rendered columns; no hardcoding elsewhere.
@@ -67,9 +67,7 @@ const FIELD_TABLE_COLUMNS = [
   { key: 'actions', label: 'Action', show: true, render: null }, // rendered separately (icon buttons)
 ];
 
-
 /* ======================== API FUNCTIONS ======================== */
-
 
 // NOTE: the backend only exposes a single `showInactive` boolean
 // (false => active only, true => everything). There is no
@@ -82,7 +80,6 @@ const getFieldDefinitions = async ({ page, limit, search, inputType, showInactiv
   if (inputType) params.set('inputType', inputType);
   if (showInactive) params.set('showInactive', 'true');
 
-
   const response = await fetch(`${FIELD_DEFINITIONS_API}?${params.toString()}`, {
     method: 'GET',
     credentials: 'include',
@@ -90,7 +87,6 @@ const getFieldDefinitions = async ({ page, limit, search, inputType, showInactiv
   if (!response.ok) throw new Error('Failed to fetch field definitions');
   return response.json();
 };
-
 
 const createFieldDefinition = async (payload) => {
   const response = await fetch(FIELD_DEFINITIONS_API, {
@@ -104,7 +100,6 @@ const createFieldDefinition = async (payload) => {
   return data;
 };
 
-
 const updateFieldDefinition = async (id, payload) => {
   const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}`, {
     method: 'PUT',
@@ -117,7 +112,6 @@ const updateFieldDefinition = async (id, payload) => {
   return data;
 };
 
-
 const deleteFieldDefinition = async (id) => {
   const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}`, {
     method: 'DELETE',
@@ -127,7 +121,6 @@ const deleteFieldDefinition = async (id) => {
   if (!response.ok) throw new Error(data?.message || 'Failed to delete field definition');
   return data;
 };
-
 
 const restoreFieldDefinition = async (id) => {
   const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}/restore`, {
@@ -139,9 +132,7 @@ const restoreFieldDefinition = async (id) => {
   return data;
 };
 
-
 /* ======================== UTILITY FUNCTIONS ======================== */
-
 
 const mapFieldDefinitionResponse = (item) => ({
   id: item._id,
@@ -155,16 +146,12 @@ const mapFieldDefinitionResponse = (item) => ({
   order: item.order ?? 0,
 });
 
-
 const isDropdownType = (inputType) => DROPDOWN_TYPES.includes(inputType);
-
 
 const getInputTypeLabel = (value) =>
   INPUT_TYPES.find((t) => t.value === value)?.label || value;
 
-
 /* ======================== ICONS (inline, no extra deps) ======================== */
-
 
 const Icon = {
   search: (
@@ -199,7 +186,7 @@ const Icon = {
     </svg>
   ),
   close: (
-    <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5">
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
       <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
@@ -219,15 +206,24 @@ const Icon = {
       <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  // used by the Required / Filterable premium toggle cards in the Add/Edit modal
+  requiredMark: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
+      <path d="M6 10.5 8.5 13 14 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  filter: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
+      <path d="M3 4.5h14L11.5 10.8V16l-3-1.6v-3.6L3 4.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  ),
 };
-
 
 /* ======================== UI HELPER COMPONENTS ======================== */
 
-
 const StatusBadge = ({ isActive }) => (
   <span
-    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ring-1 ring-inset ${
+    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
       isActive
         ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
         : 'bg-slate-100 text-slate-500 ring-slate-200'
@@ -237,7 +233,6 @@ const StatusBadge = ({ isActive }) => (
     {isActive ? 'Active' : 'Inactive'}
   </span>
 );
-
 
 const BooleanDot = ({ value }) => (
   <span
@@ -250,13 +245,11 @@ const BooleanDot = ({ value }) => (
   </span>
 );
 
-
 const InputTypeTag = ({ value }) => (
-  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono bg-slate-100 text-slate-600">
+  <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-mono text-slate-600">
     {getInputTypeLabel(value)}
   </span>
 );
-
 
 // Requirement 5: truncates any string longer than TRUNCATE_LIMIT and shows
 // an inline "...more" trigger that opens a popup with the full value.
@@ -276,7 +269,7 @@ const TruncatedText = ({ label, value, className = '', mono = false }) => {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="ml-1 font-medium text-indigo-600 hover:text-indigo-800 hover:underline transition-colors"
+            className="ml-1 font-semibold text-indigo-600 hover:underline transition-colors"
           >
             ...more
           </button>
@@ -285,7 +278,7 @@ const TruncatedText = ({ label, value, className = '', mono = false }) => {
 
       {open && (
         <Modal title={label} onClose={() => setOpen(false)} maxWidth="max-w-md">
-          <p className={`text-sm text-slate-700 whitespace-pre-wrap break-words ${mono ? 'font-mono' : ''}`}>
+          <p className={`whitespace-pre-wrap break-words text-sm text-slate-900 ${mono ? 'font-mono' : ''}`}>
             {value}
           </p>
         </Modal>
@@ -294,41 +287,37 @@ const TruncatedText = ({ label, value, className = '', mono = false }) => {
   );
 };
 
-
-const IconButton = ({ onClick, label, tone = 'slate', children }) => {
-  const tones = {
-    slate: 'text-slate-500 hover:text-slate-800 hover:bg-slate-100',
-    indigo: 'text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50',
-    red: 'text-red-500 hover:text-red-700 hover:bg-red-50',
-    emerald: 'text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50',
-  };
+/* IconBtn — SAME tone pattern as VendorsComp (adds orange for edit) */
+const IconBtn = ({ onClick, title, tone = 'slate', children }) => {
+  const toneCls =
+    tone === 'indigo' ? "text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50"
+    : tone === 'red' ? "text-rose-600 hover:border-rose-200 hover:bg-rose-50"
+    : tone === 'emerald' ? "text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50"
+    : tone === 'orange' ? "text-orange-500 hover:border-orange-200 hover:bg-orange-50"
+    : "text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700";
   return (
     <button
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-all duration-150 ${tones[tone]}`}
+      type="button" onClick={onClick} title={title} aria-label={title}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 ${toneCls}`}
     >
       {children}
     </button>
   );
 };
 
-
 const LoadingRows = ({ columns = 9, rows = 6 }) => (
   <>
     {Array.from({ length: rows }).map((_, r) => (
-      <tr key={r}>
+      <tr key={r} className="animate-pulse">
         {Array.from({ length: columns }).map((__, c) => (
-          <td key={c} className="px-5 py-3.5">
-            <div className="h-3.5 rounded bg-slate-100 animate-pulse" style={{ width: `${55 + ((r + c) % 4) * 10}%` }} />
+          <td key={c} className="px-4 py-4">
+            <div className="h-3 rounded bg-slate-100" style={{ width: `${55 + ((r + c) % 4) * 10}%` }} />
           </td>
         ))}
       </tr>
     ))}
   </>
 );
-
 
 const EmptyState = ({ colSpan, onCreateClick }) => (
   <tr>
@@ -341,7 +330,7 @@ const EmptyState = ({ colSpan, onCreateClick }) => (
         <p className="mt-1 text-sm text-slate-400">Adjust your filters, or add a new field to get started.</p>
         <button
           onClick={onCreateClick}
-          className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3.5 py-2 text-sm font-medium text-white hover:bg-slate-800 shadow-sm transition-colors"
+          className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
         >
           {Icon.plus} Add field
         </button>
@@ -350,19 +339,18 @@ const EmptyState = ({ colSpan, onCreateClick }) => (
   </tr>
 );
 
-
 const ErrorState = ({ colSpan, message, onRetry }) => (
   <tr>
     <td colSpan={colSpan} className="px-6 py-16">
       <div className="flex flex-col items-center text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-500">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-500">
           {Icon.alert}
         </div>
         <p className="mt-3 text-sm font-medium text-slate-800">Couldn't load field definitions</p>
         <p className="mt-1 max-w-sm text-sm text-slate-400">{message}</p>
         <button
           onClick={onRetry}
-          className="mt-4 rounded-md border border-slate-200 px-3.5 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          className="mt-4 rounded-lg border border-slate-200 bg-white px-3.5 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
         >
           Try again
         </button>
@@ -371,210 +359,211 @@ const ErrorState = ({ colSpan, message, onRetry }) => (
   </tr>
 );
 
-
 /* ======================== HEADER COMPONENT ======================== */
 
-
 const Header = ({ totalItems, onCreateClick }) => (
-  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between mb-6">
+  <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
     <div>
-      <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Field definitions</h1>
-      <p className="mt-1 text-sm text-slate-500">
+      <h1 className="text-xl font-semibold tracking-tight text-slate-900">Field definitions</h1>
+      <p className="mt-0.5 text-sm text-slate-500">
         {typeof totalItems === 'number' ? `${totalItems} field${totalItems === 1 ? '' : 's'} · ` : ''}
         Dynamic attributes available to product categories.
       </p>
     </div>
     <button
       onClick={onCreateClick}
-      className="inline-flex items-center justify-center gap-1.5 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-slate-800 hover:shadow-md transition-all duration-150"
+      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
     >
       {Icon.plus} Add field
     </button>
   </div>
 );
 
-
 /* ======================== FILTER BAR COMPONENT ======================== */
-
 
 // Requirement 1: status is now a plain <select> dropdown (Active / Inactive only)
 const FilterBar = ({ search, onSearchChange, inputTypeFilter, onInputTypeFilterChange, statusFilter, onStatusFilterChange }) => (
-  <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 mb-4 shadow-sm sm:flex-row sm:items-center">
-    <div className="relative flex-1 min-w-[200px]">
-      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
-        {Icon.search}
-      </span>
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder="Search by code or label"
-        className="w-full rounded-md border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-colors"
-      />
-    </div>
+  <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="relative lg:col-span-2">
+        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+          {Icon.search}
+        </span>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search by code or label"
+          className={`${inputCls} pl-9`}
+        />
+      </div>
 
-
-    <select
-      value={inputTypeFilter}
-      onChange={(e) => onInputTypeFilterChange(e.target.value)}
-      className="rounded-md border border-slate-200 bg-slate-50 py-2 px-3 text-sm text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-colors"
-    >
-      <option value="">All input types</option>
-      {INPUT_TYPES.map((t) => (
-        <option key={t.value} value={t.value}>{t.label}</option>
-      ))}
-    </select>
-
-
-    <div className="relative">
       <select
-        value={statusFilter}
-        onChange={(e) => onStatusFilterChange(e.target.value)}
-        className="appearance-none rounded-md border border-slate-200 bg-slate-50 py-2 pl-3 pr-8 text-sm font-medium text-slate-700 focus:bg-white focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 transition-colors"
+        value={inputTypeFilter}
+        onChange={(e) => onInputTypeFilterChange(e.target.value)}
+        className={inputCls}
       >
-        {STATUS_FILTERS.map((s) => (
-          <option key={s.value} value={s.value}>{s.label}</option>
+        <option value="">All input types</option>
+        {INPUT_TYPES.map((t) => (
+          <option key={t.value} value={t.value}>{t.label}</option>
         ))}
       </select>
-      <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
-        {Icon.chevronDown}
-      </span>
+
+      <div className="relative">
+        <select
+          value={statusFilter}
+          onChange={(e) => onStatusFilterChange(e.target.value)}
+          className={`${inputCls} appearance-none pr-8`}
+        >
+          {STATUS_FILTERS.map((s) => (
+            <option key={s.value} value={s.value}>{s.label}</option>
+          ))}
+        </select>
+        <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
+          {Icon.chevronDown}
+        </span>
+      </div>
     </div>
   </div>
 );
 
-
 /* ======================== TABLE ROW COMPONENT ======================== */
-
 
 // Requirement 3: renders only columns visible in FIELD_TABLE_COLUMNS
 const TableRow = ({ item, columns, onView, onEdit, onDelete, onRestore }) => (
-  <tr className="group border-b border-slate-100 last:border-0 hover:bg-slate-50/70 transition-colors">
+  <tr className="transition hover:bg-slate-50/60">
     {columns.map((col) =>
       col.key === 'actions' ? (
-        <td key={col.key} className="px-5 py-3.5">
-          <div className="flex items-center justify-end gap-1 opacity-70 group-hover:opacity-100 transition-opacity">
-            <IconButton onClick={() => onView(item)} label="View">{Icon.eye}</IconButton>
-            <IconButton onClick={() => onEdit(item)} label="Edit" tone="indigo">{Icon.edit}</IconButton>
+        <td key={col.key} className="px-4 py-3.5">
+          <div className="flex items-center justify-end gap-1">
+            <IconBtn onClick={() => onView(item)} title="View" tone="indigo">{Icon.eye}</IconBtn>
+            <IconBtn onClick={() => onEdit(item)} title="Edit" tone="orange">{Icon.edit}</IconBtn>
             {item.isActive ? (
-              <IconButton onClick={() => onDelete(item)} label="Delete" tone="red">{Icon.trash}</IconButton>
+              <IconBtn onClick={() => onDelete(item)} title="Delete" tone="red">{Icon.trash}</IconBtn>
             ) : (
-              <IconButton onClick={() => onRestore(item)} label="Restore" tone="emerald">{Icon.restore}</IconButton>
+              <IconBtn onClick={() => onRestore(item)} title="Restore" tone="emerald">{Icon.restore}</IconBtn>
             )}
           </div>
         </td>
       ) : (
-        <td key={col.key} className="px-5 py-3.5">{col.render(item)}</td>
+        <td key={col.key} className="px-4 py-3.5">{col.render(item)}</td>
       )
     )}
   </tr>
 );
 
-
 /* ======================== TABLE COMPONENT ======================== */
-
 
 const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore }) => {
   // Requirement 3: derive visible columns from the constant — no hardcoded headers
   const visibleColumns = FIELD_TABLE_COLUMNS.filter((c) => c.show);
 
-
   return (
-    <div className="rounded-lg border border-slate-200 bg-white overflow-hidden shadow-sm">
-      <div className="overflow-x-auto">
-        <table className="min-w-full">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50/60">
-              {visibleColumns.map((col) => (
-                <th key={col.key} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                  {col.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {error ? (
-              <ErrorState colSpan={visibleColumns.length} message={error} onRetry={onRetry} />
-            ) : loading ? (
-              <LoadingRows columns={visibleColumns.length} />
-            ) : items.length === 0 ? (
-              <EmptyState colSpan={visibleColumns.length} onCreateClick={onCreateClick} />
-            ) : (
-              items.map((item) => (
-                <TableRow
-                  key={item.id}
-                  item={item}
-                  columns={visibleColumns}
-                  onView={onView}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  onRestore={onRestore}
-                />
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+    <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <table className="min-w-full divide-y divide-slate-200">
+        <thead className="bg-slate-50/60">
+          <tr>
+            {visibleColumns.map((col) => (
+              <th key={col.key} className={col.key === 'actions' ? thRight : th}>
+                {col.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {error ? (
+            <ErrorState colSpan={visibleColumns.length} message={error} onRetry={onRetry} />
+          ) : loading ? (
+            <LoadingRows columns={visibleColumns.length} />
+          ) : items.length === 0 ? (
+            <EmptyState colSpan={visibleColumns.length} onCreateClick={onCreateClick} />
+          ) : (
+            items.map((item) => (
+              <TableRow
+                key={item.id}
+                item={item}
+                columns={visibleColumns}
+                onView={onView}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onRestore={onRestore}
+              />
+            ))
+          )}
+        </tbody>
+      </table>
     </div>
   );
 };
 
+/* ======================== MODAL SHELL (reusable, portal-based) ======================== */
 
-/* ======================== MODAL SHELL (reusable) ======================== */
+// Requirement 2 & 4: shared premium modal shell — now a createPortal into document.body,
+// same pattern as VendorsComp, so it never gets clipped/overlapped by parent overflow.
+const Modal = ({ title, description, onClose, children, maxWidth = 'max-w-lg' }) => {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
 
+  if (!mounted) return null;
 
-// Requirement 2 & 4: shared premium modal shell reused by the Add/Edit popup,
-// the Confirm popup, and now the TruncatedText "...more" popup
-const Modal = ({ title, description, onClose, children, maxWidth = 'max-w-lg' }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div onClick={onClose} className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]" />
-    <div className={`relative w-full ${maxWidth} rounded-xl bg-white shadow-2xl ring-1 ring-slate-900/5 flex flex-col max-h-[90vh] animate-[popIn_0.18s_ease-out]`}>
-      <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
-        <div>
-          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-          {description && <p className="mt-0.5 text-sm text-slate-400">{description}</p>}
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+      <div
+        className={`max-h-[90vh] w-full ${maxWidth} flex flex-col overflow-y-auto rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 flex items-start justify-between border-b border-slate-100 bg-white px-5 py-4">
+          <div>
+            <p className="truncate pr-4 text-base font-semibold tracking-tight text-slate-900">{title}</p>
+            {description && <p className="mt-0.5 text-sm text-slate-400">{description}</p>}
+          </div>
+          <button
+            type="button" onClick={onClose}
+            className="shrink-0 rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+          >
+            {Icon.close}
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-        >
-          {Icon.close}
-        </button>
+        <div className="flex-1 p-5">{children}</div>
       </div>
-      <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
-    </div>
-    <style>{`
-      @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
-      @keyframes popIn { from { transform: scale(0.96) translateY(6px); opacity: 0 } to { transform: scale(1) translateY(0); opacity: 1 } }
-    `}</style>
-  </div>
-);
-
+    </div>,
+    document.body
+  );
+};
 
 /* ======================== CONFIRM MODAL (Requirement 4) ======================== */
-
 
 const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 'Delete', onCancel, onConfirm, loading }) => {
   if (!open) return null;
   return (
     <Modal title={title} onClose={onCancel} maxWidth="max-w-sm">
-      <div className="flex flex-col items-center text-center gap-3 py-1">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-500">
+      <div className="flex flex-col items-center gap-3 py-1 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-500">
           {Icon.alert}
         </div>
         <p className="text-sm text-slate-600">{message}</p>
       </div>
-      <div className="flex justify-center gap-2 pt-6">
+      <div className="mt-5 flex justify-center gap-2.5">
         <button
           onClick={onCancel}
-          className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
         >
           Cancel
         </button>
         <button
           onClick={onConfirm}
           disabled={loading}
-          className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? 'Deleting…' : confirmLabel}
         </button>
@@ -583,84 +572,126 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
   );
 };
 
-
 /* ======================== FORM FIELD COMPONENTS ======================== */
-
 
 const Field = ({ label, hint, error, children }) => (
   <div>
-    <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
+    <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
     {children}
     {hint && !error && <p className="mt-1.5 text-xs text-slate-400">{hint}</p>}
-    {error && <p className="mt-1.5 text-xs font-medium text-red-600">{error}</p>}
+    {error && <p className="mt-1.5 text-xs font-medium text-rose-600">{error}</p>}
   </div>
 );
 
+const fieldInputClass = inputCls + ' disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400';
 
-const fieldInputClass =
-  'w-full rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-300 disabled:bg-slate-50 disabled:text-slate-400 transition-colors';
+// Premium colorful toggle card used for Required / Filterable in the Add/Edit
+// modal (row 3). Same on/off semantics as a plain checkbox, just a nicer,
+// color-coded presentation — `color` picks the accent (indigo / violet).
+const TOGGLE_CARD_PALETTE = {
+  indigo: {
+    activeBorder: 'border-indigo-300',
+    activeBg: 'bg-gradient-to-br from-indigo-50 to-indigo-100/70',
+    iconActive: 'bg-indigo-600 text-white',
+    track: 'bg-indigo-600',
+    text: 'text-indigo-700',
+  },
+  violet: {
+    activeBorder: 'border-violet-300',
+    activeBg: 'bg-gradient-to-br from-violet-50 to-violet-100/70',
+    iconActive: 'bg-violet-600 text-white',
+    track: 'bg-violet-600',
+    text: 'text-violet-700',
+  },
+};
 
+const ToggleCard = ({ label, hint, checked, onChange, disabled, color = 'indigo', icon }) => {
+  const p = TOGGLE_CARD_PALETTE[color];
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`flex w-full items-center gap-3 rounded-xl border p-3.5 text-left shadow-sm transition ${
+        checked ? `${p.activeBorder} ${p.activeBg}` : 'border-slate-200 bg-white'
+      } ${disabled ? 'cursor-not-allowed opacity-60' : 'hover:shadow-md'}`}
+    >
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition ${checked ? p.iconActive : 'bg-slate-100 text-slate-400'}`}>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={`block text-sm font-semibold ${checked ? p.text : 'text-slate-700'}`}>{label}</span>
+        <span className="block text-xs text-slate-400">{hint}</span>
+      </span>
+      <span className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${checked ? p.track : 'bg-slate-300'}`}>
+        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
+      </span>
+    </button>
+  );
+};
 
 /* ======================== FORM COMPONENT ======================== */
 
-
+// Requested layout: Row 1 = Code + Label, Row 2 = Input type + Order,
+// Row 3 = Required + Filterable as colorful premium toggle cards.
 const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors }) => {
   const isEdit = mode === 'edit';
   const isView = mode === 'view';
 
-
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-5">
-        <Field label="Code" hint={isEdit ? 'Code cannot be changed after creation.' : 'Lowercase, snake_case identifier.'} error={errors.code}>
-          <input
-            type="text"
-            value={formData.code}
-            disabled={isEdit || isView}
-            onChange={(e) => onChange('code', e.target.value.trim().toLowerCase())}
-            placeholder="e.g. warranty_period"
-            className={`${fieldInputClass} font-mono`}
-          />
-        </Field>
+        {/* Row 1 — Code + Label */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Code" hint={isEdit ? 'Code cannot be changed after creation.' : 'Lowercase, snake_case identifier.'} error={errors.code}>
+            <input
+              type="text"
+              value={formData.code}
+              disabled={isEdit || isView}
+              onChange={(e) => onChange('code', e.target.value.trim().toLowerCase())}
+              placeholder="e.g. warranty_period"
+              className={`${fieldInputClass} font-mono`}
+            />
+          </Field>
 
+          <Field label="Label" hint="Must be unique across all fields." error={errors.label}>
+            <input
+              type="text"
+              value={formData.label}
+              disabled={isView}
+              onChange={(e) => onChange('label', e.target.value)}
+              placeholder="e.g. Warranty Period"
+              className={fieldInputClass}
+            />
+          </Field>
+        </div>
 
-        <Field label="Label" hint="Must be unique across all fields." error={errors.label}>
-          <input
-            type="text"
-            value={formData.label}
-            disabled={isView}
-            onChange={(e) => onChange('label', e.target.value)}
-            placeholder="e.g. Warranty Period"
-            className={fieldInputClass}
-          />
-        </Field>
+        {/* Row 2 — Input type + Order */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Input type">
+            <select
+              value={formData.inputType}
+              disabled={isView}
+              onChange={(e) => onChange('inputType', e.target.value)}
+              className={fieldInputClass}
+            >
+              {INPUT_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </Field>
 
-
-        <Field label="Order" hint="Controls display sequence in the table (lower shows first)." error={errors.order}>
-          <input
-            type="number"
-            value={formData.order}
-            disabled={isView}
-            onChange={(e) => onChange('order', e.target.value === '' ? '' : Number(e.target.value))}
-            placeholder="e.g. 1"
-            className={fieldInputClass}
-          />
-        </Field>
-
-
-        <Field label="Input type">
-          <select
-            value={formData.inputType}
-            disabled={isView}
-            onChange={(e) => onChange('inputType', e.target.value)}
-            className={fieldInputClass}
-          >
-            {INPUT_TYPES.map((t) => (
-              <option key={t.value} value={t.value}>{t.label}</option>
-            ))}
-          </select>
-        </Field>
-
+          <Field label="Order" hint="Controls display sequence in the table (lower shows first)." error={errors.order}>
+            <input
+              type="number"
+              value={formData.order}
+              disabled={isView}
+              onChange={(e) => onChange('order', e.target.value === '' ? '' : Number(e.target.value))}
+              placeholder="e.g. 1"
+              className={fieldInputClass}
+            />
+          </Field>
+        </div>
 
         {isDropdownType(formData.inputType) && (
           <Field label="Options source key" hint="Must match a key in STOCK_FIELD_OPTIONS constants." error={errors.optionsSource}>
@@ -675,51 +706,40 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           </Field>
         )}
 
-
-        <div className="flex flex-col gap-3 rounded-md border border-slate-100 bg-slate-50/60 p-3.5">
-          <label className="flex items-center justify-between text-sm text-slate-700">
-            <span>
-              Required
-              <span className="block text-xs text-slate-400">Must be filled when creating a product.</span>
-            </span>
-            <input
-              type="checkbox"
-              checked={formData.isRequired}
-              disabled={isView}
-              onChange={(e) => onChange('isRequired', e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900/20"
-            />
-          </label>
-          <div className="h-px bg-slate-200" />
-          <label className="flex items-center justify-between text-sm text-slate-700">
-            <span>
-              Filterable
-              <span className="block text-xs text-slate-400">Shown as a filter option in product listings.</span>
-            </span>
-            <input
-              type="checkbox"
-              checked={formData.isFilterable}
-              disabled={isView}
-              onChange={(e) => onChange('isFilterable', e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900/20"
-            />
-          </label>
+        {/* Row 3 — Required + Filterable (colorful premium toggle cards) */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <ToggleCard
+            label="Required"
+            hint="M"
+            checked={formData.isRequired}
+            onChange={(value) => onChange('isRequired', value)}
+            disabled={isView}
+            color="indigo"
+            icon={Icon.requiredMark}
+          />
+          <ToggleCard
+            label="Filterable"
+            hint=""
+            checked={formData.isFilterable}
+            onChange={(value) => onChange('isFilterable', value)}
+            disabled={isView}
+            color="violet"
+            icon={Icon.filter}
+          />
         </div>
 
-
         {errors.general && (
-          <div className="flex items-start gap-2 rounded-md bg-red-50 px-3 py-2.5 text-sm text-red-700">
+          <div className="flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
             {Icon.alert}
             <span>{errors.general}</span>
           </div>
         )}
       </div>
 
-
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 mt-5 -mx-6 px-6">
+      <div className="-mx-5 mt-5 flex justify-end gap-2.5 border-t border-slate-100 px-5 pt-4">
         <button
           onClick={onCancel}
-          className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
         >
           {isView ? 'Close' : 'Cancel'}
         </button>
@@ -727,7 +747,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           <button
             onClick={onSubmit}
             disabled={submitting}
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create field'}
           </button>
@@ -737,25 +757,20 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
   );
 };
 
-
 /* ======================== MAIN COMPONENT ======================== */
-
 
 const FieldDefinition = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-
   const [search, setSearch] = useState('');
   const [inputTypeFilter, setInputTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'inactive' — default Active (Req 1)
 
-
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_ITEMS_PER_PAGE);
   const [totalItems, setTotalItems] = useState(0);
-
 
   const [modalMode, setModalMode] = useState(null); // 'create' | 'edit' | 'view' | null
   const [formData, setFormData] = useState(EMPTY_FORM);
@@ -763,14 +778,11 @@ const FieldDefinition = () => {
   const [submitting, setSubmitting] = useState(false);
   const [formErrors, setFormErrors] = useState({});
 
-
   // Requirement 4: confirm-delete popup state
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-
   /* ----- Data fetching ----- */
-
 
   const loadFieldDefinitions = useCallback(async () => {
     setLoading(true);
@@ -786,13 +798,11 @@ const FieldDefinition = () => {
       let mapped = (response?.data || []).map(mapFieldDefinitionResponse);
       let total = response?.pagination?.total ?? mapped.length;
 
-
       // Backend has no "inactive only" filter — narrow it down client-side.
       if (statusFilter === 'inactive') {
         mapped = mapped.filter((f) => !f.isActive);
         total = mapped.length;
       }
-
 
       setItems(mapped);
       setTotalItems(total);
@@ -803,19 +813,15 @@ const FieldDefinition = () => {
     }
   }, [currentPage, itemsPerPage, search, inputTypeFilter, statusFilter]);
 
-
   useEffect(() => {
     loadFieldDefinitions();
   }, [loadFieldDefinitions]);
-
 
   useEffect(() => {
     setCurrentPage(1);
   }, [search, inputTypeFilter, statusFilter]);
 
-
   /* ----- Modal handlers ----- */
-
 
   const openCreateModal = () => {
     setFormData(EMPTY_FORM);
@@ -823,7 +829,6 @@ const FieldDefinition = () => {
     setActiveItemId(null);
     setModalMode('create');
   };
-
 
   const openEditModal = (item) => {
     setFormData({
@@ -840,7 +845,6 @@ const FieldDefinition = () => {
     setModalMode('edit');
   };
 
-
   const openViewModal = (item) => {
     setFormData({
       code: item.code,
@@ -856,21 +860,17 @@ const FieldDefinition = () => {
     setModalMode('view');
   };
 
-
   const closeModal = () => {
     setModalMode(null);
     setActiveItemId(null);
     setFormErrors({});
   };
 
-
   const handleFormChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-
   /* ----- Validation ----- */
-
 
   const validateForm = () => {
     const errors = {};
@@ -885,9 +885,7 @@ const FieldDefinition = () => {
     return errors;
   };
 
-
   /* ----- CRUD handlers ----- */
-
 
   const handleSubmit = async () => {
     const errors = validateForm();
@@ -895,7 +893,6 @@ const FieldDefinition = () => {
       setFormErrors(errors);
       return;
     }
-
 
     setSubmitting(true);
     setFormErrors({});
@@ -909,7 +906,6 @@ const FieldDefinition = () => {
         order: formData.order === '' ? 0 : Number(formData.order),
       };
 
-
       if (modalMode === 'create') {
         payload.code = formData.code.trim();
         await createFieldDefinition(payload);
@@ -918,7 +914,6 @@ const FieldDefinition = () => {
         await updateFieldDefinition(activeItemId, payload);
         toast.success('Field definition updated successfully.');
       }
-
 
       closeModal();
       await loadFieldDefinitions();
@@ -931,10 +926,8 @@ const FieldDefinition = () => {
     }
   };
 
-
   // Requirement 4: opens custom confirm popup instead of window.confirm
   const handleDeleteClick = (item) => setConfirmTarget(item);
-
 
   const handleConfirmDelete = async () => {
     if (!confirmTarget) return;
@@ -951,7 +944,6 @@ const FieldDefinition = () => {
     }
   };
 
-
   const handleRestore = async (item) => {
     try {
       await restoreFieldDefinition(item.id);
@@ -962,67 +954,57 @@ const FieldDefinition = () => {
     }
   };
 
-
   /* ----- Render ----- */
-
 
   const modalTitle =
     modalMode === 'create' ? 'Add field definition'
     : modalMode === 'edit' ? 'Edit field definition'
     : 'Field definition details';
 
-
   const modalDescription =
     modalMode === 'create' ? 'Define a new dynamic attribute for products.'
     : modalMode === 'edit' ? 'Update label, type, and rules for this field.'
     : null;
 
-
   return (
-    <div className="min-h-screen bg-slate-50/40 p-6">
-      <div className="mx-auto max-w-6xl">
-        <Header totalItems={totalItems} onCreateClick={openCreateModal} />
+    <div className="min-h-screen bg-slate-50/60 p-6">
+      <Header totalItems={totalItems} onCreateClick={openCreateModal} />
 
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        inputTypeFilter={inputTypeFilter}
+        onInputTypeFilterChange={setInputTypeFilter}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+      />
 
-        <FilterBar
-          search={search}
-          onSearchChange={setSearch}
-          inputTypeFilter={inputTypeFilter}
-          onInputTypeFilterChange={setInputTypeFilter}
-          statusFilter={statusFilter}
-          onStatusFilterChange={setStatusFilter}
-        />
+      <Table
+        items={items}
+        loading={loading}
+        error={error}
+        onRetry={loadFieldDefinitions}
+        onCreateClick={openCreateModal}
+        onView={openViewModal}
+        onEdit={openEditModal}
+        onDelete={handleDeleteClick}
+        onRestore={handleRestore}
+      />
 
-
-        <Table
-          items={items}
-          loading={loading}
-          error={error}
-          onRetry={loadFieldDefinitions}
-          onCreateClick={openCreateModal}
-          onView={openViewModal}
-          onEdit={openEditModal}
-          onDelete={handleDeleteClick}
-          onRestore={handleRestore}
-        />
-
-
-        {!error && totalItems > 0 && (
-          <div className="mt-4">
-            <Pagination
-              currentPage={currentPage}
-              totalItems={totalItems}
-              itemsPerPage={itemsPerPage}
-              onPageChange={setCurrentPage}
-              onItemsPerPageChange={(value) => {
-                setItemsPerPage(value);
-                setCurrentPage(1);
-              }}
-            />
-          </div>
-        )}
-      </div>
-
+      {!error && totalItems > 0 && (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <Pagination
+            currentPage={currentPage}
+            totalItems={totalItems}
+            itemsPerPage={itemsPerPage}
+            onPageChange={setCurrentPage}
+            onItemsPerPageChange={(value) => {
+              setItemsPerPage(value);
+              setCurrentPage(1);
+            }}
+          />
+        </div>
+      )}
 
       {/* Requirement 2: Add/Edit/View now uses the shared premium Modal popup */}
       {modalMode && (
@@ -1039,7 +1021,6 @@ const FieldDefinition = () => {
         </Modal>
       )}
 
-
       {/* Requirement 4: reusable confirm modal for delete */}
       <ConfirmModal
         open={!!confirmTarget}
@@ -1051,6 +1032,5 @@ const FieldDefinition = () => {
     </div>
   );
 };
-
 
 export default FieldDefinition;
