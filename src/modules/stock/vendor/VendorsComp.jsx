@@ -786,9 +786,9 @@ const VendorsComp = () => {
                     <td className="px-4 py-3.5"><ActiveBadge isActive={vendor.isActive} /></td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-end gap-1">
-                        <IconBtn title="View vendor" tone="indigo" onClick={() => router.push(`/stock/vendors/${vendor._id}`)}>
+                        {/* <IconBtn title="View vendor" tone="indigo" onClick={() => router.push(`/stock/vendors/${vendor._id}`)}>
                           <Eye className="h-4 w-4" />
-                        </IconBtn>
+                        </IconBtn> */}
                         {vendor.isActive && (
                           <IconBtn title="Edit vendor" tone="orange" onClick={() => router.push(`/stock/vendors/${vendor._id}/edit`)}>
                             <Pencil className="h-4 w-4" />

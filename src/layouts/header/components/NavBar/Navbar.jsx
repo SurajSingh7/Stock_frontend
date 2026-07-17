@@ -13,10 +13,11 @@ export const Navbar = () => {
 
   let filteredCategories;
 
-  if ((userData?.role || "").toLowerCase() === "admin") {
+  if ((userData?.role || "").toLowerCase() === "admin"  ) {
     filteredCategories = navCategories;
   } else {
-    filteredCategories = useFilteredNav(navCategories, permissions);
+    // filteredCategories = useFilteredNav(navCategories, permissions);
+    filteredCategories = navCategories;
   }
 
 

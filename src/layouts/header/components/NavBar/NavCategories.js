@@ -8,7 +8,7 @@ import { SHOW_DEV } from "@/config/getEnvVariables";
 export const navCategories = [
 
   {
-    category: "Quotation & Po",
+    category: "Quotation",
     items: [
       {
         name: "Quotations",
@@ -17,6 +17,11 @@ export const navCategories = [
         url: "/stock/quotations/list",
         action: ["READ"],
       },
+    ],
+  },
+    {
+    category: "Purchase Orders",
+    items: [
       {
         name: "Purchase Order(po)",
         path: "/stock/purchase-orders",
