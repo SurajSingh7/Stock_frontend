@@ -67,7 +67,6 @@ const ACCEPTED_UPLOAD_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/we
 const emptyForm = {
   category: null,
   name: "",
-  companyUseOnly: false,
   gstRate: "",
   unit: "",
   stockAlertThreshold: "",
@@ -379,20 +378,6 @@ function TrackingPill({ value }) {
       <span className={`h-1.5 w-1.5 rounded-full ${dot[value] || "bg-slate-400"}`} />
       {value || "\u2014"}
     </span>
-  );
-}
-
-function ToggleSwitch({ checked, onChange, labelYes = "Yes", labelNo = "No" }) {
-  return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button" onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition ${checked ? "bg-indigo-600" : "bg-slate-300"}`}
-      >
-        <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
-      </button>
-      <span className="text-sm font-medium text-slate-700">{checked ? labelYes : labelNo}</span>
-    </div>
   );
 }
 
@@ -773,7 +758,6 @@ function RowDetailModal({ row, categoryName, categoryPath, onViewPath, onClose }
     ["GST Rate", row.gstRate ? `${row.gstRate}%` : "\u2014"],
     ["Unit", row.unit || "\u2014"],
     ["Stock Alert Threshold", row.stockAlertThreshold ?? "\u2014"],
-    ["Company Use Only", row.companyUseOnly ? "Yes" : "No"],
     ["Status", row.status],
     ["Active", row.isActive ? "Yes" : "No"],
     ["Product ID", row._id],
@@ -997,7 +981,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
           isRequired: sf.isRequired,
           order: index + 1,
         })),
-        companyUseOnly: form.companyUseOnly,
         gstRate: form.gstRate || null,
         unit: form.unit || null,
         stockAlertThreshold: form.stockAlertThreshold === "" ? null : Number(form.stockAlertThreshold),
@@ -1149,11 +1132,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-              <div>
-                <label className={labelCls}>Company Use</label>
-                <ToggleSwitch checked={form.companyUseOnly} onChange={(v) => updateField("companyUseOnly", v)} />
-              </div>
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
               <div>
                 <label className={labelCls}>GST</label>
                 <select
@@ -1166,9 +1145,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                   ))}
                 </select>
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <div>
                 <label className={labelCls}>Unit</label>
                 <select value={form.unit} onChange={(e) => updateField("unit", e.target.value)} className={inputCls}>
@@ -1581,7 +1557,6 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
           ? { _id: full.categoryId, name: cat.name, displayPath: cat.path }
           : { _id: full.categoryId, name: "Existing category", displayPath: "Existing category" },
         name: full.name || "",
-        companyUseOnly: full.companyUseOnly ?? false,
         gstRate: full.gstRate ?? "",
         unit: full.unit ?? "",
         stockAlertThreshold: full.stockAlertThreshold ?? "",

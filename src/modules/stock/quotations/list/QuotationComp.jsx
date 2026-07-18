@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
@@ -155,23 +156,60 @@ const CategoriesCell = ({ q, onMore }) => {
 /* Overflow (⋮) menu — extensible list of secondary actions       */
 /* ============================================================= */
 
+// Renders the flyout via a portal, positioned from the trigger button's
+// actual screen coordinates (position: fixed) instead of `absolute` inside
+// the row. The table wrapper is `overflow-x-auto`, and per the CSS spec
+// setting overflow-x to anything but visible forces overflow-y to compute as
+// "auto" too — so an `absolute` dropdown gets silently clipped at the
+// table's edge (worst for rows near the bottom). Purchase Orders' identical
+// ⋮ menu never hits this because its rows are plain cards, not a
+// horizontally-scrollable <table>.
+const ACTION_MENU_WIDTH = 176; // w-44
+
 const ActionMenu = ({ items, onSelect }) => {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+
+  const openMenu = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPos({
+      top: rect.bottom + 6,
+      left: Math.min(rect.right - ACTION_MENU_WIDTH, window.innerWidth - ACTION_MENU_WIDTH - 8),
+    });
+    setOpen(true);
+  };
 
   useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
+    if (!open) return undefined;
+    const closeOnOutside = (e) => {
+      if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    // capture:true so this also fires on the table's own scroll container,
+    // not just window — keeps a fixed-position menu from drifting away
+    // from its trigger button while scrolling.
+    const closeOnReflow = () => setOpen(false);
+    document.addEventListener("mousedown", closeOnOutside);
+    window.addEventListener("scroll", closeOnReflow, true);
+    window.addEventListener("resize", closeOnReflow);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutside);
+      window.removeEventListener("scroll", closeOnReflow, true);
+      window.removeEventListener("resize", closeOnReflow);
+    };
+  }, [open]);
 
   if (items.length === 0) return null;
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? setOpen(false) : openMenu())}
         aria-label="More actions"
         title="More actions"
         className={`flex h-7 w-7 items-center justify-center rounded-md border bg-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 ${
@@ -181,8 +219,12 @@ const ActionMenu = ({ items, onSelect }) => {
         <MoreVertical className="h-4 w-4" />
       </button>
 
-      {open && (
-        <div className="absolute right-0 z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5">
+      {open && pos && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: ACTION_MENU_WIDTH }}
+          className="z-60 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5"
+        >
           {items.map((a) => (
             <button
               key={a.key}
@@ -194,9 +236,10 @@ const ActionMenu = ({ items, onSelect }) => {
               {a.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 };
 

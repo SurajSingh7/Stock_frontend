@@ -8,8 +8,19 @@ const INTERNAL_COMPANIES_URL =
 const SHIPMENT_PREFERENCE_OPTIONS = [
   "Self Pickup", "Vendor Delivery", "Courier", "Transport", "Third-Party Logistics", "Hand Delivery",
 ];
-const DEFAULT_TERMS =
-  "1. Goods once sold will not be taken back.\n2. Delivery within the committed date.\n3. Payment as per agreed terms.";
+
+// Terms & conditions are never typed here — they're auto-attached server-side
+// from the Terms & Conditions master (vendor-specific match, else the single
+// Default term) and are immutable once the PO is created. This view only
+// renders whatever the API resolved. Defense-in-depth strip before
+// dangerouslySetInnerHTML — the backend already sanitizes on save.
+const sanitizeForPreview = (html) =>
+  String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    .replace(/javascript:/gi, "");
 
 /* =============================================================
    LOCK_CHECKBOX
@@ -67,7 +78,10 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   const [requester, setRequester] = useState("Suraj");
   const [poDate, setPoDate] = useState(todayStr());
   const [shipment, setShipment] = useState(SHIPMENT_PREFERENCE_OPTIONS[1]);
-  const [terms, setTerms] = useState(DEFAULT_TERMS);
+  // Read-only — resolved from the Terms & Conditions master API, never
+  // client-editable (see sanitizeForPreview comment above).
+  const [termsContent, setTermsContent] = useState("");
+  const [termsSource, setTermsSource] = useState("NONE"); // "VENDOR" | "DEFAULT" | "NONE"
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState(
     (context.items || []).map((it) => ({ ...it, checked: true, reason: "" }))
@@ -129,7 +143,9 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           setRequester(po.requester || "Suraj");
           if (po.poDate) setPoDate(new Date(po.poDate).toISOString().slice(0, 10));
           setShipment(po.shipmentPreference || SHIPMENT_PREFERENCE_OPTIONS[1]);
-          setTerms(po.terms || DEFAULT_TERMS);
+          // Already-resolved snapshot from when this PO was created — never re-resolved on edit.
+          setTermsContent(po.terms || "");
+          setTermsSource(po.termsSource || "NONE");
           setNotes(po.notes || "");
           const match =
             list.find((e) => String(e._id) === String(po.buyerEntity?.entityId)) ||
@@ -139,6 +155,21 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           // default: match vendor state → its alias + that state record
           const match = list.find((e) => String(e.stateCode) === String(vendorStateCode)) || list[0];
           if (match) { setAlias(match.alias); setEntityId(String(match._id)); }
+
+          // Auto-pick terms for this vendor: vendor-specific match, else the
+          // single Default term. Read-only — see resolveForVendor on the backend.
+          try {
+            const termsRes = await fetch(`${API_BACKEND_URL}/stock/terms-conditions/resolve/${vendorId}`, {
+              credentials: "include",
+            });
+            const termsJson = await termsRes.json();
+            if (termsRes.ok && termsJson.success) {
+              setTermsContent(termsJson.data?.term?.termsContent || "");
+              setTermsSource(termsJson.data?.source || "NONE");
+            }
+          } catch {
+            // non-fatal — PO creation still works with empty terms
+          }
         }
       } catch (err) {
         setError(err.message);
@@ -146,7 +177,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
         setLoading(false);
       }
     })();
-  }, [isEdit, poId, vendorStateCode]);
+  }, [isEdit, poId, vendorId, vendorStateCode]);
 
   // when alias changes, snap state to vendor-state match within that alias, else first
   const onAliasChange = (a) => {
@@ -197,7 +228,8 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
       if (isEdit) {
         const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, {
           method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-          body: JSON.stringify({ buyerEntity: entityPayload(), requester, poDate, shipmentPreference: shipment, terms, notes }),
+          // terms is immutable after create — never sent from here.
+          body: JSON.stringify({ buyerEntity: entityPayload(), requester, poDate, shipmentPreference: shipment, notes }),
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.message || "Failed to update PO");
@@ -208,7 +240,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             sourceQuotationId, vendorId,
             quotationItemIds: checked.map((r) => r.quotationItemId),
             skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
-            buyerEntity: entityPayload(), requester, poDate, shipmentPreference: shipment, terms, notes,
+            buyerEntity: entityPayload(), requester, poDate, shipmentPreference: shipment, notes,
           }),
         });
         const json = await res.json();
@@ -441,8 +473,33 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
       {/* terms & notes */}
       <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-700">Terms &amp; notes</p>
-        <label className={labelCls}>Terms and conditions</label>
-        <textarea rows={3} value={terms} onChange={(e) => setTerms(e.target.value)} className={inputCls} />
+
+        <div className="mb-1.5 flex items-center justify-between">
+          <label className={labelCls}>Terms and conditions</label>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              termsSource === "VENDOR"
+                ? "bg-indigo-50 text-indigo-700"
+                : termsSource === "DEFAULT"
+                ? "bg-amber-50 text-amber-700"
+                : "bg-slate-100 text-slate-500"
+            }`}
+          >
+            {termsSource === "VENDOR" ? "Vendor-specific term" : termsSource === "DEFAULT" ? "Default term" : "No term configured"}
+          </span>
+        </div>
+        {/* Read-only — auto-attached from the Terms & Conditions master, never editable here. */}
+        {termsContent ? (
+          <div
+            className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm leading-relaxed text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
+            dangerouslySetInnerHTML={{ __html: sanitizeForPreview(termsContent) }}
+          />
+        ) : (
+          <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-400">
+            No applicable or default Terms &amp; Conditions found. Configure one in Master &rarr; Terms &amp; Conditions.
+          </p>
+        )}
+
         <label className={`${labelCls} mt-4`}>Notes (optional)</label>
         <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />
       </section>

@@ -79,6 +79,13 @@ export const navCategories = [
         url: "/stock/master/field-definition",
         action: ["READ"],
       },
+      {
+        name: "Terms & Conditions",
+        path: "/master/terms-condition",
+        moduleName: "Stock Terms Condition",
+        url: "/stock/master/terms-condition",
+        action: ["READ"],
+      },
     ],
   },
 ];
