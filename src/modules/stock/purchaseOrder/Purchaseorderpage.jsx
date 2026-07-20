@@ -85,12 +85,6 @@ const TAB_STYLES = {
 /* Inline icons (non-lucide, used elsewhere in the UI)            */
 /* ============================================================= */
 
-const IconEye = () => (
-  <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
-    <path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10Z" stroke="currentColor" strokeWidth="1.4" />
-    <circle cx="10" cy="10" r="2.2" stroke="currentColor" strokeWidth="1.4" />
-  </svg>
-);
 const IconX = () => (
   <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
     <path d="m5 5 10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -281,8 +275,6 @@ const itemTd = "px-3 py-2 text-sm text-slate-700";
 const itemTdRight = `${itemTd} text-right tabular-nums`;
 
 const ProductsPopup = ({ row, onClose }) => {
-  const [openPath, setOpenPath] = useState(null);
-  const leafOf = (c) => String(c || "").split("/").pop().trim();
   return (
     <Modal onClose={onClose} title={`${row.vendorName} · ${row.items.length} items`} maxWidth="max-w-2xl">
       <div className="overflow-x-auto rounded-xl border border-slate-100">
@@ -300,34 +292,15 @@ const ProductsPopup = ({ row, onClose }) => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {row.items.map((it, i) => (
-              <React.Fragment key={i}>
-                <tr className="transition hover:bg-slate-50/60">
-                  <td className={itemTd}>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="truncate">{leafOf(it.categoryName)}</span>
-                      <button
-                        type="button" title="View full path" onClick={() => setOpenPath(openPath === i ? null : i)}
-                        className="shrink-0 rounded p-0.5 text-slate-800 transition hover:text-indigo-600"
-                      >
-                        <IconEye />
-                      </button>
-                    </span>
-                  </td>
-                  <td className={`${itemTd} font-medium text-slate-900`}>{it.productName}</td>
-                  <td className={itemTdRight}>{it.quantity}</td>
-                  <td className={itemTdRight}>{Number(it.unitPrice).toLocaleString("en-IN")}</td>
-                  <td className={itemTdRight}>{it.gstRate}%</td>
-                  <td className={itemTdRight}>{Number(it.gstAmount).toLocaleString("en-IN")}</td>
-                  <td className={`${itemTdRight} font-medium text-slate-900`}>{Number(it.lineTotal).toLocaleString("en-IN")}</td>
-                </tr>
-                {openPath === i && (
-                  <tr>
-                    <td colSpan={7} className="bg-indigo-50 px-3 py-1.5 text-xs text-indigo-700">
-                      Path · {it.categoryName}
-                    </td>
-                  </tr>
-                )}
-              </React.Fragment>
+              <tr key={i} className="transition hover:bg-slate-50/60">
+                <td className={itemTd}>{it.categoryName}</td>
+                <td className={`${itemTd} font-medium text-slate-900`}>{it.productName}</td>
+                <td className={itemTdRight}>{it.quantity}</td>
+                <td className={itemTdRight}>{Number(it.unitPrice).toLocaleString("en-IN")}</td>
+                <td className={itemTdRight}>{it.gstRate}%</td>
+                <td className={itemTdRight}>{Number(it.gstAmount).toLocaleString("en-IN")}</td>
+                <td className={`${itemTdRight} font-medium text-slate-900`}>{Number(it.lineTotal).toLocaleString("en-IN")}</td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -618,7 +591,6 @@ const PurchaseOrderPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [popup, setPopup] = useState(null);
-  const [pathModal, setPathModal] = useState(null);
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -690,7 +662,7 @@ const PurchaseOrderPage = () => {
   const aliases = useMemo(() => [...new Set(entities.map((e) => e.alias).filter(Boolean))], [entities]);
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v._id, label: v.name })), [vendors]);
   const categoryOptions = useMemo(
-    () => categories.map((c) => ({ value: c._id, label: c.name, path: c.displayPath || c.name })),
+    () => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })),
     [categories]
   );
 
@@ -831,15 +803,6 @@ const PurchaseOrderPage = () => {
           <SearchableSelect value={vendorF} onChange={(v) => { setVendorF(v); setPage(1); }} options={vendorOptions} placeholder="All Vendors" />
           <SearchableSelect
             value={categoryF} onChange={(v) => { setCategoryF(v); setProductF(""); setPage(1); }} options={categoryOptions} placeholder="All Categories"
-            renderExtra={(o) => (
-              <button
-                type="button" title="View full path"
-                onClick={(e) => { e.stopPropagation(); setPathModal(o); }}
-                className="shrink-0 rounded p-1 text-slate-800 transition hover:text-indigo-600"
-              >
-                <IconEye />
-              </button>
-            )}
           />
           <SearchableSelect value={productF} onChange={(v) => { setProductF(v); setPage(1); }} options={productOptions} placeholder="All Products" />
           <SearchableSelect value={entityF} onChange={(v) => { setEntityF(v); setPage(1); }} options={entityOptions} placeholder="All Entities" />
@@ -985,12 +948,6 @@ const PurchaseOrderPage = () => {
       {popup?.type === "info" && <InfoPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "review" && <ReviewPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
       {popup?.type === "notRequired" && <NotRequiredPopup row={popup.row} quotationId={popup.quotationId} onClose={() => setPopup(null)} onDone={refresh} />}
-      {pathModal && (
-        <Modal onClose={() => setPathModal(null)} title={pathModal.label} maxWidth="max-w-md">
-          <p className="text-xs font-medium uppercase tracking-wider text-slate-800">Full category path</p>
-          <p className="mt-1.5 text-sm text-slate-900">{pathModal.path}</p>
-        </Modal>
-      )}
     </div>
   );
 };

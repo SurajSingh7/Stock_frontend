@@ -4,13 +4,14 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Save, Plus, Trash2, ShieldCheck, Loader2, ChevronUp, ChevronDown,
-  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check, Eye,
+  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check,
   DeleteIcon,
   Delete,
   LucideDelete,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { PAYMENT_TERMS, STATE_OPTIONS, mockVerifyGST } from "./vendorConstants";
+import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
 
 /* ------------------------------------------------------------------ */
 /* Tokens — SAME as PurchaseOrderPage                                  */
@@ -657,30 +658,32 @@ const AddressCard = ({ vendor, setVendor, errors, useGstAddress, setUseGstAddres
 
 const AssignProductsCard = ({ vendor, setVendor }) => {
   const [search, setSearch] = useState("");
-  const [leafOptions, setLeafOptions] = useState([]);
-  const [searching, setSearching] = useState(false);
+  const [allCategories, setAllCategories] = useState([]);
+  const [searching, setSearching] = useState(true);
   const [productsByCategory, setProductsByCategory] = useState({});
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  // RULE 23 / Section 20: leaf-category search filters SERVER-SIDE.
   // hasProducts=true ⇒ a category with zero products can never show up here.
+  // Fetched once, then searched client-side against the full breadcrumb path
+  // (the server's `search` param only matches the leaf name).
   useEffect(() => {
-    if (!search) { setLeafOptions([]); return; }
-    const handle = setTimeout(async () => {
+    (async () => {
       setSearching(true);
       try {
-        const params = new URLSearchParams({ type: "LEAF", hasProducts: "true", search, limit: "10" });
-        const res = await fetch(`${API_BACKEND_URL}/stock/categories/flat?${params.toString()}`, { credentials: "include" });
-        const json = await res.json();
-        if (json.success) setLeafOptions(json.data || []);
+        setAllCategories(await fetchAllLeafCategories({ hasProducts: true }));
       } catch {
-        setLeafOptions([]);
+        setAllCategories([]);
       } finally {
         setSearching(false);
       }
-    }, 300);
-    return () => clearTimeout(handle);
-  }, [search]);
+    })();
+  }, []);
+
+  const leafOptions = search
+    ? allCategories
+        .filter((c) => (c.displayPath || c.name || "").toLowerCase().includes(search.toLowerCase()))
+        .slice(0, 30)
+    : [];
 
   const loadProductsForCategory = useCallback(
     async (categoryId) => {
@@ -723,7 +726,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
           ...v.assignedProducts,
           {
             categoryId: selectedCategory._id,
-            categoryName: selectedCategory.name,
+            categoryName: selectedCategory.displayPath || selectedCategory.name,
             products: list.map((p) => ({
               productId: p._id,
               overrides: { warrantyYears: p.warrantyYears ?? null },
@@ -734,7 +737,6 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
     }
     setSelectedCategory(null);
     setSearch("");
-    setLeafOptions([]);
   };
 
   const removeCategory = (categoryId) =>
@@ -800,7 +802,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
           <input
             className={`${inputCls} pl-9`}
             placeholder="Select last category "
-            value={selectedCategory ? selectedCategory.name : search}
+            value={selectedCategory ? (selectedCategory.displayPath || selectedCategory.name) : search}
             onChange={(e) => { setSelectedCategory(null); setSearch(e.target.value); }}
           />
           {search && !selectedCategory && (leafOptions.length > 0 || searching) && (
@@ -809,25 +811,13 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
                 <div className="px-3 py-2 text-sm text-slate-400">Searching...</div>
               ) : (
                 leafOptions.map((cat) => (
-                  <div
+                  <button
                     key={cat._id}
-                    className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-slate-800 transition hover:bg-indigo-50/60"
+                    type="button" onClick={() => setSelectedCategory(cat)}
+                    className="block w-full truncate px-3 py-2 text-left text-sm text-slate-800 transition hover:bg-indigo-50/60"
                   >
-                    <button
-                      type="button" onClick={() => setSelectedCategory(cat)}
-                      className="min-w-0 flex-1 truncate text-left"
-                    >
-                      {cat.name}
-                    </button>
-                    <button
-                      type="button"
-                      title={cat.displayPath || cat.name}
-                      onClick={() => setSelectedCategory(cat)}
-                      className="shrink-0 rounded p-1 text-slate-400 transition hover:text-indigo-600"
-                    >
-                      <Eye className="h-4 w-4" />
-                    </button>
-                  </div>
+                    {cat.displayPath || cat.name}
+                  </button>
                 ))
               )}
             </div>

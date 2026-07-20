@@ -11,6 +11,7 @@ import {
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 
 import Pagination from "@/shared/ui/pagination/Pagination";
+import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
 
 /* ================================================================== */
 /* Constants                                                           */
@@ -88,21 +89,10 @@ const cardTitleCls = "text-xs font-bold uppercase tracking-wider text-slate-600"
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-700";
 const thRight = `${th} text-right`;
 
-const leafOf = (c) => String(c || "").split("/").pop().trim();
-const hasPath = (leaf, path) => Boolean(path) && String(path).trim() !== String(leaf).trim();
 
 /* ================================================================== */
 /* API                                                                 */
 /* ================================================================== */
-
-async function apiSearchLeafCategories(search) {
-  const params = new URLSearchParams({ limit: "100", type: "LEAF" });
-  if (search) params.set("search", search);
-  const res = await fetch(`${API_BACKEND_URL}/stock/categories/flat?${params.toString()}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load categories");
-  return json.data || [];
-}
 
 // Fetch a single category by id — used by the redirect=category auto-open flow
 // AND by the lockCategory prop flow, so a locked category can show its real
@@ -325,31 +315,14 @@ function TruncateText({ text, max = TRUNCATE_LIMIT, title = "Full details", clas
 }
 
 /* Category path popup — opened by every eye button in this screen */
-function CategoryPathModal({ label, path, onClose }) {
-  return (
-    <Modal onClose={onClose} title={label} maxWidth="max-w-md">
-      <p className={cardTitleCls}>Full category path</p>
-      <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-900">{path || "\u2014"}</p>
-    </Modal>
-  );
-}
 
-/* Category cell / chip: leaf NAME + eye button (never the raw path) */
-function CategoryLabel({ name, path, onViewPath, className = "" }) {
-  const leaf = leafOf(name || path);
-  if (!leaf) return <span className="text-slate-400">{"\u2014"}</span>;
+/* Category cell / chip: always the full breadcrumb path */
+function CategoryLabel({ name, path, className = "" }) {
+  const full = path || name;
+  if (!full) return <span className="text-slate-400">{"\u2014"}</span>;
   return (
     <span className={`inline-flex items-center gap-1.5 ${className}`}>
-      <TruncateText text={leaf} title="Category" />
-      {hasPath(leaf, path) && (
-        <button
-          type="button" title="View full path"
-          onClick={(e) => { e.stopPropagation(); onViewPath({ label: leaf, path }); }}
-          className="shrink-0 rounded p-0.5 text-slate-400 transition hover:text-indigo-600"
-        >
-          <Eye size={14} />
-        </button>
-      )}
+      <TruncateText text={full} title="Category" />
     </span>
   );
 }
@@ -748,7 +721,7 @@ function FieldsPopup({ row, fieldLabelMap, onClose }) {
   );
 }
 
-function RowDetailModal({ row, categoryName, categoryPath, onViewPath, onClose }) {
+function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
   if (!row) return null;
   const attachment = row.image;
   const pdf = isPdfPath(attachment);
@@ -791,7 +764,7 @@ function RowDetailModal({ row, categoryName, categoryPath, onViewPath, onClose }
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2">
         <span className="w-40 shrink-0 text-xs font-bold uppercase tracking-wide text-slate-500">Category</span>
         <span className="text-right text-sm text-slate-800">
-          <CategoryLabel name={categoryName} path={categoryPath} onViewPath={onViewPath} />
+          <CategoryLabel name={categoryName} path={categoryPath} />
         </span>
       </div>
 
@@ -854,7 +827,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [pathModal, setPathModal] = useState(null);
 
   const [gstOptions, setGstOptions] = useState([]);
   const [gstLoading, setGstLoading] = useState(true);
@@ -863,15 +835,15 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   const [fieldDefsLoading, setFieldDefsLoading] = useState(false);
   const [fieldDefsLoaded, setFieldDefsLoaded] = useState(false);
 
-  // leaf-category picker options (server-side search)
+  // leaf-category picker options — full list, searched client-side against
+  // each option's full breadcrumb path (see SearchableSelect's local filter)
   const [catOptions, setCatOptions] = useState([]);
   const [catLoading, setCatLoading] = useState(false);
 
-  const searchCategories = useCallback(async (q) => {
+  const loadCategories = useCallback(async () => {
     setCatLoading(true);
     try {
-      const data = await apiSearchLeafCategories(q);
-      setCatOptions(data);
+      setCatOptions(await fetchAllLeafCategories());
     } catch {
       setCatOptions([]);
     } finally {
@@ -904,6 +876,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
   useEffect(() => {
     loadGstRates();
+    loadCategories();
     if (initialData.trackingMethod) loadFieldDefinitions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1021,7 +994,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     }
   };
 
-  const categoryLeaf = form.category ? leafOf(form.category.name || form.category.displayPath) : "";
   const categoryPath = form.category?.displayPath || form.category?.name || "";
 
   return (
@@ -1054,7 +1026,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
           </div>
 
           <div className="space-y-6 p-6">
-            {/* Leaf category — shows the NAME; the eye button reveals the path */}
+            {/* Leaf category — always shows the full breadcrumb path */}
             <div>
               <label className={labelCls}>
                 Leaf Category
@@ -1063,7 +1035,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
               {categoryLocked ? (
                 <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                  <CategoryLabel name={categoryLeaf} path={categoryPath} onViewPath={setPathModal} />
+                  <CategoryLabel path={categoryPath} />
                   <span className="text-xs font-medium text-slate-400">Locked</span>
                 </div>
               ) : (
@@ -1072,31 +1044,18 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                   onChange={(_val, option) => updateField("category", option ? option.raw : null)}
                   options={catOptions.map((c) => ({
                     value: c._id,
-                    label: c.name,                       // NAME only, not the path
-                    path: c.displayPath || c.name,
+                    label: c.displayPath || c.name,
                     raw: c,
                   }))}
-                  onSearch={searchCategories}
                   loading={catLoading}
                   placeholder="Select a leaf category"
                   error={errors.category}
-                  renderExtra={(o) =>
-                    hasPath(o.label, o.path) ? (
-                      <button
-                        type="button" title="View full path"
-                        onClick={(e) => { e.stopPropagation(); setPathModal({ label: o.label, path: o.path }); }}
-                        className="shrink-0 rounded p-1 text-slate-400 transition hover:text-indigo-600"
-                      >
-                        <Eye size={14} />
-                      </button>
-                    ) : null
-                  }
                 />
               )}
 
               {!categoryLocked && form.category && (
                 <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-slate-400">
-                  Selected: <CategoryLabel name={categoryLeaf} path={categoryPath} onViewPath={setPathModal} />
+                  Selected: <CategoryLabel path={categoryPath} />
                 </p>
               )}
             </div>
@@ -1258,10 +1217,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
             </div>
           </div>
         </div>
-
-        {pathModal && (
-          <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />
-        )}
       </div>
     </div>
   );
@@ -1352,7 +1307,6 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
   const [detailRow, setDetailRow] = useState(null);
   const [fieldsPopupRow, setFieldsPopupRow] = useState(null);
-  const [pathModal, setPathModal] = useState(null);
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -1407,11 +1361,12 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCategoryLocked, categoryId]);
 
-  // leaf categories for the filter dropdown (server-side search as you type)
-  const searchCategories = useCallback(async (q) => {
+  // leaf categories for the filter dropdown — full list, searched client-side
+  // against each option's full breadcrumb path
+  const loadLeafCategories = useCallback(async () => {
     setCatSearchLoading(true);
     try {
-      setLeafCategories(await apiSearchLeafCategories(q));
+      setLeafCategories(await fetchAllLeafCategories());
     } catch {
       setLeafCategories([]);
     } finally {
@@ -1419,7 +1374,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
     }
   }, []);
 
-  useEffect(() => { searchCategories(""); }, [searchCategories]);
+  useEffect(() => { loadLeafCategories(); }, [loadLeafCategories]);
 
   // field definitions → id→label map, so the Fields popup can name every field
   // even when the backend doesn't populate selectedFields.fieldDefId.
@@ -1722,33 +1677,20 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
             />
           </div>
 
-          {/* Category — searchable, shows NAME, eye button reveals the path.
-              Locked mode: disabled + always shows the locked category's name. */}
+          {/* Category — searchable, always shows the full breadcrumb path.
+              Locked mode: disabled + always shows the locked category's path. */}
           <div className="min-w-0 flex-1 xl:basis-48">
             <SearchableSelect
               value={categoryFilter}
               onChange={(v) => updateCategoryFilter(v)}
               options={leafCategories.map((c) => ({
                 value: c._id,
-                label: c.name,
-                path: c.displayPath || c.name,
+                label: c.displayPath || c.name,
               }))}
-              onSearch={searchCategories}
               loading={catSearchLoading}
               disabled={isCategoryLocked}
-              selectedLabel={isCategoryLocked ? lockedCategory?.name || "Selected category" : undefined}
+              selectedLabel={isCategoryLocked ? lockedCategory?.displayPath || lockedCategory?.name || "Selected category" : undefined}
               placeholder="All categories"
-              renderExtra={(o) =>
-                hasPath(o.label, o.path) ? (
-                  <button
-                    type="button" title="View full path"
-                    onClick={(e) => { e.stopPropagation(); setPathModal({ label: o.label, path: o.path }); }}
-                    className="shrink-0 rounded p-1 text-slate-400 transition hover:text-indigo-600"
-                  >
-                    <Eye size={14} />
-                  </button>
-                ) : null
-              }
             />
           </div>
 
@@ -1856,9 +1798,9 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
                       </div>
                     </td>
 
-                    {/* Category — leaf NAME + eye button → full path */}
+                    {/* Category — always the full breadcrumb path */}
                     <td className="px-4 py-3.5 text-sm text-slate-700">
-                      <CategoryLabel name={cat?.name} path={cat?.path} onViewPath={setPathModal} />
+                      <CategoryLabel name={cat?.name} path={cat?.path} />
                     </td>
 
                     <td className="px-4 py-3.5">
@@ -1946,17 +1888,12 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
           row={detailRow}
           categoryName={categoryMap[detailRow.categoryId]?.name}
           categoryPath={categoryMap[detailRow.categoryId]?.path}
-          onViewPath={setPathModal}
           onClose={() => setDetailRow(null)}
         />
       )}
 
       {fieldsPopupRow && (
         <FieldsPopup row={fieldsPopupRow} fieldLabelMap={fieldLabelMap} onClose={() => setFieldsPopupRow(null)} />
-      )}
-
-      {pathModal && (
-        <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />
       )}
 
       <ConfirmDialog

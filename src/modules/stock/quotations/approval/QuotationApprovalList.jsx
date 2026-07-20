@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Eye, FileText, ClipboardCheck } from "lucide-react";
-import {
-  SearchableSelect, Modal, leafOf, hasPath, ViewPathIcon, CategoryPathModal,
-} from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, Modal } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -126,7 +124,7 @@ const quotationCategories = (q) => {
   const map = new Map();
   (q.items || []).forEach((it) => {
     const path = it.categoryName || "";
-    if (path && !map.has(path)) map.set(path, { leaf: leafOf(path), path });
+    if (path && !map.has(path)) map.set(path, { path });
   });
   return [...map.values()];
 };
@@ -138,7 +136,7 @@ const CategoriesCell = ({ q, onMore }) => {
   return (
     <div className="flex flex-wrap items-center gap-1">
       {shown.map((c, i) => (
-        <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">{c.leaf}</span>
+        <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">{c.path}</span>
       ))}
       {extra > 0 && (
         <button
@@ -175,7 +173,6 @@ const QuotationApprovalList = () => {
   const [categories, setCategories] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
-  const [pathModal, setPathModal] = useState(null);
   const [moreCats, setMoreCats] = useState(null);
 
   const [summary, setSummary] = useState({ PENDING: 0, APPROVED: 0, PARTIALLY_APPROVED: 0, REJECTED: 0, ALL: 0 });
@@ -231,7 +228,7 @@ const QuotationApprovalList = () => {
 
   const onStatusTab = (next) => { setStatus(next); setPage(1); };
 
-  const categoryOptions = useMemo(() => categories.map((c) => ({ value: c._id, label: c.name, path: c.displayPath || c.name })), [categories]);
+  const categoryOptions = useMemo(() => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })), [categories]);
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v._id, label: v.name })), [vendors]);
 
   const hasActiveFilters =
@@ -282,7 +279,6 @@ const QuotationApprovalList = () => {
           <SearchableSelect
             value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }}
             options={categoryOptions} placeholder="All categories"
-            renderExtra={(o) => (hasPath(o.label, o.path) ? <ViewPathIcon onClick={(e) => { e.stopPropagation(); setPathModal(o); }} /> : null)}
           />
           <SearchableSelect
             value={productId} onChange={(v) => { setProductId(v); setPage(1); }}
@@ -431,14 +427,12 @@ const QuotationApprovalList = () => {
         />
       </div>
 
-      {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
       {moreCats && (
         <Modal onClose={() => setMoreCats(null)} title="Categories">
           <div className="space-y-2">
             {moreCats.map((c, i) => (
               <div key={i} className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
-                <p className="text-sm font-semibold text-slate-900">{c.leaf}</p>
-                <p className="mt-0.5 text-xs text-slate-500">{c.path}</p>
+                <p className="text-sm font-semibold text-slate-900">{c.path}</p>
               </div>
             ))}
           </div>

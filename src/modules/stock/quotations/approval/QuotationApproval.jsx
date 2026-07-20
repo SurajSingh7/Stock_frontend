@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Check, X, Pencil } from "lucide-react";
-import { leafOf, hasPath, ViewPathIcon, CategoryPathModal, money } from "@/modules/stock/shared/StockSharedUI";
+import { money } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -152,9 +152,7 @@ const VendorLine = ({ v, selectable = false, checked = false, disabled = false, 
 );
 
 /* category card shell — colored by decision */
-const CategoryCard = ({ categoryName, statusLabel, tone, remarks, onPath, children }) => {
-  const leaf = leafOf(categoryName);
-  const showView = hasPath(leaf, categoryName);
+const CategoryCard = ({ categoryName, statusLabel, tone, remarks, children }) => {
   const border = tone === "red" ? "border-rose-200" : tone === "green" ? "border-emerald-200" : "border-slate-200";
   const head = tone === "red" ? "bg-rose-50" : tone === "green" ? "bg-emerald-50" : "bg-slate-50/60";
   const badge =
@@ -169,8 +167,7 @@ const CategoryCard = ({ categoryName, statusLabel, tone, remarks, onPath, childr
     <div className={`mb-4 rounded-2xl border ${border} bg-white shadow-sm`}>
       <div className={`flex items-center justify-between rounded-t-2xl border-b border-slate-100 px-5 py-3 ${head}`}>
         <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
-          {leaf}
-          {showView && <ViewPathIcon onClick={() => onPath({ label: leaf, path: categoryName })} />}
+          {categoryName}
         </span>
         {statusLabel && (
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${badge}`}>
@@ -222,7 +219,6 @@ const ReviewMode = ({ quotation, onDone }) => {
   const [rowError, setRowError] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
-  const [pathModal, setPathModal] = useState(null);
 
   const setDecision = (catId, patch) => setDecisions((prev) => ({ ...prev, [catId]: { ...prev[catId], ...patch } }));
 
@@ -295,7 +291,7 @@ const ReviewMode = ({ quotation, onDone }) => {
         const tone = d.status === DECISION.APPROVED ? "green" : d.status === DECISION.REJECTED ? "red" : "gray";
         const statusLabel = d.status === DECISION.APPROVED ? "Approved" : d.status === DECISION.REJECTED ? "Rejected" : "Pending";
         return (
-          <CategoryCard key={cat.categoryId} categoryName={cat.categoryName} statusLabel={statusLabel} tone={tone} onPath={setPathModal}>
+          <CategoryCard key={cat.categoryId} categoryName={cat.categoryName} statusLabel={statusLabel} tone={tone}>
             {cat.products.map((p) => {
               const isSelProduct = d.sel?.productDefinitionId === p.productDefinitionId;
               return (
@@ -379,22 +375,21 @@ const ReviewMode = ({ quotation, onDone }) => {
           <div className="mb-4 flex flex-col gap-1.5">
             {categories.map((c) => {
               const d = decisions[c.categoryId] || {};
-              const leaf = leafOf(c.categoryName);
               if (d.status === DECISION.APPROVED)
                 return (
                   <span key={c.categoryId} className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700">
-                    <Check className="h-3.5 w-3.5" /> {leaf} — approved
+                    <Check className="h-3.5 w-3.5" /> {c.categoryName} — approved
                   </span>
                 );
               if (d.status === DECISION.REJECTED)
                 return (
                   <span key={c.categoryId} className="inline-flex items-center gap-1.5 text-sm font-medium text-rose-600">
-                    <X className="h-3.5 w-3.5" /> {leaf} — rejected
+                    <X className="h-3.5 w-3.5" /> {c.categoryName} — rejected
                   </span>
                 );
               return (
                 <span key={c.categoryId} className="inline-flex items-center gap-1.5 text-sm text-slate-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300" /> {leaf} — no decision yet
+                  <span className="h-1.5 w-1.5 rounded-full bg-slate-300" /> {c.categoryName} — no decision yet
                 </span>
               );
             })}
@@ -417,8 +412,6 @@ const ReviewMode = ({ quotation, onDone }) => {
         Pick one vendor per product. Rankings are calculated across all vendor-product combinations within the
         selected leaf category, using Warranty first and Price second.
       </p>
-
-      {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
     </div>
   );
 };
@@ -432,7 +425,6 @@ const DetailsMode = ({ quotation, backTo }) => {
   const items = quotation.items || [];
   const categories = groupCatProductVendor(items);
   const rankMap = computeCategoryRanks(items);
-  const [pathModal, setPathModal] = useState(null);
 
   const caByCat = new Map((quotation.categoryApprovals || []).map((ca) => [idOf(ca.categoryId) || ca.categoryName, ca]));
   const approvedPairs = new Set(
@@ -473,7 +465,7 @@ const DetailsMode = ({ quotation, backTo }) => {
         return (
           <CategoryCard
             key={cat.categoryId} categoryName={cat.categoryName} statusLabel={statusLabel} tone={tone}
-            remarks={st === "REJECTED" ? ca?.remarks : ""} onPath={setPathModal}
+            remarks={st === "REJECTED" ? ca?.remarks : ""}
           >
             {cat.products.map((p) => {
               const anyWon = p.vendors.some((v) => approvedPairs.has(`${p.productDefinitionId}::${v.vendorId}`));
@@ -508,8 +500,6 @@ const DetailsMode = ({ quotation, backTo }) => {
           <p className="whitespace-pre-wrap text-sm text-slate-700">{quotation.notes}</p>
         </Card>
       ) : null}
-
-      {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
     </div>
   );
 };

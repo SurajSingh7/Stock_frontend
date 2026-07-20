@@ -41,8 +41,8 @@ export const Modal = ({ onClose, title, children, maxWidth = "max-w-lg" }) => {
 
 /* ============================================================= */
 /* Searchable select                                              */
-/*   options: [{ value, label, path? }]                           */
-/*   renderExtra(option) → optional trailing node (e.g. 👁)       */
+/*   options: [{ value, label }]                                  */
+/*   renderExtra(option) → optional trailing node                 */
 /* ============================================================= */
 
 export const SearchableSelect = ({ value, onChange, options, placeholder = "All", disabled = false, renderExtra }) => {
@@ -88,35 +88,6 @@ export const SearchableSelect = ({ value, onChange, options, placeholder = "All"
     </div>
   );
 };
-
-/* ============================================================= */
-/* Category helpers                                               */
-/* ============================================================= */
-
-// leaf name = last segment of a "A / B / C" style path (or the name itself)
-export const leafOf = (c) => String(c || "").split("/").pop().trim();
-
-// a category has a meaningful path only if it has a parent (path !== leaf)
-export const hasPath = (label, path) => {
-  const p = String(path || "").trim();
-  const l = String(label || "").trim();
-  if (!p) return false;
-  return leafOf(p) !== p || p !== l; // true when there is a "/" hierarchy
-};
-
-// Small 👁 button — render beside a category ONLY when hasPath is true.
-export const ViewPathIcon = ({ onClick }) => (
-  <button type="button" title="View full path" onClick={onClick}
-    className="shrink-0 rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-indigo-600">👁</button>
-);
-
-// Popup that shows the full category hierarchy/path.
-export const CategoryPathModal = ({ label, path, onClose }) => (
-  <Modal onClose={onClose} title={label} maxWidth="max-w-md">
-    <p className="text-[11px] uppercase text-gray-400">Full category path</p>
-    <p className="mt-1 text-sm text-gray-900">{path}</p>
-  </Modal>
-);
 
 export const inputCls = "w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 export const money = (n) => `\u20B9${Number(n || 0).toLocaleString("en-IN")}`;

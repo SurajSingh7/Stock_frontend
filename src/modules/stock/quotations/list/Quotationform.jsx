@@ -3,10 +3,8 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { ArrowLeft, Plus, Trash2, Eye, Star } from "lucide-react";
-import {
-  SearchableSelect, leafOf, hasPath, ViewPathIcon, CategoryPathModal,
-} from "@/modules/stock/shared/StockSharedUI";
+import { ArrowLeft, Plus, Trash2, Star } from "lucide-react";
+import { SearchableSelect } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -151,7 +149,6 @@ const QuotationForm = ({ quotationId = null }) => {
 
   const [categories, setCategories] = useState([]);   // leaf + hasProducts
   const [pickCatId, setPickCatId] = useState("");
-  const [pathModal, setPathModal] = useState(null);   // { label, path }
 
   // global product-selection options
   const [quantityEditable, setQuantityEditable] = useState(false); // default No
@@ -169,7 +166,7 @@ const QuotationForm = ({ quotationId = null }) => {
     })();
   }, []);
 
-  const categoryOptions = categories.map((c) => ({ value: c._id, label: c.name, path: c.displayPath || c.name }));
+  const categoryOptions = categories.map((c) => ({ value: c._id, label: c.displayPath || c.name }));
 
   /* ---- edit load ---- */
   const loadForEdit = useCallback(async () => {
@@ -348,9 +345,6 @@ const QuotationForm = ({ quotationId = null }) => {
                     <label className={labelCls}>Category</label>
                 <SearchableSelect
                   value={pickCatId} onChange={setPickCatId} options={categoryOptions} placeholder="Select category"
-                  renderExtra={(o) => (hasPath(o.label, o.path) ? (
-                    <ViewPathIcon onClick={(e) => { e.stopPropagation(); setPathModal(o); }} />
-                  ) : null)}
                 />
               </div>
               <button
@@ -386,23 +380,13 @@ const QuotationForm = ({ quotationId = null }) => {
           </div>
         ) : (
           blocks.map((block) => {
-            const leaf = leafOf(block.categoryName);
-            const showView = hasPath(leaf, block.categoryName);
             return (
               <div key={block.categoryId} className="mb-6">
                 <div className="mb-3 flex items-center gap-2">
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    {leaf}
+                    {block.categoryName}
                   </span>
-                  {showView && (
-                    <button
-                      type="button" onClick={() => setPathModal({ label: leaf, path: block.categoryName })}
-                      className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600"
-                    >
-                      <Eye className="h-3.5 w-3.5" /> View path
-                    </button>
-                  )}
                   <button
                     type="button" onClick={() => removeCategory(block.categoryId)}
                     className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-medium text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
@@ -444,8 +428,6 @@ const QuotationForm = ({ quotationId = null }) => {
             </div>
           </div>
         )}
-
-        {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
       </div>
     </div>
   );

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { ArrowLeft, Eye, Lock } from "lucide-react";
+import { ArrowLeft, Lock } from "lucide-react";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -24,7 +24,6 @@ const DEFAULT_TERMS =
 const LOCK_CHECKBOX = true;
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
-const leafOf = (c) => String(c || "").split("/").pop().trim();
 const todayStr = () => {
   const d = new Date();
   const p = (x) => String(x).padStart(2, "0");
@@ -140,7 +139,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [openPath, setOpenPath] = useState(null);
 
   // distinct parent aliases
   const aliases = [...new Set(entities.map((e) => e.alias).filter(Boolean))];
@@ -416,14 +414,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                       <TruncateText text={r.productName} title="Product" />
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
-                      <TruncateText text={leafOf(r.categoryName)} title="Category" />
-                      <button
-                        type="button" title="View full path"
-                        onClick={(e) => { e.preventDefault(); setOpenPath(openPath === String(r.quotationItemId) ? null : String(r.quotationItemId)); }}
-                        className="rounded p-0.5 text-slate-500 transition hover:text-indigo-600"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                      </button>
+                      <TruncateText text={r.categoryName} title="Category" />
                     </span>
                     <span className="text-xs text-slate-600 tabular-nums">
                       qty {r.quantity} × {money(r.unitPrice)} · GST {r.gstRate}%
@@ -447,11 +438,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                   <span className="ml-auto text-slate-600">Total <span className="text-sm font-bold text-slate-900">{money(c.total)}</span></span>
                 </div>
 
-                {openPath === String(r.quotationItemId) && (
-                  <p className="ml-7 mt-1.5 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-700">
-                    Path · {r.categoryName}
-                  </p>
-                )}
                 {!LOCK_CHECKBOX && !isEdit && !r.checked && (
                   <div className="ml-7 mt-2">
                     <input

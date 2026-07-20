@@ -32,7 +32,6 @@ const LOCK_CHECKBOX = true;
 
 const money = (n) =>
   `\u20B9${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
-const leafOf = (c) => String(c || "").split("/").pop().trim();
 const todayStr = () => {
   const d = new Date();
   const p = (x) => String(x).padStart(2, "0");
@@ -48,12 +47,6 @@ const labelCls = "mb-1.5 block text-xs font-semibold text-slate-700";
 const IconArrowLeft = () => (
   <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
     <path d="M12.5 15 7.5 10l5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-const IconEye = () => (
-  <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
-    <path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10Z" stroke="currentColor" strokeWidth="1.4" />
-    <circle cx="10" cy="10" r="2.2" stroke="currentColor" strokeWidth="1.4" />
   </svg>
 );
 const IconLock = () => (
@@ -89,7 +82,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [openPath, setOpenPath] = useState(null);
 
   // distinct parent aliases
   const aliases = [...new Set(entities.map((e) => e.alias).filter(Boolean))];
@@ -383,14 +375,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                       {r.productName}
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
-                      {leafOf(r.categoryName)}
-                      <button
-                        type="button" title="View full path"
-                        onClick={(e) => { e.preventDefault(); setOpenPath(openPath === String(r.quotationItemId) ? null : String(r.quotationItemId)); }}
-                        className="rounded p-0.5 text-slate-400 transition duration-200 hover:text-indigo-600"
-                      >
-                        <IconEye />
-                      </button>
+                      {r.categoryName}
                     </span>
                     <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
                       <span>
@@ -424,11 +409,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                   <span className="ml-auto text-slate-500">Total <span className="text-sm font-bold text-slate-900">{money(c.total)}</span></span>
                 </div>
 
-                {openPath === String(r.quotationItemId) && (
-                  <p className="ml-7 mt-1.5 rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-700">
-                    Path · {r.categoryName}
-                  </p>
-                )}
                 {!LOCK_CHECKBOX && !isEdit && !r.checked && (
                   <div className="ml-7 mt-2">
                     <input

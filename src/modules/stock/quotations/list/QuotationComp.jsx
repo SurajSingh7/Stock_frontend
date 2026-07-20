@@ -6,9 +6,7 @@ import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { Plus, RotateCcw, Eye, FileText, CheckCircle2, MoreVertical } from "lucide-react";
-import {
-  SearchableSelect, Modal, leafOf, hasPath, ViewPathIcon, CategoryPathModal,
-} from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, Modal } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -122,17 +120,17 @@ const Avatar = ({ name }) => {
   );
 };
 
-// distinct categories (leaf + full path) for a quotation, from its items
+// distinct full category paths for a quotation, from its items
 const quotationCategories = (q) => {
   const map = new Map();
   (q.items || []).forEach((it) => {
     const path = it.categoryName || "";
-    if (path && !map.has(path)) map.set(path, { leaf: leafOf(path), path });
+    if (path && !map.has(path)) map.set(path, { path });
   });
   return [...map.values()];
 };
 
-// Categories cell: up to 2 leaf chips + "+N" → popup with leaf + full path
+// Categories cell: up to 2 full-path chips + "+N" → popup listing the rest
 const CategoriesCell = ({ q, onMore }) => {
   const cats = quotationCategories(q);
   if (cats.length === 0) return <span className="text-slate-400">—</span>;
@@ -141,7 +139,7 @@ const CategoriesCell = ({ q, onMore }) => {
   return (
     <div className="flex flex-wrap items-center gap-1">
       {shown.map((c, i) => (
-        <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">{c.leaf}</span>
+        <span key={i} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">{c.path}</span>
       ))}
       {extra > 0 && (
         <button
@@ -294,7 +292,6 @@ const QuotationComp = () => {
   const [categories, setCategories] = useState([]);      // leaf + hasProducts
   const [vendors, setVendors] = useState([]);
   const [productOptions, setProductOptions] = useState([]); // dependent
-  const [pathModal, setPathModal] = useState(null);
   const [moreCats, setMoreCats] = useState(null);        // +N popup
 
   const [summary, setSummary] = useState({ PENDING: 0, APPROVED: 0, PARTIALLY_APPROVED: 0, REJECTED: 0, ALL: 0 });
@@ -353,7 +350,7 @@ const QuotationComp = () => {
   const onStatusTab = (next) => { setStatus(next); setPage(1); };
 
   const categoryOptions = useMemo(
-    () => categories.map((c) => ({ value: c._id, label: c.name, path: c.displayPath || c.name })),
+    () => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })),
     [categories]
   );
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v._id, label: v.name })), [vendors]);
@@ -414,7 +411,6 @@ const QuotationComp = () => {
           <SearchableSelect
             value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }}
             options={categoryOptions} placeholder="All categories"
-            renderExtra={(o) => (hasPath(o.label, o.path) ? <ViewPathIcon onClick={(e) => { e.stopPropagation(); setPathModal(o); }} /> : null)}
           />
           <SearchableSelect
             value={productId} onChange={(v) => { setProductId(v); setPage(1); }}
@@ -543,17 +539,13 @@ const QuotationComp = () => {
         />
       </div>
 
-      {/* category path popup (from filter eye icon) */}
-      {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
-
-      {/* +N categories popup — leaf name + full path */}
+      {/* +N categories popup — full breadcrumb paths */}
       {moreCats && (
         <Modal onClose={() => setMoreCats(null)} title="Categories">
           <div className="space-y-2">
             {moreCats.map((c, i) => (
               <div key={i} className="rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
-                <p className="text-sm font-semibold text-slate-900">{c.leaf}</p>
-                <p className="mt-0.5 text-xs text-slate-500">{c.path}</p>
+                <p className="text-sm font-semibold text-slate-900">{c.path}</p>
               </div>
             ))}
           </div>

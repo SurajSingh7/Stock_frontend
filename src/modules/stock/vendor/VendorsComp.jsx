@@ -4,8 +4,8 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import {
-  Search, Plus, Eye, Pencil, Trash2, RotateCcw, ShieldCheck, ShieldAlert,
-  Building2, Phone, X, ChevronDown, MoreVertical, Loader2,
+  Search, Plus, Pencil, Trash2, RotateCcw, ShieldCheck, ShieldAlert,
+  Building2, Phone, X, ChevronDown, MoreVertical,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
@@ -27,8 +27,6 @@ const STATUS_OPTIONS = [
   { value: "INACTIVE", label: "Inactive" },
 ];
 
-const leafOf = (c) => String(c || "").split("/").pop().trim();
-const hasPath = (leaf, path) => Boolean(path) && String(path).trim() !== String(leaf).trim();
 
 /* ============================================================= */
 /* Portal Modal — same as PO board                                */
@@ -243,40 +241,10 @@ const ActiveBadge = ({ isActive }) => (
 /* Assigned-products popup                                        */
 /* ============================================================= */
 
-const CategoryPathModal = ({ categoryId, label, onClose }) => {
-  const [path, setPath] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/categories/${categoryId}`, { credentials: "include" });
-        const json = await res.json();
-        if (json.success) setPath(json.data?.displayPath || json.data?.name || "");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [categoryId]);
-
-  return (
-    <Modal onClose={onClose} title={label} maxWidth="max-w-md">
-      <p className="text-xs font-bold uppercase tracking-wider text-slate-600">Full category path</p>
-      {loading ? (
-        <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-slate-400">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading path...
-        </p>
-      ) : (
-        <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-900">{path || "—"}</p>
-      )}
-    </Modal>
-  );
-};
-
 const AssignedProductsPopup = ({ vendor, onClose }) => {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [pathFor, setPathFor] = useState(null);
+  const [pathMap, setPathMap] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -302,8 +270,30 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
       }),
     }));
 
+  // assignedProducts.categoryId is only populated with {name, type} — resolve
+  // each group's full breadcrumb path so it can always be shown inline.
+  useEffect(() => {
+    const ids = [...new Set(groups.map((g) => g.categoryId).filter(Boolean))];
+    const missing = ids.filter((id) => !(id in pathMap));
+    if (missing.length === 0) return;
+    (async () => {
+      const entries = await Promise.all(
+        missing.map(async (id) => {
+          try {
+            const res = await fetch(`${API_BACKEND_URL}/stock/categories/${id}`, { credentials: "include" });
+            const json = await res.json();
+            return [id, json.success ? json.data?.displayPath || json.data?.name || "" : ""];
+          } catch {
+            return [id, ""];
+          }
+        })
+      );
+      setPathMap((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail]);
+
   return (
-    <>
       <Modal onClose={onClose} title={`${vendor.name} · assigned products`} maxWidth="max-w-2xl">
         {loading ? (
           <div className="space-y-3">
@@ -317,14 +307,7 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
               <div key={g.categoryId} className="rounded-xl border border-slate-200 bg-white">
                 <div className="flex items-center justify-between rounded-t-xl border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
                   <span className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-900">
-                    {leafOf(g.categoryName)}
-                    <button
-                      type="button" title="View full path"
-                      onClick={() => setPathFor({ categoryId: g.categoryId, label: leafOf(g.categoryName) })}
-                      className="rounded p-0.5 text-slate-400 transition hover:text-indigo-600"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                    </button>
+                    {pathMap[g.categoryId] || g.categoryName}
                     <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                       LEAF
                     </span>
@@ -350,11 +333,6 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
           </div>
         )}
       </Modal>
-
-      {pathFor && (
-        <CategoryPathModal categoryId={pathFor.categoryId} label={pathFor.label} onClose={() => setPathFor(null)} />
-      )}
-    </>
   );
 };
 
@@ -519,7 +497,6 @@ const VendorsComp = () => {
 
   const [categories, setCategories] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
-  const [pathModal, setPathModal] = useState(null);
   const [productsPopup, setProductsPopup] = useState(null);
 
   const [page, setPage] = useState(1);
@@ -626,7 +603,7 @@ const VendorsComp = () => {
   };
 
   const categoryOptions = useMemo(
-    () => categories.map((c) => ({ value: c._id, label: c.name, path: c.displayPath || c.name })),
+    () => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })),
     [categories]
   );
 
@@ -673,17 +650,6 @@ const VendorsComp = () => {
               value={categoryId}
               onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }}
               options={categoryOptions} placeholder="All categories"
-              renderExtra={(o) =>
-                hasPath(o.label, o.path) ? (
-                  <button
-                    type="button" title="View full path"
-                    onClick={(e) => { e.stopPropagation(); setPathModal(o); }}
-                    className="shrink-0 rounded p-1 text-slate-400 transition hover:text-indigo-600"
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                  </button>
-                ) : null
-              }
             />
           </div>
           <div className="lg:col-span-1">
@@ -828,12 +794,6 @@ const VendorsComp = () => {
       </div>
 
       {productsPopup && <AssignedProductsPopup vendor={productsPopup} onClose={() => setProductsPopup(null)} />}
-      {pathModal && (
-        <Modal onClose={() => setPathModal(null)} title={pathModal.label} maxWidth="max-w-md">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-600">Full category path</p>
-          <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-900">{pathModal.path}</p>
-        </Modal>
-      )}
 
       <ConfirmDeleteModal
         vendor={deleteTarget} deleting={deleting}
