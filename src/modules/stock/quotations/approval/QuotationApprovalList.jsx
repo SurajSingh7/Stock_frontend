@@ -15,6 +15,9 @@ import {
 
 const STATUS = { PENDING: "PENDING", APPROVED: "APPROVED", PARTIALLY_APPROVED: "PARTIALLY_APPROVED", REJECTED: "REJECTED" };
 
+const fmtDateTime = (d) =>
+  d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
 const STATUS_META = {
   PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
   APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
@@ -357,20 +360,21 @@ const QuotationApprovalList = () => {
               <th className={th}>Vendors</th>
               {/* <th className={th}>Created By</th> */}
               <th className={th}>Status</th>
+              <th className={th}>Updated</th>
               <th className={thRight}>Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center">
+                <td colSpan={7} className="px-4 py-12 text-center">
                   <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
                   <p className="mt-2 text-sm text-slate-500">Loading…</p>
                 </td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-16 text-center">
+                <td colSpan={7} className="px-4 py-16 text-center">
                   <p className="text-sm font-medium text-slate-700">No quotations found</p>
                   <p className="mt-1 text-sm text-slate-400">Adjust the filters above to widen the search.</p>
                 </td>
@@ -386,6 +390,7 @@ const QuotationApprovalList = () => {
                     <td className="px-4 py-3 text-sm text-slate-700 tabular-nums">{vendorCount}</td>
                     {/* <td className="px-4 py-3 text-sm"><Avatar name={q.createdByName} /></td> */}
                     <td className="px-4 py-3"><StatusBadge status={q.status} /></td>
+                    <td className="px-4 py-3 text-sm text-slate-500 tabular-nums">{fmtDateTime(q.updatedAt)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {/* <button
@@ -403,7 +408,7 @@ const QuotationApprovalList = () => {
                           </button>
                         ) : (
                           <button
-                            type="button" onClick={() => router.push(`/stock/quotations/${q._id}/view`)} title="View"
+                            type="button" onClick={() => router.push(`/stock/quotations/${q._id}/view?from=approval`)} title="View"
                             className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
                           >
                             <Eye className="h-3.5 w-3.5" /> View

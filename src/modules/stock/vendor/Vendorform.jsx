@@ -701,7 +701,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
 
   // EDIT-MODE FIX (kept): assignedProducts arrives pre-filled from
   // GET /vendors/:id, so fetch products for any category not yet loaded.
-  // Only the SAVED productIds stay checked — no auto-check on edit.
+  // Only the SAVED products stay checked — no auto-check on edit.
   useEffect(() => {
     vendor.assignedProducts.forEach((ap) => {
       if (ap.categoryId && !productsByCategory[ap.categoryId]) loadProductsForCategory(ap.categoryId);
@@ -712,9 +712,10 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
     if (!selectedCategory) return;
     const exists = vendor.assignedProducts.some((ap) => ap.categoryId === selectedCategory._id);
     if (!exists) {
-      // Fetch FIRST, then seed productIds with all of them → every checkbox
-      // lands pre-ticked. (Seeding [] and ticking afterwards would race with
-      // the fetch and leave the category empty.)
+      // Fetch FIRST, then seed products with all of them → every checkbox
+      // lands pre-ticked, each defaulted to the product's own warranty.
+      // (Seeding [] and ticking afterwards would race with the fetch and
+      // leave the category empty.)
       const list = await loadProductsForCategory(selectedCategory._id);
       setVendor((v) => ({
         ...v,
@@ -723,7 +724,10 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
           {
             categoryId: selectedCategory._id,
             categoryName: selectedCategory.name,
-            productIds: list.map((p) => p._id),
+            products: list.map((p) => ({
+              productId: p._id,
+              overrides: { warrantyYears: p.warrantyYears ?? null },
+            })),
           },
         ],
       }));
@@ -741,8 +745,32 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
       ...v,
       assignedProducts: v.assignedProducts.map((ap) => {
         if (ap.categoryId !== categoryId) return ap;
-        const has = ap.productIds.includes(productId);
-        return { ...ap, productIds: has ? ap.productIds.filter((id) => id !== productId) : [...ap.productIds, productId] };
+        const has = ap.products.some((p) => p.productId === productId);
+        if (has) {
+          return { ...ap, products: ap.products.filter((p) => p.productId !== productId) };
+        }
+        const product = (productsByCategory[categoryId] || []).find((p) => p._id === productId);
+        return {
+          ...ap,
+          products: [
+            ...ap.products,
+            { productId, overrides: { warrantyYears: product?.warrantyYears ?? null } },
+          ],
+        };
+      }),
+    }));
+
+  const updateProductWarranty = (categoryId, productId, warrantyYears) =>
+    setVendor((v) => ({
+      ...v,
+      assignedProducts: v.assignedProducts.map((ap) => {
+        if (ap.categoryId !== categoryId) return ap;
+        return {
+          ...ap,
+          products: ap.products.map((p) =>
+            p.productId === productId ? { ...p, overrides: { warrantyYears } } : p
+          ),
+        };
       }),
     }));
 
@@ -752,9 +780,15 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
       ...v,
       assignedProducts: v.assignedProducts.map((ap) => {
         if (ap.categoryId !== categoryId) return ap;
-        const all = (productsByCategory[categoryId] || []).map((p) => p._id);
-        const allChecked = all.length > 0 && all.every((id) => ap.productIds.includes(id));
-        return { ...ap, productIds: allChecked ? [] : all };
+        const all = productsByCategory[categoryId] || [];
+        const allChecked =
+          all.length > 0 && all.every((p) => ap.products.some((sel) => sel.productId === p._id));
+        return {
+          ...ap,
+          products: allChecked
+            ? []
+            : all.map((p) => ({ productId: p._id, overrides: { warrantyYears: p.warrantyYears ?? null } })),
+        };
       }),
     }));
 
@@ -815,7 +849,8 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {vendor.assignedProducts.map((ap) => {
             const list = productsByCategory[ap.categoryId];
-            const allChecked = list && list.length > 0 && list.every((p) => ap.productIds.includes(p._id));
+            const allChecked =
+              list && list.length > 0 && list.every((p) => ap.products.some((sel) => sel.productId === p._id));
             return (
               <div key={ap.categoryId} className="rounded-xl border border-slate-200 p-4">
                 <div className="mb-3 flex items-center justify-between">
@@ -842,18 +877,49 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
                     </button>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {(list || []).map((product) => (
-                    <label key={product._id} className="flex cursor-pointer items-center gap-2 px-1 py-1 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={ap.productIds.includes(product._id)}
-                        onChange={() => toggleProduct(ap.categoryId, product._id)}
-                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                      {product.name}
-                    </label>
-                  ))}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {(list || []).map((product) => {
+                    const sel = ap.products.find((p) => p.productId === product._id);
+                    const checked = Boolean(sel);
+                    return (
+                      <div key={product._id} className="rounded-lg px-1 py-1.5 text-sm text-slate-700">
+                        <label className="flex min-w-0 cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggleProduct(ap.categoryId, product._id)}
+                            className="h-4 w-4 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="min-w-0 truncate">
+                            {product.name}
+                            <span className="ml-1 text-xs text-slate-400">
+                              (Default Warranty: {product.warrantyYears ?? "—"} {product.warrantyYears === 1 ? "Year" : "Years"})
+                            </span>
+                          </span>
+                        </label>
+                        {checked && (
+                          <div className="mt-1.5 flex items-center gap-2 pl-6">
+                            <label htmlFor={`vendor-warranty-${product._id}`} className="text-xs font-medium text-slate-600">
+                              Warranty (Years):
+                            </label>
+                            <input
+                              id={`vendor-warranty-${product._id}`}
+                              type="number" min="1" step="1"
+                              value={sel.overrides?.warrantyYears ?? ""}
+                              onChange={(e) =>
+                                updateProductWarranty(
+                                  ap.categoryId,
+                                  product._id,
+                                  e.target.value === "" ? null : Number(e.target.value)
+                                )
+                              }
+                              className="w-16 shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   {!list && (
                     <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
                       <Loader2 className="h-3 w-3 animate-spin" /> Loading products...
@@ -1031,8 +1097,16 @@ const validateVendor = (vendor) => {
   });
 
   // a category with every product unchecked is a mistake, not a valid state
-  const emptyCat = vendor.assignedProducts.find((ap) => (ap.productIds || []).length === 0);
+  const emptyCat = vendor.assignedProducts.find((ap) => (ap.products || []).length === 0);
   if (emptyCat) push(`Select at least one product in "${emptyCat.categoryName}" or remove the category`);
+
+  // every checked product needs a valid warranty override (min 1 year)
+  const badWarranty = vendor.assignedProducts.some((ap) =>
+    (ap.products || []).some(
+      (p) => !p.overrides || !Number.isInteger(p.overrides.warrantyYears) || p.overrides.warrantyYears < 1
+    )
+  );
+  if (badWarranty) push("Every assigned product needs a warranty of at least 1 year");
 
   const hasFieldError =
     Object.keys(f).some((k) => k !== "contacts" && k !== "bankAccounts" && f[k]) ||
@@ -1081,7 +1155,10 @@ const VendorForm = ({ vendorId = null }) => {
           .map((ap) => ({
             categoryId: ap.categoryId?._id || ap.categoryId,
             categoryName: ap.categoryId?.name || ap.categoryName || "",
-            productIds: (ap.productIds || []).map((p) => p?._id || p),
+            products: (ap.products || []).map((p) => ({
+              productId: p.productId?._id || p.productId,
+              overrides: { warrantyYears: p.overrides?.warrantyYears ?? null },
+            })),
           })),
       };
       setVendor(loaded);
@@ -1129,7 +1206,10 @@ const VendorForm = ({ vendorId = null }) => {
         // strip the UI-only categoryName helper
         assignedProducts: vendor.assignedProducts.map((ap) => ({
           categoryId: ap.categoryId,
-          productIds: ap.productIds,
+          products: ap.products.map((p) => ({
+            productId: p.productId,
+            overrides: { warrantyYears: p.overrides?.warrantyYears ?? null },
+          })),
         })),
       };
 

@@ -37,13 +37,33 @@ const Toggle = ({ checked, onChange, label }) => (
   </button>
 );
 
-/* one card per vendor */
-const VendorSection = ({ block, quantityEditable, onToggle, onPriceChange, onQtyChange }) => (
+/*
+  Pure display-only pivot: block.vendors (Vendor -> Products, the actual state
+  shape used by toggleRow/mutateRow/collectItems below — unchanged) grouped
+  instead as Product -> Vendors, to match the Review page's Category -> Product
+  -> Vendor hierarchy. Every row keeps its original vendorId/productDefinitionId
+  so the same mutator handlers still apply — only the rendering grouping changes.
+*/
+const groupByProduct = (vendors = []) => {
+  const products = new Map();
+  vendors.forEach((v) => {
+    v.products.forEach((p) => {
+      if (!products.has(p.productDefinitionId)) {
+        products.set(p.productDefinitionId, { productDefinitionId: p.productDefinitionId, name: p.name, rows: [] });
+      }
+      products.get(p.productDefinitionId).rows.push({ vendorId: v.vendorId, vendorName: v.vendorName, ...p });
+    });
+  });
+  return [...products.values()];
+};
+
+/* one card per product — lists every vendor offering it */
+const ProductSection = ({ product, quantityEditable, onToggle, onPriceChange, onQtyChange }) => (
   <div className="mb-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
-      <span className="text-sm font-bold text-slate-900">{block.vendorName}</span>
+      <span className="text-sm font-bold text-slate-900">{product.name}</span>
       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 tabular-nums">
-        {block.products.length} product{block.products.length > 1 ? "s" : ""}
+        {product.rows.length} vendor{product.rows.length > 1 ? "s" : ""}
       </span>
     </div>
     <div className="overflow-x-auto">
@@ -51,8 +71,9 @@ const VendorSection = ({ block, quantityEditable, onToggle, onPriceChange, onQty
         <thead className="bg-white">
           <tr className="border-b border-slate-100">
             <th className="w-10 px-3 py-2.5" />
-            <th className={th}>Product</th>
+            <th className={th}>Vendor</th>
             <th className={th}>Qty</th>
+            <th className={th}>Warranty</th>
             <th className={th}>Price</th>
             <th className={th}>Prev Qty</th>
             <th className={th}>Prev ₹</th>
@@ -62,29 +83,32 @@ const VendorSection = ({ block, quantityEditable, onToggle, onPriceChange, onQty
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
-          {block.products.map((row) => (
-            <tr key={row.productDefinitionId} className={`transition ${row.checked ? "bg-indigo-50/60" : "hover:bg-slate-50/60"}`}>
+          {product.rows.map((row) => (
+            <tr key={row.vendorId} className={`transition ${row.checked ? "bg-indigo-50/60" : "hover:bg-slate-50/60"}`}>
               <td className="px-3 py-2.5 text-center">
                 <input
                   type="checkbox" checked={row.checked}
-                  onChange={() => onToggle(block.vendorId, row.productDefinitionId)}
+                  onChange={() => onToggle(row.vendorId, row.productDefinitionId)}
                   className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                 />
               </td>
-              <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{row.name}</td>
+              <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{row.vendorName}</td>
               <td className="px-3 py-2.5">
                 <input
                   type="number" value={row.quantity} readOnly={!quantityEditable}
-                  onChange={(e) => onQtyChange(block.vendorId, row.productDefinitionId, e.target.value)}
+                  onChange={(e) => onQtyChange(row.vendorId, row.productDefinitionId, e.target.value)}
                   className={`h-8 w-16 rounded-lg border px-2 text-sm tabular-nums shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-100 ${
                     quantityEditable ? "border-slate-200 bg-white text-slate-900" : "border-transparent bg-slate-50 text-slate-500"
                   }`}
                 />
               </td>
+              <td className="px-3 py-2.5 text-sm text-slate-700 tabular-nums">
+                {row.warrantyYears ? `${row.warrantyYears} yr${row.warrantyYears === 1 ? "" : "s"}` : "—"}
+              </td>
               <td className="px-3 py-2.5">
                 <input
                   type="number" value={row.unitPrice} placeholder="—"
-                  onChange={(e) => onPriceChange(block.vendorId, row.productDefinitionId, e.target.value)}
+                  onChange={(e) => onPriceChange(row.vendorId, row.productDefinitionId, e.target.value)}
                   className="h-8 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-900 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
               </td>
@@ -166,7 +190,7 @@ const QuotationForm = ({ quotationId = null }) => {
         cat.vendors.get(venId).products.push({
           productDefinitionId: String(it.productDefinitionId?._id || it.productDefinitionId),
           name: it.productName || it.productDefinitionId?.name || "",
-          quantity: it.quantity, unitPrice: it.unitPrice, gstRate: it.gstRate,
+          quantity: it.quantity, unitPrice: it.unitPrice, warrantyYears: it.warrantyYears, gstRate: it.gstRate,
           previousQuantity: it.previousQuantity, previousPrice: it.previousPrice,
           averageRating: it.averageRating, checked: true,
         });
@@ -192,6 +216,7 @@ const QuotationForm = ({ quotationId = null }) => {
         vendorId: String(v.vendorId), vendorName: v.vendorName,
         products: (v.products || []).map((p) => ({
           productDefinitionId: String(p.productDefinitionId), name: p.name, gstRate: p.gstRate,
+          warrantyYears: p.warrantyYears ?? null,
           quantity: Number(globalQty) || 1, unitPrice: "", previousQuantity: null, previousPrice: null, averageRating: null,
           checked: autoSelectAll, // auto-select toggle drives the initial state
         })),
@@ -244,6 +269,7 @@ const QuotationForm = ({ quotationId = null }) => {
         productDefinitionId: p.productDefinitionId, vendorId: v.vendorId,
         categoryId: block.categoryId, categoryName: block.categoryName,
         quantity: Number(p.quantity) || 0, unitPrice: Number(p.unitPrice) || 0,
+        warrantyYears: p.warrantyYears ?? null,
       });
     })));
     return items;
@@ -389,9 +415,9 @@ const QuotationForm = ({ quotationId = null }) => {
                     No vendors supply products in this category.
                   </p>
                 ) : (
-                  block.vendors.map((v) => (
-                    <VendorSection
-                      key={v.vendorId} block={v} quantityEditable={quantityEditable}
+                  groupByProduct(block.vendors).map((product) => (
+                    <ProductSection
+                      key={product.productDefinitionId} product={product} quantityEditable={quantityEditable}
                       onToggle={toggleRow}
                       onPriceChange={(vid, pid, val) => mutateRow(vid, pid, { unitPrice: val })}
                       onQtyChange={(vid, pid, val) => mutateRow(vid, pid, { quantity: val })}

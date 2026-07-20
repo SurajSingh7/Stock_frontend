@@ -68,6 +68,7 @@ const emptyForm = {
   category: null,
   name: "",
   gstRate: "",
+  warrantyYears: "",
   unit: "",
   stockAlertThreshold: "",
   trackingMethod: "",
@@ -756,6 +757,7 @@ function RowDetailModal({ row, categoryName, categoryPath, onViewPath, onClose }
     ["Tracking Method", row.trackingMethod],
     ["Fields Count", row.selectedFields?.length ?? 0],
     ["GST Rate", row.gstRate ? `${row.gstRate}%` : "\u2014"],
+    ["Warranty", row.warrantyYears ? `${row.warrantyYears} Year${row.warrantyYears === 1 ? "" : "s"}` : "\u2014"],
     ["Unit", row.unit || "\u2014"],
     ["Stock Alert Threshold", row.stockAlertThreshold ?? "\u2014"],
     ["Status", row.status],
@@ -945,6 +947,14 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     if (!form.trackingMethod) next.trackingMethod = "Please select a tracking method";
     if (!form.selectedFields.length) next.selectedFields = "Select at least one field";
     if (
+      !form.warrantyYears ||
+      isNaN(Number(form.warrantyYears)) ||
+      !Number.isInteger(Number(form.warrantyYears)) ||
+      Number(form.warrantyYears) < 1
+    ) {
+      next.warrantyYears = "Warranty must be a whole number of at least 1 year";
+    }
+    if (
       form.stockAlertThreshold !== "" &&
       (isNaN(Number(form.stockAlertThreshold)) || Number(form.stockAlertThreshold) < 0)
     ) {
@@ -982,6 +992,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
           order: index + 1,
         })),
         gstRate: form.gstRate || null,
+        warrantyYears: Number(form.warrantyYears),
         unit: form.unit || null,
         stockAlertThreshold: form.stockAlertThreshold === "" ? null : Number(form.stockAlertThreshold),
         // Explicit null tells the backend "clear the file" when the user hit
@@ -1132,7 +1143,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
               <div>
                 <label className={labelCls}>GST</label>
                 <select
@@ -1144,6 +1155,19 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                     <option key={g.value} value={g.value}>{g.label}</option>
                   ))}
                 </select>
+              </div>
+              <div>
+                <label className={labelCls}>
+                  Warranty (Years)
+                  <RequiredMark />
+                </label>
+                <input
+                  type="number" min="1" step="1" value={form.warrantyYears}
+                  onChange={(e) => updateField("warrantyYears", e.target.value)}
+                  placeholder="e.g. 1"
+                  className={errors.warrantyYears ? inputErrCls : inputCls}
+                />
+                <FieldError message={errors.warrantyYears} />
               </div>
               <div>
                 <label className={labelCls}>Unit</label>
@@ -1558,6 +1582,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
           : { _id: full.categoryId, name: "Existing category", displayPath: "Existing category" },
         name: full.name || "",
         gstRate: full.gstRate ?? "",
+        warrantyYears: full.warrantyYears ?? "",
         unit: full.unit ?? "",
         stockAlertThreshold: full.stockAlertThreshold ?? "",
         trackingMethod: full.trackingMethod || "",
@@ -1860,6 +1885,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
                     <td className="px-4 py-3.5 text-sm text-slate-700 tabular-nums">
                       {row.gstRate ? `${row.gstRate}%` : "\u2014"}
                       {row.unit ? ` \u00b7 ${row.unit}` : ""}
+                      {row.warrantyYears ? ` \u00b7 ${row.warrantyYears}yr` : ""}
                     </td>
 
                     <td className="px-4 py-3.5">

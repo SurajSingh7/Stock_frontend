@@ -26,6 +26,51 @@ const STATUS_META = {
   REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
 };
 
+// L-1/L-2/L-3 get a colored badge, L-4+ stays neutral (per spec — only the
+// top three ranks are visually escalated).
+const RANK_META = {
+  1: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  2: "bg-amber-50 text-amber-700 ring-amber-200",
+  3: "bg-rose-50 text-rose-700 ring-rose-200",
+};
+const RankBadge = ({ rank }) => {
+  if (!rank) return null;
+  const cls = RANK_META[rank] || "bg-slate-100 text-slate-600 ring-slate-200";
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${cls}`}>
+      L-{rank}
+    </span>
+  );
+};
+
+/*
+  Ranking is computed per LEAF CATEGORY, across every vendor-product
+  combination inside that category — not per product — within a SINGLE
+  quotation only (never across quotations). Priority: higher warrantyYears
+  first, then lower unitPrice. Array.sort is spec-stable, so equal
+  warranty+price ties fall back to insertion (bid) order for free. Returns a
+  Map of item._id -> rank (1-based), purely derived, never persisted.
+*/
+const computeCategoryRanks = (items = []) => {
+  const byCategory = new Map();
+  items.forEach((it) => {
+    const cId = idOf(it.categoryId) || it.categoryName;
+    const list = byCategory.get(cId) || [];
+    list.push(it);
+    byCategory.set(cId, list);
+  });
+  const rankMap = new Map();
+  byCategory.forEach((list) => {
+    const sorted = [...list].sort(
+      (a, b) =>
+        (Number(b.warrantyYears) || 0) - (Number(a.warrantyYears) || 0) ||
+        (Number(a.unitPrice) || 0) - (Number(b.unitPrice) || 0)
+    );
+    sorted.forEach((it, idx) => rankMap.set(idOf(it._id), idx + 1));
+  });
+  return rankMap;
+};
+
 const cardTitleCls = "text-xs font-bold uppercase tracking-wider text-slate-600";
 const fieldLabelCls = "text-xs font-bold uppercase tracking-wider text-slate-600";
 const backBtnCls =
@@ -51,10 +96,12 @@ const groupCatProductVendor = (items = []) => {
     const pId = idOf(it.productDefinitionId);
     if (!cat.products.has(pId)) cat.products.set(pId, { productDefinitionId: pId, productName: it.productName || "", vendors: [] });
     cat.products.get(pId).vendors.push({
+      itemId: idOf(it._id),
       vendorId: idOf(it.vendorId),
       vendorName: it.vendorName || "",
       quantity: it.quantity,
       unitPrice: it.unitPrice,
+      warrantyYears: it.warrantyYears,
       gstRate: it.gstRate,
       gstAmount: gstOf(it),
       lineTotal: totalOf(it),
@@ -63,12 +110,19 @@ const groupCatProductVendor = (items = []) => {
   return [...cats.values()].map((c) => ({ ...c, products: [...c.products.values()] }));
 };
 
+// Soft row background per rank (L-1/L-2/L-3 only — L-4+ stays default/hover).
+const RANK_ROW_BG = {
+  1: "bg-emerald-50",
+  2: "bg-orange-50",
+  3: "bg-rose-50",
+};
+
 /* one vendor offer line — same layout in review / details / view */
-const VendorLine = ({ v, selectable = false, checked = false, disabled = false, onToggle, won = false }) => (
+const VendorLine = ({ v, selectable = false, checked = false, disabled = false, onToggle, won = false, rank }) => (
   <div
     className={`flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg px-3 py-2 text-sm transition ${
-      won || checked ? "bg-emerald-50 ring-1 ring-inset ring-emerald-100" : "hover:bg-slate-50"
-    }`}
+      RANK_ROW_BG[rank] || "hover:bg-slate-50"
+    } ${won || checked ? "ring-1 ring-inset ring-emerald-300" : ""}`}
   >
     <span className="flex min-w-[150px] items-center gap-2 font-semibold text-slate-900">
       {selectable && (
@@ -85,10 +139,14 @@ const VendorLine = ({ v, selectable = false, checked = false, disabled = false, 
     </span>
     <span className="text-xs text-slate-600">Qty <span className="font-semibold text-slate-900 tabular-nums">{v.quantity}</span></span>
     <span className="text-xs text-slate-600">Unit price <span className="font-semibold text-slate-900 tabular-nums">{inr(v.unitPrice)}</span></span>
+    <span className="text-xs text-slate-600">
+      Warranty <span className="font-semibold text-slate-900 tabular-nums">{v.warrantyYears ? `${v.warrantyYears} yr${v.warrantyYears === 1 ? "" : "s"}` : "—"}</span>
+    </span>
     <span className="text-xs text-slate-600">GST <span className="font-semibold text-slate-900 tabular-nums">{v.gstRate}%</span></span>
     <span className="text-xs text-slate-600">GST ₹ <span className="font-semibold text-slate-900 tabular-nums">{inr(v.gstAmount)}</span></span>
-    <span className="ml-auto text-xs text-slate-600">
+    <span className="ml-auto flex items-center gap-2 text-xs text-slate-600">
       Total <span className="text-sm font-bold text-slate-900 tabular-nums">{inr(v.lineTotal)}</span>
+      <RankBadge rank={rank} />
     </span>
   </div>
 );
@@ -158,6 +216,7 @@ const Field = ({ label, value }) => (
 const ReviewMode = ({ quotation, onDone }) => {
   const router = useRouter();
   const categories = groupCatProductVendor(quotation.items);
+  const rankMap = computeCategoryRanks(quotation.items);
 
   const [decisions, setDecisions] = useState({});
   const [rowError, setRowError] = useState({});
@@ -246,7 +305,7 @@ const ReviewMode = ({ quotation, onDone }) => {
                     return (
                       <VendorLine
                         key={v.vendorId} v={v} selectable checked={!!checked}
-                        disabled={isLocked}
+                        disabled={isLocked} rank={rankMap.get(v.itemId)}
                         onToggle={() => pickVendor(cat.categoryId, p.productDefinitionId, v.vendorId)}
                       />
                     );
@@ -354,6 +413,11 @@ const ReviewMode = ({ quotation, onDone }) => {
         </div>
       </div>
 
+      <p className="mt-4 text-xs text-slate-500">
+        Pick one vendor per product. Rankings are calculated across all vendor-product combinations within the
+        selected leaf category, using Warranty first and Price second.
+      </p>
+
       {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
     </div>
   );
@@ -367,6 +431,7 @@ const DetailsMode = ({ quotation, backTo }) => {
   const router = useRouter();
   const items = quotation.items || [];
   const categories = groupCatProductVendor(items);
+  const rankMap = computeCategoryRanks(items);
   const [pathModal, setPathModal] = useState(null);
 
   const caByCat = new Map((quotation.categoryApprovals || []).map((ca) => [idOf(ca.categoryId) || ca.categoryName, ca]));
@@ -415,7 +480,10 @@ const DetailsMode = ({ quotation, backTo }) => {
               return (
                 <ProductBlock key={p.productDefinitionId} product={p} highlight={anyWon}>
                   {p.vendors.map((v) => (
-                    <VendorLine key={v.vendorId} v={v} won={approvedPairs.has(`${p.productDefinitionId}::${v.vendorId}`)} />
+                    <VendorLine
+                      key={v.vendorId} v={v} rank={rankMap.get(v.itemId)}
+                      won={approvedPairs.has(`${p.productDefinitionId}::${v.vendorId}`)}
+                    />
                   ))}
                 </ProductBlock>
               );
@@ -440,73 +508,6 @@ const DetailsMode = ({ quotation, backTo }) => {
           <p className="whitespace-pre-wrap text-sm text-slate-700">{quotation.notes}</p>
         </Card>
       ) : null}
-
-      {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
-    </div>
-  );
-};
-
-/* ================================================================= */
-/* View mode — decision result (read-only)                            */
-/* ================================================================= */
-
-const ViewMode = ({ quotation, backTo }) => {
-  const router = useRouter();
-  const approvals = quotation.categoryApprovals || [];
-  const [pathModal, setPathModal] = useState(null);
-
-  return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => router.push(backTo)} className={backBtnCls}>
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to list
-        </button>
-        <p className="text-base font-semibold tracking-tight text-slate-900">{quotation.quotationNumber}</p>
-        <span className="ml-auto"><StatusBadge status={quotation.status} /></span>
-      </div>
-
-      <Card title="Quotation information">
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Field label="Quotation No" value={quotation.quotationNumber} />
-          <Field label="Status" value={(STATUS_META[quotation.status] || STATUS_META.PENDING).label} />
-          <Field label="Created By" value={quotation.createdByName} />
-          <Field label="Categories" value={String(approvals.length)} />
-        </div>
-      </Card>
-
-      {approvals.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center">
-          <p className="text-sm font-medium text-slate-700">Still pending review</p>
-          <p className="mt-1 text-sm text-slate-400">Use “Details” to see everything that was quoted.</p>
-        </div>
-      ) : (
-        approvals.map((ca) => {
-          const approved = ca.status === "APPROVED";
-          return (
-            <CategoryCard
-              key={idOf(ca.categoryId) + ca.categoryName} categoryName={ca.categoryName}
-              statusLabel={approved ? "Approved" : "Rejected"} tone={approved ? "green" : "red"}
-              remarks={!approved ? ca.remarks || "No reason given" : ""} onPath={setPathModal}
-            >
-              {approved ? (
-                (ca.selections || []).map((s, i) => (
-                  <ProductBlock key={i} product={{ productName: s.productName }} highlight>
-                    <VendorLine
-                      won
-                      v={{
-                        vendorName: s.vendorName, quantity: s.quantity, unitPrice: s.unitPrice,
-                        gstRate: s.gstRate, gstAmount: s.gstAmount, lineTotal: s.lineTotal,
-                      }}
-                    />
-                  </ProductBlock>
-                ))
-              ) : (
-                <p className="text-sm text-slate-500">No product was approved for this category.</p>
-              )}
-            </CategoryCard>
-          );
-        })
-      )}
 
       {pathModal && <CategoryPathModal label={pathModal.label} path={pathModal.path} onClose={() => setPathModal(null)} />}
     </div>
@@ -555,17 +556,30 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
   const isDetails = mode === "details";
   const isViewMode = mode === "view";
   const showReview = !isViewMode && !isDetails && quotation.status === "PENDING";
-  const backTo = isViewMode || isDetails ? "/stock/quotations/list" : "/stock/quotations/approval";
+  // "View" is reached from two different origins (the Quotation List's View
+  // button, and the Quotation Approval list's View button for non-pending
+  // rows) that both land on the SAME /stock/quotations/[id]/view URL, so the
+  // origin has to travel as a ?from= query param — the Approval list appends
+  // it, the plain Quotation List doesn't, and Back returns to wherever the
+  // user actually came from instead of a hardcoded destination.
+  // Read the query param directly (rather than next/navigation's
+  // useSearchParams) so this client component doesn't force a Suspense
+  // boundary requirement onto its page.js at build time.
+  const cameFromApproval =
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("from") === "approval";
+  const backTo = isDetails
+    ? "/stock/quotations/list"
+    : isViewMode
+    ? (cameFromApproval ? "/stock/quotations/approval" : "/stock/quotations/list")
+    : "/stock/quotations/approval";
 
   return (
     <div className="min-h-screen bg-slate-50/60">
       <div className="mx-auto max-w-5xl p-6 pb-12">
-        {isDetails ? (
-          <DetailsMode quotation={quotation} backTo={backTo} />
-        ) : showReview ? (
+        {showReview ? (
           <ReviewMode quotation={quotation} onDone={load} />
         ) : (
-          <ViewMode quotation={quotation} backTo={backTo} />
+          <DetailsMode quotation={quotation} backTo={backTo} />
         )}
       </div>
     </div>

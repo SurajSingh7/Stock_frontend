@@ -295,7 +295,11 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
     .map((ap) => ({
       categoryId: ap.categoryId?._id || ap.categoryId,
       categoryName: ap.categoryId?.name || ap.categoryName || "",
-      products: (ap.productIds || []).map((p) => (typeof p === "object" ? p : { _id: p, name: "—" })),
+      products: (ap.products || []).map((p) => {
+        const productId = p.productId;
+        const product = typeof productId === "object" ? productId : { _id: productId, name: "—" };
+        return { ...product, warrantyYears: p.overrides?.warrantyYears ?? null };
+      }),
     }));
 
   return (
@@ -336,6 +340,7 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
                     g.products.map((p) => (
                       <span key={p._id} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                         {p.name}
+                        {p.warrantyYears ? ` · ${p.warrantyYears}yr` : ""}
                       </span>
                     ))
                   )}
@@ -746,7 +751,7 @@ const VendorsComp = () => {
             ) : (
               vendors.map((vendor) => {
                 const primaryContact = vendor.contacts?.find((c) => c.label === "PRIMARY") || vendor.contacts?.[0];
-                const productCount = (vendor.assignedProducts || []).reduce((sum, ap) => sum + (ap.productIds?.length || 0), 0);
+                const productCount = (vendor.assignedProducts || []).reduce((sum, ap) => sum + (ap.products?.length || 0), 0);
                 return (
                   <tr key={vendor._id} className="transition hover:bg-slate-50/60">
                     <td className="px-4 py-3.5">
