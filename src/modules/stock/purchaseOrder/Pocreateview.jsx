@@ -75,6 +75,9 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   // client-editable (see sanitizeForPreview comment above).
   const [termsContent, setTermsContent] = useState("");
   const [termsSource, setTermsSource] = useState("NONE"); // "VENDOR" | "DEFAULT" | "NONE"
+  // Manual fallback — only used (and only shown) when nothing auto-resolves.
+  const [activeTerms, setActiveTerms] = useState([]);
+  const [selectedTermsId, setSelectedTermsId] = useState("");
   const [notes, setNotes] = useState("");
   const [rows, setRows] = useState(
     (context.items || []).map((it) => ({ ...it, checked: true, reason: "" }))
@@ -150,6 +153,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
 
           // Auto-pick terms for this vendor: vendor-specific match, else the
           // single Default term. Read-only — see resolveForVendor on the backend.
+          let resolvedSource = "NONE";
           try {
             const termsRes = await fetch(`${API_BACKEND_URL}/stock/terms-conditions/resolve/${vendorId}`, {
               credentials: "include",
@@ -157,10 +161,26 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             const termsJson = await termsRes.json();
             if (termsRes.ok && termsJson.success) {
               setTermsContent(termsJson.data?.term?.termsContent || "");
-              setTermsSource(termsJson.data?.source || "NONE");
+              resolvedSource = termsJson.data?.source || "NONE";
+              setTermsSource(resolvedSource);
             }
           } catch {
             // non-fatal — PO creation still works with empty terms
+          }
+
+          // Nothing auto-resolved (no vendor-specific term, no Default term
+          // configured) — Terms & Conditions is mandatory, so the user must
+          // pick one by hand from the active templates.
+          if (resolvedSource === "NONE") {
+            try {
+              const listRes = await fetch(`${API_BACKEND_URL}/stock/terms-conditions?status=ACTIVE&limit=100`, {
+                credentials: "include",
+              });
+              const listJson = await listRes.json();
+              if (listRes.ok && listJson.success) setActiveTerms(listJson.data?.data || []);
+            } catch {
+              // non-fatal — the dropdown just stays empty; submit remains blocked
+            }
           }
         }
       } catch (err) {
@@ -213,6 +233,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
     if (!isEdit) {
       if (checked.length === 0) return setError("Select at least one item for the PO");
       if (unchecked.some((r) => !r.reason.trim())) return setError("Give a reason for every unchecked (skipped) item");
+      if (termsSource === "NONE" && !selectedTermsId) return setError("Terms & Conditions is required.");
     }
     setSaving(true);
     setError(null);
@@ -233,6 +254,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             quotationItemIds: checked.map((r) => r.quotationItemId),
             skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
             buyerEntity: entityPayload(), requester, poDate, shipmentPreference: shipment, notes,
+            termsConditionId: selectedTermsId || undefined,
           }),
         });
         const json = await res.json();
@@ -325,7 +347,11 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           </div>
           <div>
             <label className={labelCls}>PO date</label>
-            <input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} className={inputCls} />
+            <input
+              type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)}
+              disabled={!isEdit} className={inputCls}
+            />
+            {!isEdit && <p className="mt-1 text-xs text-slate-400">Always today&rsquo;s date &mdash; not editable.</p>}
           </div>
           <div>
             <label className={labelCls}>Shipment preference</label>
@@ -354,80 +380,88 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           )}
         </div>
 
-        <div className="divide-y divide-slate-100">
-          {rows.map((r) => {
-            const c = calc(r);
-            return (
-              <div key={String(r.quotationItemId)} className={`px-5 py-3.5 transition duration-200 ${!isEdit && !r.checked ? "bg-slate-50/60" : ""}`}>
-                <label className={`flex items-center gap-3 text-sm ${LOCK_CHECKBOX ? "cursor-default" : "cursor-pointer"}`}>
-                  {!isEdit && (
-                    <span className="inline-flex items-center gap-1.5">
-                      <input
-                        type="checkbox" checked={r.checked} onChange={() => toggle(r.quotationItemId)}
-                        disabled={LOCK_CHECKBOX}
-                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
-                      />
-                      {LOCK_CHECKBOX && <span className="text-slate-400" title="Locked — this item cannot be removed"><IconLock /></span>}
-                    </span>
-                  )}
-                  <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <span className={`font-semibold ${!isEdit && !r.checked ? "text-slate-400 line-through" : "text-slate-900"}`}>
-                      {r.productName}
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
-                      {r.categoryName}
-                    </span>
-                    <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                      <span>
-                        <span className="font-medium text-slate-700">Qty:</span> {r.quantity}
-                      </span>
-
-                      <span>
-                        <span className="font-medium text-slate-700">Unit Price:</span> {money(r.unitPrice)}
-                      </span>
-
-                      <span>
-                        <span className="font-medium text-slate-700">GST:</span> {r.gstRate}%
-                      </span>
-                    </div>
-                  </span>
-                </label>
-
-                {/* per-item price breakdown (display-only; server recomputes) */}
-                <div className="ml-7 mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs tabular-nums">
-                  <span className="text-slate-500">Taxable <span className="font-semibold text-slate-800">{money(c.base)}</span></span>
-                  {taxType === "CGST_SGST" ? (
-                    <>
-                      <span className="text-slate-500">CGST ({(Number(r.gstRate) / 2)}%) <span className="font-semibold text-slate-800">{money(c.cgst)}</span></span>
-                      <span className="text-slate-500">SGST ({(Number(r.gstRate) / 2)}%) <span className="font-semibold text-slate-800">{money(c.sgst)}</span></span>
-                    </>
-                  ) : taxType === "IGST" ? (
-                    <span className="text-slate-500">IGST ({r.gstRate}%) <span className="font-semibold text-slate-800">{money(c.igst)}</span></span>
-                  ) : (
-                    <span className="text-slate-500">GST ({r.gstRate}%) <span className="font-semibold text-slate-800">{money(c.gst)}</span></span>
-                  )}
-                  <span className="ml-auto text-slate-500">Total <span className="text-sm font-bold text-slate-900">{money(c.total)}</span></span>
-                </div>
-
-                {!LOCK_CHECKBOX && !isEdit && !r.checked && (
-                  <div className="ml-7 mt-2">
-                    <input
-                      value={r.reason} onChange={(e) => setReason(r.quotationItemId, e.target.value)}
-                      placeholder="Reason for skipping (required)"
-                      className="w-full rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-red-300 transition duration-200 focus:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-100"
-                    />
-                  </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {!isEdit && <th className="px-3 py-2.5 w-8"></th>}
+                <th className="px-3 py-2.5 w-10">Sr.</th>
+                <th className="px-3 py-2.5">Description</th>
+                <th className="px-3 py-2.5">Product</th>
+                <th className="px-3 py-2.5 text-right">Qty</th>
+                <th className="px-3 py-2.5 text-right">Basic Price</th>
+                {taxType === "CGST_SGST" ? (
+                  <>
+                    <th className="px-3 py-2.5 text-right">CGST</th>
+                    <th className="px-3 py-2.5 text-right">SGST</th>
+                  </>
+                ) : taxType === "IGST" ? (
+                  <th className="px-3 py-2.5 text-right">IGST</th>
+                ) : (
+                  <th className="px-3 py-2.5 text-right">GST</th>
                 )}
-              </div>
-            );
-          })}
+                <th className="px-3 py-2.5 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r, idx) => {
+                const c = calc(r);
+                const skipped = !isEdit && !r.checked;
+                return (
+                  <React.Fragment key={String(r.quotationItemId)}>
+                    <tr className={`transition duration-200 ${skipped ? "bg-slate-50/60" : ""}`}>
+                      {!isEdit && (
+                        <td className="px-3 py-2.5 align-top">
+                          <span className="inline-flex items-center gap-1">
+                            <input
+                              type="checkbox" checked={r.checked} onChange={() => toggle(r.quotationItemId)}
+                              disabled={LOCK_CHECKBOX}
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                            {LOCK_CHECKBOX && <span className="text-slate-400" title="Locked — this item cannot be removed"><IconLock /></span>}
+                          </span>
+                        </td>
+                      )}
+                      <td className="px-3 py-2.5 align-top tabular-nums text-slate-500">{idx + 1}</td>
+                      <td className={`px-3 py-2.5 align-top ${skipped ? "text-slate-400 line-through" : "text-slate-700"}`}>{r.categoryName}</td>
+                      <td className={`px-3 py-2.5 align-top font-medium ${skipped ? "text-slate-400 line-through" : "text-slate-900"}`}>{r.productName}</td>
+                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{r.quantity}</td>
+                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.base)}</td>
+                      {taxType === "CGST_SGST" ? (
+                        <>
+                          <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.cgst)}</td>
+                          <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.sgst)}</td>
+                        </>
+                      ) : taxType === "IGST" ? (
+                        <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.igst)}</td>
+                      ) : (
+                        <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.gst)}</td>
+                      )}
+                      <td className="px-3 py-2.5 align-top text-right tabular-nums font-semibold text-slate-900">{money(c.total)}</td>
+                    </tr>
+                    {!LOCK_CHECKBOX && !isEdit && !r.checked && (
+                      <tr>
+                        <td colSpan={9} className="px-3 pb-2.5">
+                          <input
+                            value={r.reason} onChange={(e) => setReason(r.quotationItemId, e.target.value)}
+                            placeholder="Reason for skipping (required)"
+                            className="w-full rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-red-300 transition duration-200 focus:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-100"
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
 
         {/* order summary — checked items only (display-only preview) */}
         <div className="rounded-b-2xl border-t-2 border-slate-200 bg-slate-50/70 px-5 py-4">
           <div className="ml-auto w-full max-w-xs space-y-1.5 text-sm tabular-nums">
             <div className="flex items-center justify-between text-slate-600">
-              <span>Taxable amount</span><span className="font-medium text-slate-800">{money(summary.base)}</span>
+              <span>Basic Price</span><span className="font-medium text-slate-800">{money(summary.base)}</span>
             </div>
             {taxType === "CGST_SGST" ? (
               <>
@@ -455,30 +489,71 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
         <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-700">Terms &amp; notes</p>
 
         <div className="mb-1.5 flex items-center justify-between">
-          <label className={labelCls}>Terms and conditions</label>
+          <label className={labelCls}>
+            Terms and conditions
+            {!isEdit && termsSource === "NONE" && <span className="ml-0.5 text-red-500">*</span>}
+          </label>
           <span
             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
               termsSource === "VENDOR"
                 ? "bg-indigo-50 text-indigo-700"
                 : termsSource === "DEFAULT"
                 ? "bg-amber-50 text-amber-700"
+                : termsSource === "MANUAL"
+                ? "bg-emerald-50 text-emerald-700"
                 : "bg-slate-100 text-slate-500"
             }`}
           >
-            {termsSource === "VENDOR" ? "Vendor-specific term" : termsSource === "DEFAULT" ? "Default term" : "No term configured"}
+            {termsSource === "VENDOR"
+              ? "Vendor-specific term"
+              : termsSource === "DEFAULT"
+              ? "Default term"
+              : termsSource === "MANUAL"
+              ? "Manually selected"
+              : "No term configured"}
           </span>
         </div>
-        {/* Read-only — auto-attached from the Terms & Conditions master, never editable here. */}
+
+        {!isEdit && termsSource === "NONE" ? (
+          <>
+            {/* No vendor-specific or Default term exists — Terms & Conditions
+                is mandatory, so a template must be picked by hand. */}
+            <select
+              value={selectedTermsId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setSelectedTermsId(id);
+                const picked = activeTerms.find((t) => String(t._id) === id);
+                setTermsContent(picked?.termsContent || "");
+                setTermsSource(picked ? "MANUAL" : "NONE");
+              }}
+              className={inputCls}
+            >
+              <option value="">Select a Terms &amp; Conditions template&hellip;</option>
+              {activeTerms.map((t) => (
+                <option key={t._id} value={t._id}>{t.termName}</option>
+              ))}
+            </select>
+            {activeTerms.length === 0 && (
+              <p className="mt-1.5 text-xs text-red-500">
+                No active Terms &amp; Conditions templates exist. Configure one in Master &rarr; Terms &amp; Conditions before generating this PO.
+              </p>
+            )}
+          </>
+        ) : null}
+
+        {/* Read-only preview — auto-attached (or, when nothing resolved, the
+            manually selected template above) — never typed here. */}
         {termsContent ? (
           <div
-            className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm leading-relaxed text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
+            className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm leading-relaxed text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
             dangerouslySetInnerHTML={{ __html: sanitizeForPreview(termsContent) }}
           />
-        ) : (
-          <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-400">
+        ) : (isEdit || termsSource !== "NONE") ? (
+          <p className="mt-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-400">
             No applicable or default Terms &amp; Conditions found. Configure one in Master &rarr; Terms &amp; Conditions.
           </p>
-        )}
+        ) : null}
 
         <label className={`${labelCls} mt-4`}>Notes (optional)</label>
         <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />

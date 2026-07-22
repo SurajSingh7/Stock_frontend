@@ -13,6 +13,7 @@ import {
   MoreVertical,
   FileText,
   PencilLine,
+  Download,
 } from "lucide-react";
 
 /* ============================================================= */
@@ -766,6 +767,12 @@ const PurchaseOrderPage = () => {
             className="ml-auto rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-medium text-indigo-600 shadow-sm transition hover:bg-indigo-50"
           >
             Open PDF
+          </a>
+          <a
+            href={pdfUrl} download={`PO-${view.poId}.pdf`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+          >
+            <Download className="h-3.5 w-3.5" /> Download PDF
           </a>
         </div>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
