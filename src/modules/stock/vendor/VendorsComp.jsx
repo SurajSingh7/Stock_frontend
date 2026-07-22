@@ -443,7 +443,7 @@ const RowMenu = ({ items }) => {
   const toggleOpen = () => {
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      setCoords({ top: rect.bottom + 6, left: rect.right - 160 });
+      setCoords({ top: rect.bottom + 41, left: rect.right + 159 });
     }
     setOpen((o) => !o);
   };
