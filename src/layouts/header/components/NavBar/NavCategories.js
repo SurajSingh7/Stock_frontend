@@ -6,6 +6,18 @@
 import { SHOW_DEV } from "@/config/getEnvVariables";
 
 export const navCategories = [
+   {
+    category: "Tracking Orders",
+    items: [
+      {
+        name: "track",
+        path: "/stock/tracking-orders",
+        moduleName: "tracking-orders",
+        url: "/stock/tracking-orders",
+        action: ["READ"],
+      },
+    ],
+  },
 
   {
     category: "Quotation",
@@ -19,18 +31,7 @@ export const navCategories = [
       },
     ],
   },
-    {
-    category: "Purchase Orders",
-    items: [
-      {
-        name: "Purchase Order(po)",
-        path: "/stock/purchase-orders",
-        moduleName: "Stock Field Definition",
-        url: "/stock/master/field-definition",
-        action: ["READ"],
-      },
-    ],
-  },
+  
   {
     category: "Vendor",
     items: [
@@ -55,6 +56,19 @@ export const navCategories = [
       },
     ],
   },
+  {
+    category: "Account",
+    items: [
+      {
+        name: "Po Approval",
+        path: "/stock/purchase-orders",
+        moduleName: "Stock purchase-orders",
+        url: "/stock/master/purchase-orders",
+        action: ["READ"],
+      },
+    ],
+  },
+  
   {
     category: "Master",
     items: [
@@ -84,6 +98,13 @@ export const navCategories = [
         path: "/master/terms-condition",
         moduleName: "Stock Terms Condition",
         url: "/stock/master/terms-condition",
+        action: ["READ"],
+      },
+      {
+        name: "Notification",
+        path: "/master/notification",
+        moduleName: "Stock Notification",
+        url: "/stock/master/notification",
         action: ["READ"],
       },
     ],

@@ -263,7 +263,9 @@ const ReviewMode = ({ quotation, onDone }) => {
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to submit");
-      onDone();
+      // Stay on Quotation Approval — go back to the list so it reloads
+      // (fresh list + tab counts), rather than navigating away to Tracking Orders.
+      router.push("/stock/quotations/approval");
     } catch (err) { setError(err.message); window.scrollTo({ top: 0, behavior: "smooth" }); } finally { setSubmitting(false); }
   };
 
