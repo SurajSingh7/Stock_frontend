@@ -34,7 +34,8 @@ const STATUS_META = {
   PO_PENDING: { label: "PO Pending", badge: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500", border: "border-l-orange-400" },
   PO_GENERATED: { label: "PO Generated", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", border: "border-l-sky-400" },
   PO_APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400" },
-  MATERIAL_PENDING: { label: "Material Pending", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500", border: "border-l-indigo-400" },
+  PO_SENT: { label: "PO Sent", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500", border: "border-l-indigo-400" },
+  MATERIAL_PENDING: { label: "Material Pending", badge: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500", border: "border-l-violet-400" },
   REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400" },
   NOT_REQUIRED: { label: "Not Required", badge: "bg-slate-100 text-slate-500 ring-slate-200", dot: "bg-slate-400", border: "border-l-slate-300" },
 };
@@ -45,12 +46,15 @@ const TAB_LIST = [
   { key: "PO_PENDING", label: "PO Pending" },
   { key: "PO_GENERATED", label: "PO Generated" },
   { key: "PO_APPROVED", label: "PO Approved" },
+  { key: "PO_SENT", label: "PO Sent" },
   { key: "MATERIAL_PENDING", label: "Material Pending" },
+  { key: "REJECTED", label: "PO Rejected" },
+  { key: "NOT_REQUIRED", label: "Not Required" },
 ];
 
 const DEFAULT_COUNTS = {
   ALL: 0, ENTITY_PENDING: 0, PO_PENDING: 0, PO_GENERATED: 0,
-  PO_APPROVED: 0, MATERIAL_PENDING: 0, REJECTED: 0, NOT_REQUIRED: 0,
+  PO_APPROVED: 0, PO_SENT: 0, MATERIAL_PENDING: 0, REJECTED: 0, NOT_REQUIRED: 0,
 };
 
 /* ============================================================= */

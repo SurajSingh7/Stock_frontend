@@ -7,17 +7,19 @@ export const STAGES = [
   { key: "PO_PENDING", label: "PO Pending" },
   { key: "PO_GENERATED", label: "PO Generated" },
   { key: "PO_APPROVED", label: "PO Approved" },
+  { key: "PO_SENT", label: "PO Sent" },
   { key: "MATERIAL_PENDING", label: "Material Pending" },
 ];
 
-// Tracking-order status -> stage index on the 5-node tracker above.
+// Tracking-order status -> stage index on the 6-node tracker above.
 export const stageIndexForStatus = (status) => {
   switch (status) {
     case "ENTITY_PENDING": return 0;
     case "PO_PENDING": return 1;
     case "PO_GENERATED": return 2;
     case "PO_APPROVED": return 3;
-    case "MATERIAL_PENDING": return 4;
+    case "PO_SENT": return 4;
+    case "MATERIAL_PENDING": return 5;
     default: return -1; // REJECTED / NOT_REQUIRED — off the happy path
   }
 };

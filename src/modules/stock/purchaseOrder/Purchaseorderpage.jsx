@@ -14,6 +14,7 @@ import {
   FileText,
   Download,
   Mail,
+  CheckCircle2,
 } from "lucide-react";
 import SendMailPopup from "./SendMailPopup";
 
@@ -80,6 +81,12 @@ const TAB_STYLES = {
     inactive: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100",
     chipActive: "bg-rose-500 text-rose-50",
     chipInactive: "bg-rose-100 text-rose-700",
+  },
+  SENT: {
+    active: "border-indigo-600 bg-indigo-600 text-white",
+    inactive: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+    chipActive: "bg-indigo-500 text-indigo-50",
+    chipInactive: "bg-indigo-100 text-indigo-700",
   },
 };
 
@@ -502,10 +509,10 @@ const buildRowActions = (row) => {
     inline.push({ type: "iconText", key: "view", label: "View PO", text: "PO", icon: Eye, tone: "indigo" });
   }
 
-  // PO status stays APPROVED even after mail is sent (see backend sendMail),
-  // so mailResult is what marks "already handled" here — otherwise the
-  // button would stay clickable forever and allow re-sending.
-  if (s === "APPROVED" && !row.mailResult?.mode) {
+  // APPROVED: only before the first send (mailResult unset) — status moves
+  // to SENT the moment mail goes out. SENT: always available, so the PO can
+  // be resent as many times as needed.
+  if ((s === "APPROVED" && !row.mailResult?.mode) || s === "SENT") {
     inline.push({ type: "icon", key: "sendMail", label: "Send Mail", icon: Mail, tone: "green" });
   }
 
@@ -555,7 +562,7 @@ const ActionBar = ({ row, on }) => {
 const PurchaseOrderPage = () => {
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
-  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
+  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
   const [entities, setEntities] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -602,7 +609,7 @@ const PurchaseOrderPage = () => {
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load board");
 
       setBoard(json.data?.board || []);
-      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
+      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
       setPagination(json.pagination || { total: 0, totalPages: 1 });
     } catch (e) {
       setError(e.message); setBoard([]);
@@ -752,6 +759,7 @@ const PurchaseOrderPage = () => {
     { key: "PO_PENDING", label: "PO Pending", count: counts.PO_PENDING },
     { key: "GENERATED", label: "PO Generated", count: counts.GENERATED },
     { key: "APPROVED", label: "PO Approved", count: counts.APPROVED },
+    { key: "SENT", label: "PO Sent", count: counts.SENT },
     { key: "REJECTED", label: "PO Rejected", count: counts.REJECTED },
   ];
 
@@ -891,8 +899,9 @@ const PurchaseOrderPage = () => {
                       <TruncateText text={row.entityAlias} title="Entity" />
                     </div>
                     <div className="col-span-3 flex flex-wrap items-center justify-end gap-1.5">
-                      {row.mailResult?.mode && (
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                      {row.status === "SENT" && row.mailResult?.mode && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                          <CheckCircle2 className="h-3 w-3" />
                           {row.mailResult.mode === "SENT" ? "Mail Sent" : "Manual"}
                         </span>
                       )}
