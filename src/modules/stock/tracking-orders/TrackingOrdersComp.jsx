@@ -6,7 +6,8 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 import StatusTracker, { stageIndexForStatus } from "./StatusTracker";
-import { RotateCcw, Search, ChevronDown, X, Phone, PlusCircle, Ban } from "lucide-react";
+import InvoiceReceiveView from "./InvoiceReceiveView";
+import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmt = (d) =>
@@ -29,15 +30,19 @@ const DateField = ({ label, value, onChange }) => (
   </div>
 );
 
+// `badge`/`dot` = soft ring style (filter dropdown, small chips).
+// `pill` = solid, colorful fill used on the card header — the punchy look.
 const STATUS_META = {
-  ENTITY_PENDING: { label: "Entity Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", border: "border-l-amber-400" },
-  PO_PENDING: { label: "PO Pending", badge: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500", border: "border-l-orange-400" },
-  PO_GENERATED: { label: "PO Generated", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", border: "border-l-sky-400" },
-  PO_APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400" },
-  PO_SENT: { label: "PO Sent", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500", border: "border-l-indigo-400" },
-  MATERIAL_PENDING: { label: "Material Pending", badge: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500", border: "border-l-violet-400" },
-  REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400" },
-  NOT_REQUIRED: { label: "Not Required", badge: "bg-slate-100 text-slate-500 ring-slate-200", dot: "bg-slate-400", border: "border-l-slate-300" },
+  ENTITY_PENDING: { label: "Entity Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", border: "border-l-amber-400", pill: "bg-amber-500 text-white" },
+  PO_PENDING: { label: "PO Pending", badge: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500", border: "border-l-orange-400", pill: "bg-orange-500 text-white" },
+  PO_GENERATED: { label: "PO Generated", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", border: "border-l-sky-400", pill: "bg-sky-500 text-white" },
+  PO_APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
+  PO_SENT: { label: "PO Sent", badge: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500", border: "border-l-orange-400", pill: "bg-orange-500 text-white" },
+  IN_PROGRESS: { label: "In Progress", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", border: "border-l-amber-400", pill: "bg-amber-500 text-white" },
+  PARTIAL: { label: "Partial", badge: "bg-yellow-50 text-yellow-700 ring-yellow-200", dot: "bg-yellow-500", border: "border-l-yellow-400", pill: "bg-yellow-500 text-white" },
+  COMPLETED: { label: "Completed", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
+  REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400", pill: "bg-rose-500 text-white" },
+  NOT_REQUIRED: { label: "Not Required", badge: "bg-slate-100 text-slate-500 ring-slate-200", dot: "bg-slate-400", border: "border-l-slate-300", pill: "bg-slate-400 text-white" },
 };
 
 const TAB_LIST = [
@@ -47,15 +52,22 @@ const TAB_LIST = [
   { key: "PO_GENERATED", label: "PO Generated" },
   { key: "PO_APPROVED", label: "PO Approved" },
   { key: "PO_SENT", label: "PO Sent" },
-  { key: "MATERIAL_PENDING", label: "Material Pending" },
+  { key: "IN_PROGRESS", label: "In Progress" },
+  { key: "PARTIAL", label: "Partial" },
+  { key: "COMPLETED", label: "Completed" },
   { key: "REJECTED", label: "PO Rejected" },
   { key: "NOT_REQUIRED", label: "Not Required" },
 ];
 
 const DEFAULT_COUNTS = {
   ALL: 0, ENTITY_PENDING: 0, PO_PENDING: 0, PO_GENERATED: 0,
-  PO_APPROVED: 0, PO_SENT: 0, MATERIAL_PENDING: 0, REJECTED: 0, NOT_REQUIRED: 0,
+  PO_APPROVED: 0, PO_SENT: 0, IN_PROGRESS: 0, PARTIAL: 0, COMPLETED: 0, REJECTED: 0, NOT_REQUIRED: 0,
 };
+
+// Add Items only while there's still something to receive.
+const RECEIVABLE_STATUSES = new Set(["PO_SENT", "IN_PROGRESS", "PARTIAL"]);
+// Overall Summary / Invoices are meaningful once the PO has been sent.
+const RECEIVING_FLOW_STATUSES = new Set(["PO_SENT", "IN_PROGRESS", "PARTIAL", "COMPLETED"]);
 
 /* ============================================================= */
 /* Searchable status filter — same pattern as the PO Approval     */
@@ -336,11 +348,407 @@ const NotRequiredPopup = ({ row, onClose, onDone }) => {
   );
 };
 
+const StatCard = ({ label, value, valueCls = "text-slate-900" }) => (
+  <div className="rounded-xl bg-slate-50 px-4 py-3 text-center">
+    <p className={`text-2xl font-bold tabular-nums ${valueCls}`}>{value}</p>
+    <p className="mt-1 text-xs font-semibold text-slate-500">{label}</p>
+  </div>
+);
+
+const StatusLine = ({ dot, label, count, pct }) => (
+  <div className="flex items-center justify-between border-b border-slate-100 py-2 text-sm last:border-b-0">
+    <span className="inline-flex items-center gap-2 text-slate-700">
+      <span className={`h-2.5 w-2.5 rounded-full ${dot}`} /> {label}
+    </span>
+    <span className="font-semibold tabular-nums text-slate-900">{count} <span className="font-normal text-slate-400">({pct}%)</span></span>
+  </div>
+);
+
+const OverallSummaryPopup = ({ row, invoices, onClose }) => {
+  const orderedQty = row.totalQuantity;
+  const receivedQty = row.receivedQuantity ?? 0;
+  const pendingQty = row.pendingQuantity ?? Math.max(0, orderedQty - receivedQty);
+
+  const invoiceQty = { APPROVED: 0, PENDING: 0, REJECTED: 0 };
+  (invoices || []).forEach((inv) => {
+    if (invoiceQty[inv.status] !== undefined) invoiceQty[inv.status] += inv.qtyReceived || 0;
+  });
+  const pctOf = (n) => (orderedQty > 0 ? Math.round((n / orderedQty) * 100) : 0);
+
+  return (
+    <Modal onClose={onClose} title={`Overall Summary - ${row.poNumber || row.vendorName}`} maxWidth="max-w-md">
+      <div className="mb-5 grid grid-cols-3 gap-3">
+        <StatCard label="Total Ordered Qty" value={orderedQty} />
+        <StatCard label="Total Received Qty" value={receivedQty} valueCls="text-emerald-600" />
+        <StatCard label="Total Pending Qty" value={pendingQty} valueCls="text-amber-600" />
+      </div>
+
+      <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-500">By Status</p>
+      <StatusLine dot="bg-emerald-500" label="Approved" count={invoiceQty.APPROVED} pct={pctOf(invoiceQty.APPROVED)} />
+      <StatusLine dot="bg-amber-500" label="Pending" count={invoiceQty.PENDING} pct={pctOf(invoiceQty.PENDING)} />
+      <StatusLine dot="bg-rose-500" label="Rejected" count={invoiceQty.REJECTED} pct={pctOf(invoiceQty.REJECTED)} />
+
+      <div className="mt-2 flex items-center justify-between border-t-2 border-slate-200 pt-2.5 text-sm">
+        <span className="font-bold text-slate-900">Total</span>
+        <span className="font-bold tabular-nums text-slate-900">{orderedQty} (100%)</span>
+      </div>
+    </Modal>
+  );
+};
+
+const INVOICE_STATUS_META = {
+  PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
+  APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
+  REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
+};
+
+const InvoiceStatusBadge = ({ status }) => {
+  const m = INVOICE_STATUS_META[status] || {};
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${m.dot || "bg-slate-400"}`} />
+      {m.label || status}
+    </span>
+  );
+};
+
+const InvoiceDetailPopup = ({ invoice, onClose }) => {
+  const itemTh = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
+  const itemThRight = `${itemTh} text-right`;
+  const itemTd = "px-3 py-2 text-sm text-slate-700";
+  const itemTdRight = `${itemTd} text-right tabular-nums`;
+  return (
+    <Modal onClose={onClose} title={`Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
+      <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{fmt(invoice.invoiceDate)}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Amount</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{money(invoice.amount)}</p>
+        </div>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
+          <div className="mt-1"><InvoiceStatusBadge status={invoice.status} /></div>
+        </div>
+        {invoice.invoiceFile && (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Attachment</p>
+            <a href={`${API_BACKEND_URL.replace(/\/api\/v1$/, "")}${invoice.invoiceFile}`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-medium text-indigo-600 hover:underline">
+              View file
+            </a>
+          </div>
+        )}
+      </div>
+      {invoice.status === "REJECTED" && invoice.rejectedReason && (
+        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          Rejected: {invoice.rejectedReason}
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-xl border border-slate-100">
+        <table className="w-full min-w-full border-collapse">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className={itemTh}>Product</th>
+              <th className={itemThRight}>Qty Received</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {(invoice.lines || []).map((l, i) => (
+              <tr key={i}>
+                <td className={`${itemTd} font-medium text-slate-900`}>{l.productName}</td>
+                <td className={itemTdRight}>{l.receivedQuantity}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {invoice.extraCharges?.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Extra Charges</p>
+          <ul className="space-y-1 text-sm text-slate-700">
+            {invoice.extraCharges.map((c, i) => (
+              <li key={i} className="flex justify-between"><span>{c.note || "—"}</span><span className="tabular-nums">{money(c.amount)}</span></li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+/* Embedded (non-modal) invoice table — rendered directly inside the         */
+/* Tracking Order card so approval status/qty is visible without a click.    */
+const invTh = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
+const invThRight = `${invTh} text-right`;
+const invTd = "px-3 py-2.5 text-sm text-slate-700";
+const invTdRight = `${invTd} text-right tabular-nums`;
+
+// Dot + plain-text approval indicator (no pill background) — used inline in
+// the invoice table, matching the approved reference look.
+const APPROVAL_DOT_META = {
+  PENDING: { label: "Pending", dot: "bg-amber-500", text: "text-slate-700" },
+  APPROVED: { label: "Approved", dot: "bg-emerald-500", text: "text-slate-700" },
+  REJECTED: { label: "Rejected", dot: "bg-rose-500", text: "text-slate-700" },
+};
+const ApprovalDot = ({ status }) => {
+  const m = APPROVAL_DOT_META[status] || {};
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${m.text || "text-slate-700"}`}>
+      <span className={`h-2 w-2 rounded-full ${m.dot || "bg-slate-400"}`} />
+      {m.label || status}
+    </span>
+  );
+};
+
+// Items cell — "Product (qty), Product (qty)" plus a small "N Items" tag.
+const ItemsCell = ({ lines }) => {
+  const list = lines || [];
+  const summary = list.map((l) => `${l.productName} (${l.receivedQuantity})`).join(", ");
+  return (
+    <div className="max-w-[240px]">
+      <p className="truncate text-sm text-slate-700">{summary || "—"}</p>
+      <span className="mt-0.5 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+        {list.length} Item{list.length === 1 ? "" : "s"}
+      </span>
+    </div>
+  );
+};
+
+// Small icon-button row menu: Eye = View (direct), kebab = More (Edit when rejected).
+const RowActionMenu = ({ invoice, onView, onEdit }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <button
+        type="button" onClick={() => onView(invoice)} title="View"
+        className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600"
+      >
+        <Eye className="h-3.5 w-3.5" />
+      </button>
+      {invoice.status === "REJECTED" && (
+        <div className="relative" ref={ref}>
+          <button
+            type="button" onClick={() => setOpen((o) => !o)} title="More"
+            className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            <MoreVertical className="h-3.5 w-3.5" />
+          </button>
+          {open && (
+            <div className="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+              <button
+                type="button" onClick={() => { setOpen(false); onEdit(invoice); }}
+                className="block w-full px-3 py-1.5 text-left text-xs font-medium text-orange-600 hover:bg-orange-50"
+              >
+                Edit
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const InvoiceTableBlock = ({ invoices, loading, orderedQty, onView, onEdit }) => {
+  if (loading) {
+    return <div className="h-16 animate-pulse rounded-xl bg-slate-100" />;
+  }
+  if (invoices.length === 0) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+        <Info className="h-4 w-4 shrink-0" /> No invoice has been added yet.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-100">
+      <table className="w-full min-w-full border-collapse">
+        <thead className="bg-slate-50">
+          <tr>
+            <th className={invTh}>Invoice No</th>
+            <th className={invTh}>Invoice Date</th>
+            <th className={invTh}>Items</th>
+            <th className={invThRight}>Qty (This Inv.)</th>
+            <th className={invThRight}>Amount</th>
+            <th className={invTh}>Approval Status</th>
+            <th className={invThRight}>Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {invoices.map((inv) => {
+            const pct = orderedQty > 0 ? Math.round(((inv.qtyReceived || 0) / orderedQty) * 100) : 0;
+            return (
+              <tr key={inv._id} className="transition hover:bg-slate-50/60">
+                <td className={`${invTd} font-semibold text-indigo-600`}>{inv.invoiceNumber}</td>
+                <td className={invTd}>{fmt(inv.invoiceDate)}</td>
+                <td className={invTd}><ItemsCell lines={inv.lines} /></td>
+                <td className={invTdRight}>{inv.qtyReceived} <span className="text-slate-400">({pct}%)</span></td>
+                <td className={invTdRight}>{money(inv.amount)}</td>
+                <td className={invTd}><ApprovalDot status={inv.status} /></td>
+                <td className={invTdRight}>
+                  <RowActionMenu invoice={inv} onView={onView} onEdit={onEdit} />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+/* ============================================================= */
+/* Tracking Order card — one per vendor row, PO Number/Status      */
+/* header, summary strip, and (once a PO exists) an embedded       */
+/* invoice table — matches the approved card layout.               */
+/* ============================================================= */
+
+// Bold black label + colon, plain value — matches the approved card layout.
+const SummaryField = ({ label, value, valueCls = "text-slate-900" }) => (
+  <div className="flex items-baseline gap-1.5 text-sm">
+    <span className="font-bold text-slate-900">{label} :</span>
+    <span className={`font-medium tabular-nums ${valueCls}`}>{value}</span>
+  </div>
+);
+
+const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onAddItems, onEditInvoice, onHoverStage }) => {
+  const m = STATUS_META[row.status] || {};
+  const isReceivingFlow = RECEIVING_FLOW_STATUSES.has(row.status);
+  const hasPo = !!row.poNumber;
+
+  const [invoices, setInvoices] = useState([]);
+  const [invLoading, setInvLoading] = useState(false);
+  const [popup, setPopup] = useState(null); // { type: "products" | "overallSummary" | "viewInvoice", ... }
+
+  const loadInvoices = useCallback(async () => {
+    if (!isReceivingFlow) return;
+    setInvLoading(true);
+    try {
+      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/board?trackingOrderId=${row.trackingOrderId}&limit=200`, { credentials: "include" });
+      const json = await res.json();
+      if (res.ok && json.success) setInvoices(json.data?.rows || []);
+    } catch {
+      // non-fatal — the card just shows "no invoices yet"
+    } finally {
+      setInvLoading(false);
+    }
+  }, [row.trackingOrderId, isReceivingFlow]);
+
+  useEffect(() => { loadInvoices(); }, [loadInvoices, refreshSignal]);
+
+  return (
+    <div
+      onMouseEnter={() => onHoverStage(stageIndexForStatus(row.status))}
+      onMouseLeave={() => onHoverStage(null)}
+      className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm border-t-4 ${m.border ? m.border.replace("border-l-", "border-t-") : "border-t-slate-200"}`}
+    >
+      {/* Header — PO Number + Status (left), action buttons (right) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-5 py-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{quotationNumber}</span>
+          <span className="text-base font-bold text-slate-900">PO Number : <span className="font-semibold text-slate-900">{row.poNumber || "—"}</span></span>
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide shadow-sm ${m.pill || "bg-slate-400 text-white"}`}>
+            <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+            {m.label || row.status}
+          </span>
+          {row.mailResult?.mode && (
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+              {row.mailResult.mode === "SENT" ? "Mail Sent (ERP)" : "Mail Sent (Manual)"}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {row.status === "ENTITY_PENDING" && (
+            <button
+              type="button" onClick={() => onAddEntity(row)}
+              className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
+            >
+              <PlusCircle className="h-3.5 w-3.5" /> Add Entity
+            </button>
+          )}
+          {(row.status === "ENTITY_PENDING" || row.status === "PO_PENDING") && (
+            <button
+              type="button" onClick={() => onNotRequired(row)}
+              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+            >
+              <Ban className="h-3.5 w-3.5" /> Not Required
+            </button>
+          )}
+          {isReceivingFlow && (
+            <button
+              type="button" onClick={() => setPopup({ type: "overallSummary" })}
+              className="inline-flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-600 shadow-sm transition hover:border-blue-400 hover:bg-blue-50"
+            >
+              <ClipboardList className="h-3.5 w-3.5" /> Overall Summary
+            </button>
+          )}
+          {RECEIVABLE_STATUSES.has(row.status) && (
+            <button
+              type="button" onClick={() => onAddItems(row)}
+              className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500"
+            >
+              <PlusCircle className="h-3.5 w-3.5" /> Add Items
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Summary strip */}
+      <div className="grid grid-cols-1 gap-x-8 gap-y-3 bg-slate-50/60 px-5 py-4 sm:grid-cols-3">
+        <SummaryField label="PO Date" value={hasPo ? fmt(row.poDate) : "—"} />
+        <SummaryField label="Vendor" value={row.vendorName} />
+        <SummaryField
+          label="Total Amount"
+          value={
+            <button type="button" onClick={() => setPopup({ type: "products" })} className="hover:underline">
+              {money(row.totalAmount)} <span className="font-normal text-slate-400">({row.items.length} item{row.items.length > 1 ? "s" : ""})</span>
+            </button>
+          }
+        />
+        {hasPo && (
+          <>
+            <SummaryField label="Total Ordered Qty" value={row.totalQuantity} />
+            <SummaryField label="Received Qty" value={row.receivedQuantity ?? 0} valueCls="text-emerald-700" />
+            <SummaryField label="Pending Qty" value={row.pendingQuantity ?? Math.max(0, row.totalQuantity - (row.receivedQuantity || 0))} valueCls="text-amber-700" />
+          </>
+        )}
+      </div>
+
+      {/* Invoice table — only once the receiving flow has started */}
+      {isReceivingFlow && (
+        <div className="border-t border-slate-100 px-5 py-4">
+          <InvoiceTableBlock
+            invoices={invoices}
+            loading={invLoading}
+            orderedQty={row.totalQuantity}
+            onView={(inv) => setPopup({ type: "viewInvoice", invoice: inv })}
+            onEdit={(inv) => onEditInvoice(row, inv)}
+          />
+        </div>
+      )}
+
+      {popup?.type === "products" && <ProductsPopup row={row} onClose={() => setPopup(null)} />}
+      {popup?.type === "overallSummary" && <OverallSummaryPopup row={row} invoices={invoices} onClose={() => setPopup(null)} />}
+      {popup?.type === "viewInvoice" && <InvoiceDetailPopup invoice={popup.invoice} onClose={() => setPopup(null)} />}
+    </div>
+  );
+};
+
 /* ============================================================= */
 /* Main                                                           */
 /* ============================================================= */
 
 const TrackingOrdersComp = () => {
+  const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -356,6 +764,7 @@ const TrackingOrdersComp = () => {
   const [limit, setLimit] = useState(10);
   const [pagination, setPagination] = useState({ total: 0, totalPages: 1 });
   const [counts, setCounts] = useState(DEFAULT_COUNTS);
+  const [boardVersion, setBoardVersion] = useState(0);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedSearch(search), 350);
@@ -389,15 +798,39 @@ const TrackingOrdersComp = () => {
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
 
-  const refresh = () => { loadBoard(); setPopup(null); };
+  const refresh = () => { loadBoard(); setPopup(null); setBoardVersion((v) => v + 1); };
   const hasActiveFilters = !!search || !!status || !!dateFrom || !!dateTo;
   const clearFilters = () => { setSearch(""); setStatus(""); setDateFrom(""); setDateTo(""); setPage(1); };
+
+  const backToBoard = () => { setView({ mode: "board" }); loadBoard(); setBoardVersion((v) => v + 1); };
+
+  if (view.mode === "receiveInvoice") {
+    return (
+      <InvoiceReceiveView
+        mode="create"
+        trackingOrderId={view.row.trackingOrderId}
+        onBack={backToBoard}
+        onDone={backToBoard}
+      />
+    );
+  }
+  if (view.mode === "editInvoice") {
+    return (
+      <InvoiceReceiveView
+        mode="edit"
+        trackingOrderId={view.row.trackingOrderId}
+        invoice={view.invoice}
+        onBack={backToBoard}
+        onDone={backToBoard}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Tracking Orders</h1>
-        <p className="mt-0.5 text-sm text-slate-600">Follow every vendor order from entity assignment through to material pending.</p>
+        <p className="mt-0.5 text-sm text-slate-600">Follow every vendor order from entity assignment through goods receiving to completion.</p>
       </div>
 
       <StatusTracker activeStage={hoveredStage} />
@@ -446,94 +879,21 @@ const TrackingOrdersComp = () => {
         </div>
       ) : (
         <div className="space-y-5">
-          {board.map((q) => (
-            <div key={q.sourceQuotationId} className="overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-t-2xl border-b border-slate-100 bg-slate-50/60 px-5 py-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Quotation No:</span>
-                  <span className="text-sm font-semibold text-indigo-600">{q.quotationNumber}</span>
-                  <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 ring-1 ring-inset ring-indigo-100">
-                    {q.vendorCount} vendor{q.vendorCount > 1 ? "s" : ""}
-                  </span>
-                </div>
-                <span className="text-xs font-bold text-slate-600">
-                  Approved: <span className="font-medium text-slate-900">{fmt(q.quotationApprovalDate)}</span>
-                </span>
-              </div>
-
-              <div className="hidden grid-cols-12 gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-700 lg:grid">
-                <span className="col-span-2">Vendor</span>
-                <span className="col-span-2">PO No</span>
-                <span className="col-span-1">Products</span>
-                <span className="col-span-1 text-right">Total</span>
-                <span className="col-span-1 text-right">Qty</span>
-                <span className="col-span-2">Status</span>
-                <span className="col-span-1">Entity</span>
-                <span className="col-span-2 text-right">Actions</span>
-              </div>
-
-              {q.rows.map((row) => {
-                const m = STATUS_META[row.status] || {};
-                const stage = stageIndexForStatus(row.status);
-                return (
-                  <div
-                    key={row.vendorId}
-                    onMouseEnter={() => setHoveredStage(stage)}
-                    onMouseLeave={() => setHoveredStage(null)}
-                    className={`grid grid-cols-1 gap-2 border-t border-slate-100 border-l-4 ${m.border || "border-l-slate-200"} px-5 py-3.5 transition hover:bg-slate-50/50 lg:grid-cols-12 lg:items-center`}
-                  >
-                    <div className="col-span-2 min-w-0">
-                      <p className="truncate text-sm font-medium text-slate-900">{row.vendorName}</p>
-                      <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-slate-500">
-                        <Phone className="h-3 w-3" /> {row.phone || "—"}
-                      </p>
-                    </div>
-                    <div className="col-span-2 truncate text-sm font-medium text-indigo-600">{row.poNumber || "—"}</div>
-                    <div className="col-span-1">
-                      <button
-                        type="button" onClick={() => setPopup({ type: "products", row })}
-                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-                      >
-                        {row.items.length} item{row.items.length > 1 ? "s" : ""} <ChevronDown className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <div className="col-span-1 text-sm font-semibold text-slate-900 tabular-nums lg:text-right">{money(row.totalAmount)}</div>
-                    <div className="col-span-1 text-sm text-slate-700 tabular-nums lg:text-right">{row.totalQuantity}</div>
-                    <div className="col-span-2">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${m.dot || "bg-slate-400"}`} />
-                        {m.label || row.status}
-                      </span>
-                    </div>
-                    <div className="col-span-1 truncate text-sm font-medium text-slate-700">{row.entityAlias || "—"}</div>
-                    <div className="col-span-2 flex flex-wrap items-center justify-end gap-1.5">
-                      {row.status === "ENTITY_PENDING" && (
-                        <button
-                          type="button" onClick={() => setPopup({ type: "addEntity", row })}
-                          className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs font-medium text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
-                        >
-                          <PlusCircle className="h-3.5 w-3.5" /> Add Entity
-                        </button>
-                      )}
-                      {(row.status === "ENTITY_PENDING" || row.status === "PO_PENDING") && (
-                        <button
-                          type="button" onClick={() => setPopup({ type: "notRequired", row })}
-                          className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-medium text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
-                        >
-                          <Ban className="h-3.5 w-3.5" /> Not Required
-                        </button>
-                      )}
-                      {row.mailResult?.mode && (
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
-                          {row.mailResult.mode === "SENT" ? "Mail Sent (ERP)" : "Mail Sent (Manual)"}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+          {board.map((q) =>
+            q.rows.map((row) => (
+              <TrackingOrderCard
+                key={row.trackingOrderId}
+                quotationNumber={q.quotationNumber}
+                row={row}
+                refreshSignal={boardVersion}
+                onAddEntity={(r) => setPopup({ type: "addEntity", row: r })}
+                onNotRequired={(r) => setPopup({ type: "notRequired", row: r })}
+                onAddItems={(r) => setView({ mode: "receiveInvoice", row: r })}
+                onEditInvoice={(r, invoice) => setView({ mode: "editInvoice", row: r, invoice })}
+                onHoverStage={setHoveredStage}
+              />
+            ))
+          )}
         </div>
       )}
 
@@ -552,7 +912,6 @@ const TrackingOrdersComp = () => {
         </div>
       )}
 
-      {popup?.type === "products" && <ProductsPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "addEntity" && <AddEntityPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
       {popup?.type === "notRequired" && <NotRequiredPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
     </div>

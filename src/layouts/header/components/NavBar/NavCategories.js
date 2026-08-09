@@ -66,9 +66,36 @@ export const navCategories = [
         url: "/stock/master/purchase-orders",
         action: ["READ"],
       },
+      {
+        name: "Invoice Approval",
+        path: "/stock/invoice-approval",
+        moduleName: "Stock Invoice Approval",
+        url: "/stock/invoice-approval",
+        action: ["READ"],
+      },
     ],
   },
-  
+
+  {
+    category: "Inventory",
+    items: [
+      {
+        name: "Product Inventory",
+        path: "/stock/product-inventory",
+        moduleName: "Stock Product Inventory",
+        url: "/stock/product-inventory",
+        action: ["READ"],
+      },
+      {
+        name: "Item Inventory",
+        path: "/stock/item-inventory",
+        moduleName: "Stock Item Inventory",
+        url: "/stock/item-inventory",
+        action: ["READ"],
+      },
+    ],
+  },
+
   {
     category: "Master",
     items: [
@@ -105,6 +132,13 @@ export const navCategories = [
         path: "/master/notification",
         moduleName: "Stock Notification",
         url: "/stock/master/notification",
+        action: ["READ"],
+      },
+      {
+        name: "Warehouses",
+        path: "/master/warehouse",
+        moduleName: "Stock Warehouse",
+        url: "/master/warehouse",
         action: ["READ"],
       },
     ],

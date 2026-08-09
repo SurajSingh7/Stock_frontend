@@ -42,6 +42,7 @@ const EMPTY_FORM = {
   optionsSource: '',
   isRequired: false,
   isFilterable: false,
+  showList: false,
   order: 0,
 };
 
@@ -63,6 +64,7 @@ const FIELD_TABLE_COLUMNS = [
   { key: 'optionsSource', label: 'Options source', show: true, render: (item) => <TruncatedText label="Options source" value={item.optionsSource} className="text-slate-400" mono /> },
   { key: 'isRequired', label: 'Required', show: true, render: (item) => <BooleanDot value={item.isRequired} /> },
   // { key: 'isFilterable', label: 'Filterable', show: true, render: (item) => <BooleanDot value={item.isFilterable} /> },
+  { key: 'showList', label: 'Show in list', show: true, render: (item) => <BooleanDot value={item.showList} /> },
   { key: 'isActive', label: 'Status', show: true, render: (item) => <StatusBadge isActive={item.isActive} /> },
   { key: 'actions', label: 'Action', show: true, render: null }, // rendered separately (icon buttons)
 ];
@@ -142,6 +144,7 @@ const mapFieldDefinitionResponse = (item) => ({
   optionsSource: item.optionsSource || '',
   isRequired: !!item.isRequired,
   isFilterable: !!item.isFilterable,
+  showList: !!item.showList,
   isActive: item.isActive !== false,
   order: item.order ?? 0,
 });
@@ -215,6 +218,11 @@ const Icon = {
   filter: (
     <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
       <path d="M3 4.5h14L11.5 10.8V16l-3-1.6v-3.6L3 4.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  ),
+  list: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
+      <path d="M6.5 5.5h10M6.5 10h10M6.5 14.5h10M3.5 5.5h.01M3.5 10h.01M3.5 14.5h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
 };
@@ -706,7 +714,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           </Field>
         )}
 
-        {/* Row 3 — Required + Filterable (colorful premium toggle cards) */}
+        {/* Row 3 — Required + Filterable + Show in list (colorful premium toggle cards) */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <ToggleCard
             label="Required"
@@ -725,6 +733,15 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             disabled={isView}
             color="violet"
             icon={Icon.filter}
+          />
+          <ToggleCard
+            label="Show in list"
+            hint="Renders as a column on the Item Inventory list."
+            checked={formData.showList}
+            onChange={(value) => onChange('showList', value)}
+            disabled={isView}
+            color="indigo"
+            icon={Icon.list}
           />
         </div>
 
@@ -838,6 +855,7 @@ const FieldDefinition = () => {
       optionsSource: item.optionsSource,
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
+      showList: item.showList,
       order: item.order ?? 0,
     });
     setFormErrors({});
@@ -853,6 +871,7 @@ const FieldDefinition = () => {
       optionsSource: item.optionsSource,
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
+      showList: item.showList,
       order: item.order ?? 0,
     });
     setFormErrors({});
@@ -903,6 +922,7 @@ const FieldDefinition = () => {
         optionsSource: isDropdownType(formData.inputType) ? formData.optionsSource.trim() : null,
         isRequired: formData.isRequired,
         isFilterable: formData.isFilterable,
+        showList: formData.showList,
         order: formData.order === '' ? 0 : Number(formData.order),
       };
 
