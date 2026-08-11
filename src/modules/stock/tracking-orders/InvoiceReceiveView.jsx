@@ -82,7 +82,31 @@ function buildInvoiceFormData(payload, file) {
   return formData;
 }
 
-const emptyLineState = () => ({ rows: [], quantity: "", rating: { rating: null, notes: "" } });
+const emptyLineState = () => ({
+  rows: [],
+  quantity: "",
+  focEnabled: true,
+  focQuantity: "",
+  rating: { rating: null, notes: "" },
+});
+
+// Per-unit Basic/CGST/SGST/IGST/Total breakdown for the active PO line —
+// purely a display computation, derived from the PO's own snapshot
+// (unitPrice/gstRate/taxType), no backend round-trip needed.
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+const unitPriceBreakdown = (poLine, taxType) => {
+  const basic = Number(poLine?.unitPrice) || 0;
+  const gstRate = Number(poLine?.gstRate) || 0;
+  let cgst = 0, sgst = 0, igst = 0;
+  if (taxType === "IGST") {
+    igst = round2((basic * gstRate) / 100);
+  } else {
+    cgst = round2((basic * gstRate) / 200);
+    sgst = cgst;
+  }
+  const total = round2(basic + cgst + sgst + igst);
+  return { basic, cgst, sgst, igst, total };
+};
 
 /* ============================================================= */
 /* Rating popup                                                   */
@@ -160,13 +184,56 @@ const DynamicFieldInput = ({ fieldDef, value, onChange }) => {
 /* Product tab body                                                */
 /* ============================================================= */
 
-const ProductTab = ({ poLine, productDef, lineState, onLineChange, alreadyReceived, onOpenRating }) => {
+// Small on/off pill switch — used for the FOC toggle.
+const ToggleSwitch = ({ checked, onChange, label }) => (
+  <button
+    type="button" onClick={() => onChange(!checked)}
+    className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700"
+  >
+    <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${checked ? "bg-blue-600" : "bg-slate-300"}`}>
+      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition ${checked ? "translate-x-4.5" : "translate-x-1"}`} />
+    </span>
+    {label}
+  </button>
+);
+
+const UnitStat = ({ label, value }) => (
+  <div className="rounded-lg bg-slate-50 px-3 py-2 text-center">
+    <p className="text-sm font-bold tabular-nums text-slate-900">₹{value.toLocaleString("en-IN")}</p>
+    <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+  </div>
+);
+
+// Basic/CGST/SGST/IGST/Total-per-unit strip — shown above the Add Rows /
+// Quantity controls so accounts can see the unit economics while receiving.
+const UnitPriceSummary = ({ poLine, taxType }) => {
+  const b = unitPriceBreakdown(poLine, taxType);
+  return (
+    <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
+      <UnitStat label="Basic / Unit" value={b.basic} />
+      {taxType === "IGST" ? (
+        <UnitStat label="IGST / Unit" value={b.igst} />
+      ) : (
+        <>
+          <UnitStat label="CGST / Unit" value={b.cgst} />
+          <UnitStat label="SGST / Unit" value={b.sgst} />
+        </>
+      )}
+      <UnitStat label="Total / Unit" value={b.total} />
+    </div>
+  );
+};
+
+const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alreadyReceived, onOpenRating }) => {
   const isIndividual = productDef?.trackingMethod === "individual";
   const orderedQty = poLine.quantity;
   const usedByOthers = alreadyReceived || 0;
-  const receivedNow = isIndividual ? lineState.rows.length : Number(lineState.quantity || 0);
+  const paidRows = lineState.rows.filter((r) => !r.isFoc);
+  const focRows = lineState.rows.filter((r) => r.isFoc);
+  const receivedNow = isIndividual ? paidRows.length : Number(lineState.quantity || 0);
   const remaining = Math.max(0, orderedQty - usedByOthers - receivedNow);
   const overLimit = usedByOthers + receivedNow > orderedQty;
+  const focQtyNum = Math.max(0, Number(lineState.focQuantity) || 0);
 
   const selectedFields = (productDef?.selectedFields || [])
     .slice()
@@ -175,8 +242,7 @@ const ProductTab = ({ poLine, productDef, lineState, onLineChange, alreadyReceiv
     .filter(Boolean);
 
   const addRows = (n) => {
-    const rows = [...lineState.rows];
-    for (let i = 0; i < n; i++) rows.push({ fieldValues: {} });
+    const rows = [...lineState.rows, ...Array.from({ length: n }, () => ({ fieldValues: {}, isFoc: false }))];
     onLineChange({ ...lineState, rows });
   };
   const removeRow = (idx) => {
@@ -187,8 +253,30 @@ const ProductTab = ({ poLine, productDef, lineState, onLineChange, alreadyReceiv
     onLineChange({ ...lineState, rows });
   };
 
+  const setFocEnabled = (on) => {
+    if (!on) {
+      onLineChange({ ...lineState, focEnabled: false, focQuantity: "", rows: paidRows });
+    } else {
+      onLineChange({ ...lineState, focEnabled: true });
+    }
+  };
+  const setFocQuantity = (val) => {
+    const n = Math.max(0, Number(val) || 0);
+    let nextFoc = focRows;
+    if (n > focRows.length) {
+      nextFoc = [...focRows, ...Array.from({ length: n - focRows.length }, () => ({ fieldValues: {}, isFoc: true }))];
+    } else if (n < focRows.length) {
+      nextFoc = focRows.slice(0, n);
+    }
+    onLineChange({ ...lineState, focQuantity: val, rows: isIndividual ? [...paidRows, ...nextFoc] : lineState.rows });
+  };
+
+  const allRows = isIndividual ? [...paidRows, ...focRows] : [];
+
   return (
     <div>
+      <UnitPriceSummary poLine={poLine} taxType={taxType} />
+
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
           {isIndividual ? "Received units" : "Received quantity"}
@@ -196,6 +284,25 @@ const ProductTab = ({ poLine, productDef, lineState, onLineChange, alreadyReceiv
         <p className={`text-xs font-semibold tabular-nums ${overLimit ? "text-rose-600" : "text-slate-500"}`}>
           Ordered {orderedQty} · Already in other invoices {usedByOthers} · Remaining {remaining}
         </p>
+      </div>
+
+      <div className="mb-3">
+        <ToggleSwitch checked={lineState.focEnabled} onChange={setFocEnabled} label="FOC (Free of Cost)" />
+        {lineState.focEnabled && (
+          <div className="mt-2 max-w-xs">
+            <input
+              type="number" min="0" value={lineState.focQuantity}
+              onChange={(e) => setFocQuantity(e.target.value)}
+              placeholder="FOC quantity"
+              className={inputCls}
+            />
+            {isIndividual && focQtyNum > 0 && (
+              <p className="mt-1 text-[11px] font-medium text-amber-600">
+                {focQtyNum} FOC row{focQtyNum > 1 ? "s" : ""} added below — must be filled before submitting.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {overLimit && (
@@ -218,9 +325,9 @@ const ProductTab = ({ poLine, productDef, lineState, onLineChange, alreadyReceiv
                   +{n} Row{n > 1 ? "s" : ""}
                 </button>
               ))}
-              {lineState.rows.length > 0 && (
+              {paidRows.length > 0 && (
                 <button
-                  type="button" onClick={() => onLineChange({ ...lineState, rows: [] })}
+                  type="button" onClick={() => onLineChange({ ...lineState, rows: focRows })}
                   className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-500 shadow-sm transition hover:bg-slate-50"
                 >
                   Clear all
@@ -254,12 +361,13 @@ const ProductTab = ({ poLine, productDef, lineState, onLineChange, alreadyReceiv
         </p>
       )}
 
-      {isIndividual && lineState.rows.length > 0 && (
+      {isIndividual && allRows.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="w-full min-w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="px-3 py-2 w-10">#</th>
+                <th className="px-3 py-2 w-16">Type</th>
                 {selectedFields.map((fd) => (
                   <th key={fd._id} className="px-3 py-2">{fd.label}</th>
                 ))}
@@ -267,25 +375,35 @@ const ProductTab = ({ poLine, productDef, lineState, onLineChange, alreadyReceiv
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {lineState.rows.map((row, idx) => (
-                <tr key={idx}>
-                  <td className="px-3 py-2 tabular-nums text-slate-400">{idx + 1}</td>
-                  {selectedFields.map((fd) => (
-                    <td key={fd._id} className="px-3 py-2">
-                      <DynamicFieldInput
-                        fieldDef={fd}
-                        value={row.fieldValues[fd.code]}
-                        onChange={(v) => setRowField(idx, fd.code, v)}
-                      />
+              {allRows.map((row, idx) => {
+                const realIdx = lineState.rows.indexOf(row);
+                return (
+                  <tr key={realIdx} className={row.isFoc ? "bg-amber-50/60" : ""}>
+                    <td className="px-3 py-2 tabular-nums text-slate-400">{idx + 1}</td>
+                    <td className="px-3 py-2">
+                      {row.isFoc ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">FOC</span>
+                      ) : (
+                        <span className="text-[10px] font-medium text-slate-400">Paid</span>
+                      )}
                     </td>
-                  ))}
-                  <td className="px-3 py-2">
-                    <button type="button" onClick={() => removeRow(idx)} title="Delete row" className="rounded-md border border-rose-200 bg-white p-1.5 text-rose-600 shadow-sm transition hover:bg-rose-50">
-                      <IconTrash />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    {selectedFields.map((fd) => (
+                      <td key={fd._id} className="px-3 py-2">
+                        <DynamicFieldInput
+                          fieldDef={fd}
+                          value={row.fieldValues[fd.code]}
+                          onChange={(v) => setRowField(realIdx, fd.code, v)}
+                        />
+                      </td>
+                    ))}
+                    <td className="px-3 py-2">
+                      <button type="button" onClick={() => removeRow(realIdx)} title="Delete row" className="rounded-md border border-rose-200 bg-white p-1.5 text-rose-600 shadow-sm transition hover:bg-rose-50">
+                        <IconTrash />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -372,10 +490,14 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           const key = String(it.quotationItemId);
           if (isEdit) {
             const existing = (invoice.lines || []).find((l) => String(l.quotationItemId) === key);
+            const existingRows = (existing?.rows || []).map((r) => ({ fieldValues: r.fieldValues || {}, isFoc: !!r.isFoc }));
+            const focQty = existing?.focQuantity || 0;
             initialLines[key] = existing
               ? {
-                  rows: existing.rows && existing.rows.length ? existing.rows : [],
-                  quantity: existing.rows?.length ? "" : String(existing.receivedQuantity ?? ""),
+                  rows: existingRows,
+                  quantity: existingRows.length ? "" : String(existing.receivedQuantity ?? ""),
+                  focEnabled: true,
+                  focQuantity: focQty ? String(focQty) : "",
                   rating: existing.rating || { rating: null, notes: "" },
                 }
               : emptyLineState();
@@ -434,17 +556,20 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
     setInvoiceFile(picked);
   };
 
+  const isRowFilled = (r) => Object.values(r.fieldValues || {}).some((v) => v !== "" && v != null);
+
   const builtLines = useMemo(() => {
     return poItems
       .map((it) => {
         const key = String(it.quotationItemId);
         const ls = lines[key] || emptyLineState();
         const isIndividual = productDefs[it.productDefinitionId]?.trackingMethod === "individual";
-        const rows = isIndividual ? ls.rows.filter((r) => Object.values(r.fieldValues || {}).some((v) => v !== "" && v != null)) : [];
-        const receivedQuantity = isIndividual ? rows.length : Number(ls.quantity || 0);
-        return { quotationItemId: it.quotationItemId, receivedQuantity, rows, rating: ls.rating?.rating ? ls.rating : null };
+        const rows = isIndividual ? ls.rows.filter(isRowFilled) : [];
+        const receivedQuantity = isIndividual ? rows.filter((r) => !r.isFoc).length : Number(ls.quantity || 0);
+        const focQuantity = isIndividual ? rows.filter((r) => r.isFoc).length : Math.max(0, Number(ls.focQuantity) || 0);
+        return { quotationItemId: it.quotationItemId, receivedQuantity, focQuantity, rows, rating: ls.rating?.rating ? ls.rating : null };
       })
-      .filter((l) => l.receivedQuantity > 0);
+      .filter((l) => l.receivedQuantity > 0 || l.focQuantity > 0);
   }, [poItems, lines, productDefs]);
 
   const submit = async () => {
@@ -460,6 +585,16 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
       const used = alreadyReceivedByLine[key] || 0;
       if (used + receivedQuantity > it.quantity) {
         return setError(`${it.productName}: received quantity exceeds the ordered quantity`);
+      }
+
+      const isIndividual = productDefs[it.productDefinitionId]?.trackingMethod === "individual";
+      if (isIndividual) {
+        const ls = lines[key] || emptyLineState();
+        const targetFoc = Math.max(0, Number(ls.focQuantity) || 0);
+        const filledFoc = ls.rows.filter((r) => r.isFoc && isRowFilled(r)).length;
+        if (targetFoc > 0 && filledFoc < targetFoc) {
+          return setError(`${it.productName}: fill all ${targetFoc} FOC row(s) before submitting`);
+        }
       }
     }
 
@@ -642,7 +777,7 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           const key = String(it.quotationItemId);
           const isActive = activeTabId === key;
           const received = lines[key]
-            ? (def?.trackingMethod === "individual" ? lines[key].rows.length : Number(lines[key].quantity || 0))
+            ? (def?.trackingMethod === "individual" ? lines[key].rows.filter((r) => !r.isFoc).length : Number(lines[key].quantity || 0))
             : 0;
           return (
             <button
@@ -665,6 +800,7 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           <ProductTab
             poLine={activeItem}
             productDef={productDefs[activeItem.productDefinitionId]}
+            taxType={po?.taxType}
             lineState={activeLineState}
             onLineChange={(next) => setLineState(activeTabId, next)}
             alreadyReceived={alreadyReceivedByLine[activeTabId]}

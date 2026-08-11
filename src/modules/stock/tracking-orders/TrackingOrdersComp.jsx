@@ -7,7 +7,7 @@ import Pagination from "@/shared/ui/pagination/Pagination";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 import StatusTracker, { stageIndexForStatus } from "./StatusTracker";
 import InvoiceReceiveView from "./InvoiceReceiveView";
-import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info } from "lucide-react";
+import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmt = (d) =>
@@ -179,36 +179,71 @@ const Modal = ({ onClose, title, children, maxWidth = "max-w-lg" }) => {
 /* Popups                                                         */
 /* ============================================================= */
 
+// Matches the PO PDF's item table + summary layout — Sr/Description/Product/
+// Qty/Basic Price/CGST/SGST(or IGST)/Amount, then a right-aligned totals
+// block (Basic Price, CGST, SGST/IGST, Grand total).
 const ProductsPopup = ({ row, onClose }) => {
   const itemTh = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
   const itemThRight = `${itemTh} text-right`;
   const itemTd = "px-3 py-2 text-sm text-slate-700";
   const itemTdRight = `${itemTd} text-right tabular-nums`;
+  const isIgst = row.taxType === "IGST";
+  const n = (v) => Number(v || 0).toLocaleString("en-IN");
+
   return (
-    <Modal onClose={onClose} title={`${row.vendorName} · ${row.items.length} items`} maxWidth="max-w-2xl">
+    <Modal onClose={onClose} title={`${row.vendorName} · ${row.items.length} items`} maxWidth="max-w-3xl">
       <div className="overflow-x-auto rounded-xl border border-slate-100">
         <table className="w-full min-w-full border-collapse">
           <thead className="bg-slate-50">
             <tr>
-              <th className={itemTh}>Category</th>
+              <th className={itemTh}>Sr.</th>
+              <th className={itemTh}>Description</th>
               <th className={itemTh}>Product</th>
               <th className={itemThRight}>Qty</th>
-              <th className={itemThRight}>Rate</th>
-              <th className={itemThRight}>Total</th>
+              <th className={itemThRight}>Basic Price</th>
+              {isIgst ? <th className={itemThRight}>IGST</th> : (
+                <>
+                  <th className={itemThRight}>CGST</th>
+                  <th className={itemThRight}>SGST</th>
+                </>
+              )}
+              <th className={itemThRight}>Amount</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {row.items.map((it, i) => (
               <tr key={i} className="transition hover:bg-slate-50/60">
+                <td className={itemTd}>{i + 1}</td>
                 <td className={itemTd}>{it.categoryName}</td>
                 <td className={`${itemTd} font-medium text-slate-900`}>{it.productName}</td>
                 <td className={itemTdRight}>{it.quantity}</td>
-                <td className={itemTdRight}>{Number(it.unitPrice).toLocaleString("en-IN")}</td>
-                <td className={`${itemTdRight} font-medium text-slate-900`}>{Number(it.lineTotal).toLocaleString("en-IN")}</td>
+                <td className={itemTdRight}>{n(it.taxable)}</td>
+                {isIgst ? <td className={itemTdRight}>{n(it.igst)}</td> : (
+                  <>
+                    <td className={itemTdRight}>{n(it.cgst)}</td>
+                    <td className={itemTdRight}>{n(it.sgst)}</td>
+                  </>
+                )}
+                <td className={`${itemTdRight} font-medium text-slate-900`}>{n(it.lineTotal)}</td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-4 ml-auto w-full max-w-[220px] space-y-1.5 text-sm">
+        <div className="flex justify-between text-slate-500"><span>Basic Price</span><span className="tabular-nums">{money(row.subTotal)}</span></div>
+        {isIgst ? (
+          <div className="flex justify-between text-slate-500"><span>IGST</span><span className="tabular-nums">{money(row.igstTotal)}</span></div>
+        ) : (
+          <>
+            <div className="flex justify-between text-slate-500"><span>CGST</span><span className="tabular-nums">{money(row.cgstTotal)}</span></div>
+            <div className="flex justify-between text-slate-500"><span>SGST</span><span className="tabular-nums">{money(row.sgstTotal)}</span></div>
+          </>
+        )}
+        <div className="flex justify-between border-t-2 border-slate-200 pt-1.5 font-bold text-slate-900">
+          <span>Grand total</span><span className="tabular-nums">{money(row.totalAmount)}</span>
+        </div>
       </div>
     </Modal>
   );
@@ -577,9 +612,15 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, onView, onEdit }) =>
             <th className={invTh}>Invoice No</th>
             <th className={invTh}>Invoice Date</th>
             <th className={invTh}>Items</th>
-            <th className={invThRight}>Qty (This Inv.)</th>
-            <th className={invThRight}>Amount</th>
-            <th className={invTh}>Approval Status</th>
+            <th className={invThRight}>Qty</th>
+            <th className={invThRight}>FOC</th>
+            <th className={invThRight}>Basic Price</th>
+            <th className={invThRight}>CGST</th>
+            <th className={invThRight}>SGST</th>
+            <th className={invThRight}>IGST</th>
+            <th className={invThRight}>Extra</th>
+            <th className={invThRight}>Total</th>
+            <th className={invTh}>Status</th>
             <th className={invThRight}>Actions</th>
           </tr>
         </thead>
@@ -591,8 +632,14 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, onView, onEdit }) =>
                 <td className={`${invTd} font-semibold text-indigo-600`}>{inv.invoiceNumber}</td>
                 <td className={invTd}>{fmt(inv.invoiceDate)}</td>
                 <td className={invTd}><ItemsCell lines={inv.lines} /></td>
-                <td className={invTdRight}>{inv.qtyReceived} <span className="text-slate-400">({pct}%)</span></td>
-                <td className={invTdRight}>{money(inv.amount)}</td>
+                <td className={invTdRight}>{inv.qtyReceived} </td>
+                <td className={invTdRight}>{inv.focQtyReceived || 0}</td>
+                <td className={invTdRight}>{money(inv.basicAmount)}</td>
+                <td className={invTdRight}>{money(inv.cgstAmount)}</td>
+                <td className={invTdRight}>{money(inv.sgstAmount)}</td>
+                <td className={invTdRight}>{money(inv.igstAmount)}</td>
+                <td className={invTdRight}>{money(inv.extraChargesTotal)}</td>
+                <td className={`${invTdRight} font-semibold text-slate-900`}>{money(inv.grandTotal)}</td>
                 <td className={invTd}><ApprovalDot status={inv.status} /></td>
                 <td className={invTdRight}>
                   <RowActionMenu invoice={inv} onView={onView} onEdit={onEdit} />
@@ -620,7 +667,17 @@ const SummaryField = ({ label, value, valueCls = "text-slate-900" }) => (
   </div>
 );
 
-const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onAddItems, onEditInvoice, onHoverStage }) => {
+// GST breakdown label — only the pair that applies (CGST+SGST same-state,
+// IGST inter-state), matching the PO's own taxType.
+const gstSummaryLabel = (row) => {
+  if (row.taxType === "IGST" && row.igstTotal > 0) return `IGST ${money(row.igstTotal)}`;
+  if (row.taxType === "CGST_SGST" && (row.cgstTotal > 0 || row.sgstTotal > 0)) {
+    return `CGST ${money(row.cgstTotal)} + SGST ${money(row.sgstTotal)}`;
+  }
+  return "—";
+};
+
+const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onAddItems, onEditInvoice, onViewPoDoc, onHoverStage }) => {
   const m = STATUS_META[row.status] || {};
   const isReceivingFlow = RECEIVING_FLOW_STATUSES.has(row.status);
   const hasPo = !!row.poNumber;
@@ -706,14 +763,29 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
       <div className="grid grid-cols-1 gap-x-8 gap-y-3 bg-slate-50/60 px-5 py-4 sm:grid-cols-3">
         <SummaryField label="PO Date" value={hasPo ? fmt(row.poDate) : "—"} />
         <SummaryField label="Vendor" value={row.vendorName} />
+        {hasPo && <SummaryField label="GST" value={gstSummaryLabel(row)} />}
+        {hasPo && <SummaryField label="Basic Price" value={money(row.subTotal)} />}
         <SummaryField
-          label="Total Amount"
+          label="Grand Total"
           value={
             <button type="button" onClick={() => setPopup({ type: "products" })} className="hover:underline">
               {money(row.totalAmount)} <span className="font-normal text-slate-400">({row.items.length} item{row.items.length > 1 ? "s" : ""})</span>
             </button>
           }
         />
+        {hasPo && (
+          <SummaryField
+            label="PO Doc"
+            value={
+              <button
+                type="button" onClick={() => onViewPoDoc(row)}
+                className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline"
+              >
+                <FileText className="h-3.5 w-3.5" /> View
+              </button>
+            }
+          />
+        )}
         {hasPo && (
           <>
             <SummaryField label="Total Ordered Qty" value={row.totalQuantity} />
@@ -825,6 +897,31 @@ const TrackingOrdersComp = () => {
       />
     );
   }
+  if (view.mode === "viewPoDoc") {
+    const pdfUrl = `${API_BACKEND_URL}/stock/purchase-orders/${view.poId}/pdf`;
+    return (
+      <div className="mx-auto max-w-4xl p-6">
+        <div className="mb-5 flex items-center gap-3">
+          <button
+            type="button" onClick={() => setView({ mode: "board" })}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <h1 className="text-lg font-semibold tracking-tight text-slate-900">PO Document · {view.poNumber || "—"}</h1>
+          <a
+            href={pdfUrl} download={`PO-${view.poNumber || view.poId}.pdf`}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+          >
+            <Download className="h-3.5 w-3.5" /> Download
+          </a>
+        </div>
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
+          <iframe title="PO Document" src={pdfUrl} className="h-screen w-full" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -890,6 +987,7 @@ const TrackingOrdersComp = () => {
                 onNotRequired={(r) => setPopup({ type: "notRequired", row: r })}
                 onAddItems={(r) => setView({ mode: "receiveInvoice", row: r })}
                 onEditInvoice={(r, invoice) => setView({ mode: "editInvoice", row: r, invoice })}
+                onViewPoDoc={(r) => setView({ mode: "viewPoDoc", poId: r.poId, poNumber: r.poNumber })}
                 onHoverStage={setHoveredStage}
               />
             ))

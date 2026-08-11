@@ -3,9 +3,10 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
-import { RotateCcw, Eye, Edit3 } from "lucide-react";
+import { RotateCcw, Eye, Edit3, ClipboardCheck } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import InvoiceReceiveView from "@/modules/stock/tracking-orders/InvoiceReceiveView";
+import InvoiceReviewView from "./InvoiceReviewView";
 
 const STATUS = { PENDING: "PENDING", APPROVED: "APPROVED", REJECTED: "REJECTED" };
 
@@ -52,6 +53,33 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+// Dot + plain-text status indicator for the dedicated "Approval Status"
+// table column — same look as the Tracking Order card's invoice table.
+const ApprovalDot = ({ status }) => {
+  const m = STATUS_META[status] || {};
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
+      <span className={`h-2 w-2 rounded-full ${m.dot || "bg-slate-400"}`} />
+      {m.label || status}
+    </span>
+  );
+};
+
+// Items cell — "Product (qty), Product (qty)" plus a small "N Items" tag,
+// same pattern as the Tracking Order card's invoice table.
+const ItemsCell = ({ lines }) => {
+  const list = lines || [];
+  const summary = list.map((l) => `${l.productName} (${l.receivedQuantity})`).join(", ");
+  return (
+    <div className="max-w-[240px]">
+      <p className="truncate text-sm text-slate-700">{summary || "—"}</p>
+      <span className="mt-0.5 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+        {list.length} Item{list.length === 1 ? "" : "s"}
+      </span>
+    </div>
+  );
+};
+
 /* ============================================================= */
 /* Detail / Review popup                                          */
 /* ============================================================= */
@@ -91,42 +119,6 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
   );
 };
 
-// Approve is a single click from the row (see handleApprove in the main
-// component) — Reject still needs a reason, so it gets a small popup.
-const RejectPopup = ({ invoice, onClose, onDone }) => {
-  const [busy, setBusy] = useState(false);
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState(null);
-
-  const confirmReject = async () => {
-    if (!reason.trim()) { setError("A reason is required to reject"); return; }
-    setBusy(true); setError(null);
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${invoice._id}/reject`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ reason }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
-      onDone();
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
-  };
-
-  return (
-    <Modal onClose={onClose} title={`Reject ${invoice.invoiceNumber}`} maxWidth="max-w-sm">
-      {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
-      <label className="mb-1.5 block text-xs font-semibold text-slate-700">Reason</label>
-      <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (required)" className={`${inputCls} mb-4`} />
-      <div className="flex justify-end gap-2.5">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Cancel</button>
-        <button type="button" disabled={busy} onClick={confirmReject} className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60">
-          {busy ? "Rejecting…" : "Confirm reject"}
-        </button>
-      </div>
-    </Modal>
-  );
-};
-
 /* ============================================================= */
 /* Main                                                           */
 /* ============================================================= */
@@ -157,8 +149,6 @@ const InvoiceApprovalList = () => {
   const [total, setTotal] = useState(0);
 
   const [viewing, setViewing] = useState(null);
-  const [rejecting, setRejecting] = useState(null);
-  const [approvingId, setApprovingId] = useState(null);
   const [actionError, setActionError] = useState(null);
 
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
@@ -229,20 +219,6 @@ const InvoiceApprovalList = () => {
 
   const backToList = () => { setView({ mode: "list" }); loadList(); };
 
-  const handleApprove = async (inv) => {
-    setApprovingId(inv._id); setActionError(null);
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${inv._id}/approve`, { method: "PATCH", credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to approve");
-      loadList();
-    } catch (e) {
-      setActionError(e.message);
-    } finally {
-      setApprovingId(null);
-    }
-  };
-
   if (view.mode === "editInvoice") {
     return (
       <InvoiceReceiveView
@@ -253,6 +229,9 @@ const InvoiceApprovalList = () => {
         onDone={backToList}
       />
     );
+  }
+  if (view.mode === "review") {
+    return <InvoiceReviewView invoiceId={view.invoiceId} onBack={backToList} onDone={backToList} />;
   }
 
   return (
@@ -337,24 +316,28 @@ const InvoiceApprovalList = () => {
           <thead className="bg-slate-50/60">
             <tr>
               <th className={th}>Invoice No</th>
-              <th className={th}>PO Number</th>
-              <th className={th}>Vendor</th>
               <th className={th}>Invoice Date</th>
-              <th className={thRight}>Qty (This Inv.)</th>
-              <th className={thRight}>Amount</th>
-              <th className={th}>Submitted By</th>
-              <th className={th}>Submitted On</th>
+              <th className={th}>Items</th>
+              <th className={thRight}>Qty </th>
+              <th className={thRight}>FOC</th>
+              <th className={thRight}>Basic Price</th>
+              <th className={thRight}>CGST</th>
+              <th className={thRight}>SGST</th>
+              <th className={thRight}>IGST</th>
+              <th className={thRight}>Extra </th>
+              <th className={thRight}>Total</th>
+              <th className={th}>Status</th>
               <th className={thRight}>Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={9} className="px-4 py-12 text-center">
+              <tr><td colSpan={13} className="px-4 py-12 text-center">
                 <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent" />
                 <p className="mt-2 text-sm text-slate-500">Loading…</p>
               </td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-16 text-center">
+              <tr><td colSpan={13} className="px-4 py-16 text-center">
                 <p className="text-sm font-medium text-slate-700">No invoices found</p>
                 <p className="mt-1 text-sm text-slate-400">Adjust the filters above to widen the search.</p>
               </td></tr>
@@ -364,34 +347,31 @@ const InvoiceApprovalList = () => {
                 return (
                   <tr key={inv._id} className="transition hover:bg-slate-50/60">
                     <td className="px-4 py-3 text-sm font-semibold text-indigo-600">{inv.invoiceNumber}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{inv.poNumber || "—"}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{inv.vendorName}</td>
                     <td className="px-4 py-3 text-sm text-slate-500 tabular-nums">{fmtDateTime(inv.invoiceDate)}</td>
+                    <td className="px-4 py-3"><ItemsCell lines={inv.lines} /></td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">
-                      {inv.qtyReceived} <span className="text-slate-400">({pct}%)</span>
+                      {inv.qtyReceived} 
                     </td>
-                    <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900 tabular-nums">{money(inv.amount)}</td>
-                    <td className="px-4 py-3 text-sm text-slate-600">{inv.receivedByName || inv.createdByName || "—"}</td>
-                    <td className="px-4 py-3 text-sm text-slate-500 tabular-nums">{fmtDateTime(inv.createdAt)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{inv.focQtyReceived || 0}</td>
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.basicAmount)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.cgstAmount)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.sgstAmount)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.igstAmount)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.extraChargesTotal)}</td>
+                    <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900 tabular-nums">{money(inv.grandTotal)}</td>
+                    <td className="px-4 py-3"><ApprovalDot status={inv.status} /></td>
                     <td className="px-4 py-3 text-right">
                       {inv.status === STATUS.PENDING ? (
-                        <div className="flex items-center justify-end gap-1.5">
+                        <div className="flex items-center justify-end">
                           <button
-                            type="button" onClick={() => handleApprove(inv)} disabled={approvingId === inv._id}
-                            className="inline-flex items-center justify-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id })}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500"
                           >
-                            {approvingId === inv._id ? "Approving…" : "Approve"}
-                          </button>
-                          <button
-                            type="button" onClick={() => setRejecting(inv)} disabled={approvingId === inv._id}
-                            className="inline-flex items-center justify-center gap-1 rounded-full bg-rose-600 px-3 py-1 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Reject
+                            <ClipboardCheck className="h-3.5 w-3.5" /> Review
                           </button>
                         </div>
                       ) : (
                         <div className="flex items-center justify-end gap-1.5">
-                          <span className="mr-1"><StatusBadge status={inv.status} /></span>
                           <button
                             type="button" onClick={() => setViewing(inv)} title="View"
                             className="rounded-md border border-indigo-200 bg-white p-1.5 text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
@@ -425,13 +405,6 @@ const InvoiceApprovalList = () => {
       </div>
 
       {viewing && <InvoiceDetailPopup invoice={viewing} onClose={() => setViewing(null)} />}
-      {rejecting && (
-        <RejectPopup
-          invoice={rejecting}
-          onClose={() => setRejecting(null)}
-          onDone={() => { setRejecting(null); loadList(); }}
-        />
-      )}
     </div>
   );
 };
