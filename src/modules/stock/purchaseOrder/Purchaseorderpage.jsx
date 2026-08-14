@@ -12,9 +12,11 @@ import {
   Pencil,
   MoreVertical,
   FileText,
-  PencilLine,
   Download,
+  Mail,
+  CheckCircle2,
 } from "lucide-react";
+import SendMailPopup from "./SendMailPopup";
 
 /* ============================================================= */
 /* Constants                                                      */
@@ -79,6 +81,12 @@ const TAB_STYLES = {
     inactive: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100",
     chipActive: "bg-rose-500 text-rose-50",
     chipInactive: "bg-rose-100 text-rose-700",
+  },
+  SENT: {
+    active: "border-indigo-600 bg-indigo-600 text-white",
+    inactive: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+    chipActive: "bg-indigo-500 text-indigo-50",
+    chipInactive: "bg-indigo-100 text-indigo-700",
   },
 };
 
@@ -372,37 +380,6 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
   );
 };
 
-const NotRequiredPopup = ({ row, quotationId, onClose, onDone }) => {
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  return (
-    <Modal onClose={onClose} title="Mark as Not Required">
-      <p className="mb-3 text-sm">
-        PO creation for <span className="font-medium text-slate-800">{row.vendorName}</span> will be turned off for this quotation.
-      </p>
-      <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (required)" className={`${inputCls} mb-4`} />
-      <div className="flex justify-end gap-2.5">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Cancel</button>
-        <button
-          type="button" disabled={busy || !reason.trim()}
-          onClick={async () => {
-            setBusy(true);
-            await fetch(`${API_BACKEND_URL}/stock/quotations/${quotationId}/disable-vendor`, {
-              method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-              body: JSON.stringify({ vendorId: row.vendorId, reason: reason.trim() }),
-            });
-            setBusy(false); onDone();
-          }}
-          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Mark Not Required
-        </button>
-      </div>
-    </Modal>
-  );
-};
-
 /* ============================================================= */
 /* Action bar building blocks — ERP style, compact & scalable     */
 /* ============================================================= */
@@ -532,8 +509,11 @@ const buildRowActions = (row) => {
     inline.push({ type: "iconText", key: "view", label: "View PO", text: "PO", icon: Eye, tone: "indigo" });
   }
 
-  if (s === "APPROVED") {
-    inline.push({ type: "text", key: "send", label: "Send PO", tone: "green" });
+  // APPROVED: only before the first send (mailResult unset) — status moves
+  // to SENT the moment mail goes out. SENT: always available, so the PO can
+  // be resent as many times as needed.
+  if ((s === "APPROVED" && !row.mailResult?.mode) || s === "SENT") {
+    inline.push({ type: "icon", key: "sendMail", label: "Send Mail", icon: Mail, tone: "green" });
   }
 
   if (s === "GENERATED") {
@@ -545,9 +525,6 @@ const buildRowActions = (row) => {
   }
 
   menu.push({ key: "details", label: "Details", tone: "gray", icon: FileText });
-  if (s === "PO_PENDING") {
-    menu.push({ key: "notRequired", label: "Not Required", tone: "red", icon: PencilLine });
-  }
 
   if (row.skipped?.length > 0) {
     inline.push({ type: "text", key: "info", label: "Info", tone: "gray" });
@@ -585,7 +562,7 @@ const ActionBar = ({ row, on }) => {
 const PurchaseOrderPage = () => {
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
-  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
+  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
   const [entities, setEntities] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -632,7 +609,7 @@ const PurchaseOrderPage = () => {
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load board");
 
       setBoard(json.data?.board || []);
-      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
+      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
       setPagination(json.pagination || { total: 0, totalPages: 1 });
     } catch (e) {
       setError(e.message); setBoard([]);
@@ -720,16 +697,12 @@ const PurchaseOrderPage = () => {
         vendorName: row.vendorName,
         vendorStateCode: row.stateCode,
         items: row.items,
+        buyerEntity: row.buyerEntity,
       });
     }
-    if (type === "edit") return setView({ mode: "edit", poId: row.poId, vendorName: row.vendorName, vendorStateCode: row.stateCode });
+    if (type === "edit") return setView({ mode: "edit", poId: row.poId, vendorName: row.vendorName, vendorStateCode: row.stateCode, buyerEntity: row.buyerEntity });
     if (type === "view") return setView({ mode: "view", poId: row.poId });
-    if (type === "send") {
-      fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/send`, {
-        method: "PATCH", credentials: "include",
-      }).then(loadBoard);
-      return;
-    }
+    if (type === "sendMail") return setPopup({ type: "sendMail", row });
     if (type === "details") {
       return setView({
         mode: "details",
@@ -741,7 +714,6 @@ const PurchaseOrderPage = () => {
     }
     if (type === "review") return setPopup({ type: "review", row });
     if (type === "info") return setPopup({ type: "info", row });
-    if (type === "notRequired") return setPopup({ type: "notRequired", row, quotationId: q.sourceQuotationId });
   };
 
   if (view.mode === "create" || view.mode === "edit")
@@ -787,13 +759,14 @@ const PurchaseOrderPage = () => {
     { key: "PO_PENDING", label: "PO Pending", count: counts.PO_PENDING },
     { key: "GENERATED", label: "PO Generated", count: counts.GENERATED },
     { key: "APPROVED", label: "PO Approved", count: counts.APPROVED },
+    { key: "SENT", label: "PO Sent", count: counts.SENT },
     { key: "REJECTED", label: "PO Rejected", count: counts.REJECTED },
   ];
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Purchase orders</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Purchase orders Approval</h1>
         <p className="mt-0.5 text-sm">Create, review, and track purchase orders built from approved quotations.</p>
       </div>
 
@@ -925,7 +898,13 @@ const PurchaseOrderPage = () => {
                     <div className="col-span-1 text-sm font-medium text-slate-700">
                       <TruncateText text={row.entityAlias} title="Entity" />
                     </div>
-                    <div className="col-span-3">
+                    <div className="col-span-3 flex flex-wrap items-center justify-end gap-1.5">
+                      {row.status === "SENT" && row.mailResult?.mode && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                          <CheckCircle2 className="h-3 w-3" />
+                          {row.mailResult.mode === "SENT" ? "Mail Sent" : "Manual"}
+                        </span>
+                      )}
                       <ActionBar row={row} on={(type, r) => onAction(type, r, q)} />
                     </div>
                   </div>
@@ -954,7 +933,7 @@ const PurchaseOrderPage = () => {
       {popup?.type === "products" && <ProductsPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "info" && <InfoPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "review" && <ReviewPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
-      {popup?.type === "notRequired" && <NotRequiredPopup row={popup.row} quotationId={popup.quotationId} onClose={() => setPopup(null)} onDone={refresh} />}
+      {popup?.type === "sendMail" && <SendMailPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
     </div>
   );
 };

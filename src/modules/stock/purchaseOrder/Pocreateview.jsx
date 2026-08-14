@@ -3,8 +3,6 @@
 import React, { useState, useEffect } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 
-const INTERNAL_COMPANIES_URL =
-  "https://gist.githubusercontent.com/SurajSingh7/ac8ffea18746e9fea058db22054bd3f3/raw/internal-companies.json";
 const SHIPMENT_PREFERENCE_OPTIONS = [
   "Self Pickup", "Vendor Delivery", "Courier", "Transport", "Third-Party Logistics", "Hand Delivery",
 ];
@@ -63,11 +61,13 @@ const IconX = () => (
 
 const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   const isEdit = mode === "edit";
-  const { sourceQuotationId, vendorId, vendorName, vendorStateCode, poId } = context;
+  const { sourceQuotationId, vendorId, vendorName, vendorStateCode, poId, buyerEntity: contextBuyerEntity } = context;
 
-  const [entities, setEntities] = useState([]);
-  const [alias, setAlias] = useState("");
-  const [entityId, setEntityId] = useState(""); // resolved alias+state record
+  // Entity/State is no longer chosen here — it's assigned once on the
+  // Tracking Orders page and consumed here read-only (see Backend
+  // createPurchaseOrder, which derives it server-side from the tracking
+  // order rather than trusting anything sent from this form).
+  const selectedEntity = contextBuyerEntity || null;
   const [requester, setRequester] = useState("Suraj");
   const [poDate, setPoDate] = useState(todayStr());
   const [shipment, setShipment] = useState(SHIPMENT_PREFERENCE_OPTIONS[1]);
@@ -86,11 +86,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  // distinct parent aliases
-  const aliases = [...new Set(entities.map((e) => e.alias).filter(Boolean))];
-  // states available for the chosen alias
-  const statesForAlias = entities.filter((e) => e.alias === alias);
-  const selectedEntity = entities.find((e) => String(e._id) === String(entityId)) || null;
   const sameState = selectedEntity && String(selectedEntity.stateCode) === String(vendorStateCode);
 
   /* -----------------------------------------------------------
@@ -119,11 +114,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
     (async () => {
       setLoading(true);
       try {
-        const res = await fetch(INTERNAL_COMPANIES_URL);
-        const json = await res.json();
-        const list = (json.data || []).filter((e) => e.isActive !== false && e.isShownOnDropDown !== false);
-        setEntities(list);
-
         if (isEdit) {
           const poRes = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, { credentials: "include" });
           const poJson = await poRes.json();
@@ -142,15 +132,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           setTermsContent(po.terms || "");
           setTermsSource(po.termsSource || "NONE");
           setNotes(po.notes || "");
-          const match =
-            list.find((e) => String(e._id) === String(po.buyerEntity?.entityId)) ||
-            list.find((e) => e.alias === po.buyerEntity?.alias && String(e.stateCode) === String(po.buyerEntity?.stateCode));
-          if (match) { setAlias(match.alias); setEntityId(String(match._id)); }
         } else {
-          // default: match vendor state → its alias + that state record
-          const match = list.find((e) => String(e.stateCode) === String(vendorStateCode)) || list[0];
-          if (match) { setAlias(match.alias); setEntityId(String(match._id)); }
-
           // Auto-pick terms for this vendor: vendor-specific match, else the
           // single Default term. Read-only — see resolveForVendor on the backend.
           let resolvedSource = "NONE";
@@ -191,14 +173,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
     })();
   }, [isEdit, poId, vendorId, vendorStateCode]);
 
-  // when alias changes, snap state to vendor-state match within that alias, else first
-  const onAliasChange = (a) => {
-    setAlias(a);
-    const list = entities.filter((e) => e.alias === a);
-    const match = list.find((e) => String(e.stateCode) === String(vendorStateCode)) || list[0];
-    setEntityId(match ? String(match._id) : "");
-  };
-
   // when LOCK_CHECKBOX is on, items can never be toggled off
   const toggle = (id) => {
     if (LOCK_CHECKBOX) return;
@@ -219,17 +193,8 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
     { base: 0, cgst: 0, sgst: 0, igst: 0, total: 0 }
   );
 
-  const entityPayload = () =>
-    selectedEntity
-      ? {
-        entityId: selectedEntity._id, name: selectedEntity.name, alias: selectedEntity.alias,
-        gstNumber: selectedEntity.gstNumber, address: selectedEntity.address,
-        state: selectedEntity.state, stateCode: selectedEntity.stateCode,
-      }
-      : null;
-
   const submit = async () => {
-    if (!selectedEntity) return setError("Select entity and state");
+    if (!selectedEntity) return setError("No entity assigned yet — add one in Tracking Orders first");
     if (!isEdit) {
       if (checked.length === 0) return setError("Select at least one item for the PO");
       if (unchecked.some((r) => !r.reason.trim())) return setError("Give a reason for every unchecked (skipped) item");
@@ -241,8 +206,8 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
       if (isEdit) {
         const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, {
           method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-          // terms is immutable after create — never sent from here.
-          body: JSON.stringify({ buyerEntity: entityPayload(), requester, poDate, shipmentPreference: shipment, notes }),
+          // terms/buyerEntity are immutable after create — never sent from here.
+          body: JSON.stringify({ requester, poDate, shipmentPreference: shipment, notes }),
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.message || "Failed to update PO");
@@ -253,7 +218,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             sourceQuotationId, vendorId,
             quotationItemIds: checked.map((r) => r.quotationItemId),
             skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
-            buyerEntity: entityPayload(), requester, poDate, shipmentPreference: shipment, notes,
+            requester, poDate, shipmentPreference: shipment, notes,
             termsConditionId: selectedTermsId || undefined,
           }),
         });
@@ -311,34 +276,34 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
         </div>
       )}
 
-      {/* buyer entity */}
+      {/* buyer entity — read-only: assigned once on Tracking Orders */}
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-700">Buyer entity</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label className={labelCls}>Entity</label>
-            <select value={alias} onChange={(e) => onAliasChange(e.target.value)} className={inputCls}>
-              <option value="">Select entity</option>
-              {aliases.map((a) => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={labelCls}>State</label>
-            <select value={entityId} onChange={(e) => setEntityId(e.target.value)} className={inputCls} disabled={!alias}>
-              {statesForAlias.map((e) => (
-                <option key={e._id} value={e._id}>{e.state} - {e.stateCode}</option>
-              ))}
-            </select>
-            {selectedEntity && (
+        <div className="mb-4 flex items-center justify-between">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Buyer entity</p>
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">Set in Tracking Orders</span>
+        </div>
+        {selectedEntity ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls}>Entity</label>
+              <p className={`${inputCls} bg-slate-50 text-slate-700`}>{selectedEntity.alias}</p>
+            </div>
+            <div>
+              <label className={labelCls}>State</label>
+              <p className={`${inputCls} bg-slate-50 text-slate-700`}>{selectedEntity.state} - {selectedEntity.stateCode}</p>
               <p className="mt-1.5 text-xs text-slate-400">
                 GST {selectedEntity.gstNumber} ·{" "}
                 <span className={sameState ? "text-green-600" : "text-indigo-600"}>
                   {sameState ? "Same state → CGST + SGST" : "Different state → IGST"}
                 </span>
               </p>
-            )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50/60 px-3 py-2.5 text-sm text-amber-700">
+            No entity assigned yet — add one on the Tracking Orders page before creating this PO.
+          </p>
+        )}
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
