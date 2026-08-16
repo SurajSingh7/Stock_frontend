@@ -100,7 +100,7 @@ const LineCard = ({ line, taxType }) => {
           <p className="text-xs text-slate-500">{line.categoryName}</p>
         </div>
         <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-          {isIndividual ? "Individual Tracking" : "Quantity Tracking"}
+          {isIndividual ? "Individual Tracking" : "Group Tracking"}
         </span>
       </div>
 

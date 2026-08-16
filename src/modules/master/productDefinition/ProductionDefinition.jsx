@@ -39,14 +39,16 @@ const UNIT_TYPES = [
 
 const TRACKING_METHODS = [
   { value: "individual", label: "Individual", description: "Each unit tracked separately (serial no., IMEI, etc.)" },
-  { value: "quantity", label: "Quantity", description: "Tracked as a bulk quantity (notebooks, pens, cables, etc.)" },
+  { value: "quantity", label: "Group", description: "Tracked as a bulk quantity (notebooks, pens, cables, etc.)" },
 ];
 
 // Type filter is a DROPDOWN now (was a pill group)
 const TRACKING_FILTER_OPTIONS = [
   { value: "individual", label: "Individual" },
-  { value: "quantity", label: "Quantity" },
+  { value: "quantity", label: "Group" },
 ];
+
+const TRACKING_METHOD_LABELS = Object.fromEntries(TRACKING_METHODS.map((m) => [m.value, m.label]));
 
 const PRODUCT_STATUS = [
   { value: "ACTIVE", label: "Active" },
@@ -348,9 +350,9 @@ function TrackingPill({ value }) {
   };
   const dot = { individual: "bg-indigo-500", quantity: "bg-sky-500" };
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${map[value] || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${map[value] || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${dot[value] || "bg-slate-400"}`} />
-      {value || "\u2014"}
+      {TRACKING_METHOD_LABELS[value] || value || "\u2014"}
     </span>
   );
 }
@@ -727,7 +729,7 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
   const pdf = isPdfPath(attachment);
 
   const rows = [
-    ["Tracking Method", row.trackingMethod],
+    ["Tracking Method", TRACKING_METHOD_LABELS[row.trackingMethod] || row.trackingMethod],
     ["Fields Count", row.selectedFields?.length ?? 0],
     ["GST Rate", row.gstRate ? `${row.gstRate}%` : "\u2014"],
     ["Warranty", row.warrantyYears ? `${row.warrantyYears} Year${row.warrantyYears === 1 ? "" : "s"}` : "\u2014"],
@@ -881,11 +883,32 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Only offer fields that are applicable to the currently selected tracking
+  // method (set per field-definition — see Field Definitions > "Applicable
+  // to"). Fields with no applicability set are treated as applicable to both.
+  const applicableFieldDefs = useMemo(() => {
+    if (!form.trackingMethod) return fieldDefs;
+    return fieldDefs.filter(
+      (f) => !f.applicableTrackingMethods?.length || f.applicableTrackingMethods.includes(form.trackingMethod)
+    );
+  }, [fieldDefs, form.trackingMethod]);
+
   const handleTrackingMethodChange = (value) => {
     setForm((f) => ({ ...f, trackingMethod: value }));
     setErrors((e) => ({ ...e, trackingMethod: undefined }));
     if (!fieldDefsLoaded) loadFieldDefinitions();
   };
+
+  // When the tracking method changes (or field defs finish loading), drop
+  // any already-selected field that's no longer applicable to the new method.
+  useEffect(() => {
+    if (!fieldDefsLoaded || !form.trackingMethod) return;
+    const applicableIds = new Set(applicableFieldDefs.map((f) => f._id));
+    setForm((f) => {
+      const filtered = f.selectedFields.filter((sf) => applicableIds.has(sf.fieldDefId));
+      return filtered.length === f.selectedFields.length ? f : { ...f, selectedFields: filtered };
+    });
+  }, [form.trackingMethod, fieldDefsLoaded, applicableFieldDefs]);
 
   const toggleFieldDef = (fieldDefId) => {
     setForm((f) => {
@@ -1188,7 +1211,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                   <span className="ml-2 text-xs font-normal text-slate-400">({form.selectedFields.length} selected)</span>
                 </label>
                 <FieldDefinitionMultiSelect
-                  fields={fieldDefs}
+                  fields={applicableFieldDefs}
                   loading={fieldDefsLoading}
                   selectedFields={form.selectedFields}
                   onToggle={toggleFieldDef}

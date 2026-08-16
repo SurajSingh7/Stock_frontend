@@ -24,6 +24,13 @@ const INPUT_TYPES = [
 
 const DROPDOWN_TYPES = ['dropdown', 'multi_select'];
 
+// Which Tracking Method(s) (see Product Definition) this field is offered
+// for on the "Applicable Fields" picker. Both checked = shown for either.
+const TRACKING_METHOD_OPTIONS = [
+  { value: 'individual', label: 'Individual' },
+  { value: 'quantity', label: 'Group' },
+];
+
 // Requirement 1: dropdown-only status filter, no "All" option
 const STATUS_FILTERS = [
   { value: 'active', label: 'Active' },
@@ -44,6 +51,7 @@ const EMPTY_FORM = {
   isFilterable: false,
   showList: false,
   order: 0,
+  applicableTrackingMethods: ['individual', 'quantity'],
 };
 
 /* ---------- Design tokens — SAME as VendorsComp ---------- */
@@ -61,6 +69,7 @@ const FIELD_TABLE_COLUMNS = [
   { key: 'code', label: 'Code', show: true, render: (item) => <TruncatedText label="Code" value={item.code} className="text-slate-700" mono /> },
   { key: 'label', label: 'Label', show: true, render: (item) => <TruncatedText label="Label" value={item.label} className="font-medium text-slate-900" /> },
   { key: 'inputType', label: 'Input type', show: true, render: (item) => <InputTypeTag value={item.inputType} /> },
+  { key: 'applicableTrackingMethods', label: 'Applies to', show: true, render: (item) => <TrackingMethodTag value={item.applicableTrackingMethods} /> },
   { key: 'optionsSource', label: 'Options source', show: true, render: (item) => <TruncatedText label="Options source" value={item.optionsSource} className="text-slate-400" mono /> },
   { key: 'isRequired', label: 'Required', show: true, render: (item) => <BooleanDot value={item.isRequired} /> },
   // { key: 'isFilterable', label: 'Filterable', show: true, render: (item) => <BooleanDot value={item.isFilterable} /> },
@@ -147,12 +156,22 @@ const mapFieldDefinitionResponse = (item) => ({
   showList: !!item.showList,
   isActive: item.isActive !== false,
   order: item.order ?? 0,
+  applicableTrackingMethods:
+    Array.isArray(item.applicableTrackingMethods) && item.applicableTrackingMethods.length > 0
+      ? item.applicableTrackingMethods
+      : ['individual', 'quantity'],
 });
 
 const isDropdownType = (inputType) => DROPDOWN_TYPES.includes(inputType);
 
 const getInputTypeLabel = (value) =>
   INPUT_TYPES.find((t) => t.value === value)?.label || value;
+
+const getTrackingMethodsLabel = (values) => {
+  const arr = Array.isArray(values) && values.length > 0 ? values : ['individual', 'quantity'];
+  if (arr.length >= TRACKING_METHOD_OPTIONS.length) return 'Both';
+  return arr.map((v) => TRACKING_METHOD_OPTIONS.find((t) => t.value === v)?.label || v).join(', ');
+};
 
 /* ======================== ICONS (inline, no extra deps) ======================== */
 
@@ -225,6 +244,24 @@ const Icon = {
       <path d="M6.5 5.5h10M6.5 10h10M6.5 14.5h10M3.5 5.5h.01M3.5 10h.01M3.5 14.5h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
+  // small checkmark used inside the Applicable-to checkbox cards
+  checkSmall: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-3 w-3">
+      <path d="M4.5 10.3 8 13.8l7-7.6" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  individual: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
+      <circle cx="10" cy="6.5" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  ),
+  group: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
+      <rect x="3.5" y="4" width="13" height="6" rx="1.4" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="3.5" y="12" width="13" height="4" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  ),
 };
 
 /* ======================== UI HELPER COMPONENTS ======================== */
@@ -256,6 +293,12 @@ const BooleanDot = ({ value }) => (
 const InputTypeTag = ({ value }) => (
   <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-mono text-slate-600">
     {getInputTypeLabel(value)}
+  </span>
+);
+
+const TrackingMethodTag = ({ value }) => (
+  <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-200">
+    {getTrackingMethodsLabel(value)}
   </span>
 );
 
@@ -613,6 +656,34 @@ const TOGGLE_CARD_PALETTE = {
   },
 };
 
+// Checkbox variant of ToggleCard used for "Applicable to" — unlike the
+// toggle cards above, multiple of these can be checked at once (Individual,
+// Group, or both), so it renders a checkbox rather than an on/off switch.
+const CheckboxCard = ({ label, hint, checked, onChange, disabled, color = 'indigo', icon }) => {
+  const p = TOGGLE_CARD_PALETTE[color];
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`flex w-full items-center gap-3 rounded-xl border p-3.5 text-left shadow-sm transition ${
+        checked ? `${p.activeBorder} ${p.activeBg}` : 'border-slate-200 bg-white'
+      } ${disabled ? 'cursor-not-allowed opacity-60' : 'hover:shadow-md'}`}
+    >
+      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition ${checked ? p.iconActive : 'bg-slate-100 text-slate-400'}`}>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className={`block text-sm font-semibold ${checked ? p.text : 'text-slate-700'}`}>{label}</span>
+        {hint && <span className="block text-xs text-slate-400">{hint}</span>}
+      </span>
+      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${checked ? `${p.track} border-transparent` : 'border-slate-300 bg-white'}`}>
+        {checked && Icon.checkSmall}
+      </span>
+    </button>
+  );
+};
+
 const ToggleCard = ({ label, hint, checked, onChange, disabled, color = 'indigo', icon }) => {
   const p = TOGGLE_CARD_PALETTE[color];
   return (
@@ -745,6 +816,35 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           />
         </div>
 
+        {/* Row 4 — Applicable to (Tracking Method): check either or both */}
+        <Field
+          label="Applicable to (Tracking Method)"
+          hint="Controls which fields show up on the product's Applicable Fields picker for each tracking method."
+          error={errors.applicableTrackingMethods}
+        >
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {TRACKING_METHOD_OPTIONS.map((opt) => {
+              const checked = formData.applicableTrackingMethods.includes(opt.value);
+              return (
+                <CheckboxCard
+                  key={opt.value}
+                  label={opt.label}
+                  checked={checked}
+                  onChange={(value) => {
+                    const next = value
+                      ? [...formData.applicableTrackingMethods, opt.value]
+                      : formData.applicableTrackingMethods.filter((v) => v !== opt.value);
+                    onChange('applicableTrackingMethods', next);
+                  }}
+                  disabled={isView}
+                  color={opt.value === 'individual' ? 'indigo' : 'violet'}
+                  icon={opt.value === 'individual' ? Icon.individual : Icon.group}
+                />
+              );
+            })}
+          </div>
+        </Field>
+
         {errors.general && (
           <div className="flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
             {Icon.alert}
@@ -857,6 +957,7 @@ const FieldDefinition = () => {
       isFilterable: item.isFilterable,
       showList: item.showList,
       order: item.order ?? 0,
+      applicableTrackingMethods: item.applicableTrackingMethods,
     });
     setFormErrors({});
     setActiveItemId(item.id);
@@ -873,6 +974,7 @@ const FieldDefinition = () => {
       isFilterable: item.isFilterable,
       showList: item.showList,
       order: item.order ?? 0,
+      applicableTrackingMethods: item.applicableTrackingMethods,
     });
     setFormErrors({});
     setActiveItemId(item.id);
@@ -901,6 +1003,9 @@ const FieldDefinition = () => {
     if (isDropdownType(formData.inputType) && !formData.optionsSource.trim()) {
       errors.optionsSource = 'Options source key is required for dropdown / multi-select fields.';
     }
+    if (!formData.applicableTrackingMethods || formData.applicableTrackingMethods.length === 0) {
+      errors.applicableTrackingMethods = 'Select at least one tracking method (Individual and/or Group).';
+    }
     return errors;
   };
 
@@ -924,6 +1029,7 @@ const FieldDefinition = () => {
         isFilterable: formData.isFilterable,
         showList: formData.showList,
         order: formData.order === '' ? 0 : Number(formData.order),
+        applicableTrackingMethods: formData.applicableTrackingMethods,
       };
 
       if (modalMode === 'create') {
