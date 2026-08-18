@@ -97,6 +97,33 @@ export const navCategories = [
   },
 
   {
+    category: "Transfer",
+    items: [
+      {
+        name: "Transfer Requests",
+        path: "/stock/transfer-requests",
+        moduleName: "Stock Transfer Requests",
+        url: "/stock/transfer-requests",
+        action: ["READ"],
+      },
+      {
+        name: "Incoming Requests",
+        path: "/stock/incoming-requests",
+        moduleName: "Stock Incoming Requests",
+        url: "/stock/incoming-requests",
+        action: ["READ"],
+      },
+      {
+        name: "Transfer History",
+        path: "/stock/transfer-history",
+        moduleName: "Stock Transfer History",
+        url: "/stock/transfer-history",
+        action: ["READ"],
+      },
+    ],
+  },
+
+  {
     category: "Master",
     items: [
       {
