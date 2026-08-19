@@ -91,3 +91,17 @@ export const SearchableSelect = ({ value, onChange, options, placeholder = "All"
 
 export const inputCls = "w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 export const money = (n) => `\u20B9${Number(n || 0).toLocaleString("en-IN")}`;
+
+/* ============================================================= */
+/* Unit \u2014 independent of trackingMethod, the client picks both     */
+/* explicitly (e.g. Group+Pieces for bottles, Individual+Meter for  */
+/* a serialized reel are both valid). Always display the actual     */
+/* saved `unit` value \u2014 never derive it from trackingMethod.        */
+/* ============================================================= */
+export const UNIT_LABEL = { pieces: "Pieces", meter: "Meter" };
+export const unitLabel = (unit) => UNIT_LABEL[unit] || "";
+
+export const qtyWithUnit = (qty, unit) => {
+  const label = unitLabel(unit);
+  return label ? `${qty ?? 0} ${label}` : String(qty ?? 0);
+};

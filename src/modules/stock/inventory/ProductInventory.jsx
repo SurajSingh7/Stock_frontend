@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, History, Eye, ArrowLeft } from "lucide-react";
-import { SearchableSelect, Modal, inputCls } from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-700";
 const thRight = "px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-700";
@@ -72,7 +72,7 @@ const ProductInventoryHistory = ({ product, onBack }) => {
                     <p className="text-xs text-slate-500">{fmtDate(r.invoiceDate)}</p>
                   </div>
                   <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                    Received {r.quantity} Qty
+                    Received {r.quantity} {unitLabel(product.unit)}
                   </span>
                 </div>
               </li>
@@ -82,7 +82,7 @@ const ProductInventoryHistory = ({ product, onBack }) => {
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
                 <p className="text-sm font-bold text-emerald-800">Current Stock</p>
                 <span className="rounded-full bg-emerald-600 px-3 py-1 text-sm font-semibold text-white">
-                  {product.availableQty} Qty
+                  {product.availableQty} {unitLabel(product.unit)}
                 </span>
               </div>
             </li>
@@ -106,7 +106,7 @@ const ProductDetailsPopup = ({ product, onClose }) => (
       </div>
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Available Quantity</p>
-        <p className="mt-1 text-sm font-semibold text-emerald-700 tabular-nums">{product.availableQty}</p>
+        <p className="mt-1 text-sm font-semibold text-emerald-700 tabular-nums">{product.availableQty} {unitLabel(product.unit)}</p>
       </div>
     </div>
   </Modal>
@@ -260,7 +260,7 @@ const ProductInventory = () => {
                       onClick={() => router.push(`/stock/item-inventory?productDefinitionId=${p.productDefinitionId}`)}
                       className={`text-sm font-semibold tabular-nums hover:underline ${p.availableQty > 0 ? "text-emerald-700" : "text-slate-400"}`}
                     >
-                      {p.availableQty}
+                      {p.availableQty} {unitLabel(p.unit)}
                     </button>
                   </td>
                   <td className="px-4 py-3 text-right">

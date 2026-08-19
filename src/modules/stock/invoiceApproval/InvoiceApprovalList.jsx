@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Eye, Edit3, ClipboardCheck } from "lucide-react";
-import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, Modal, inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import InvoiceReceiveView from "@/modules/stock/tracking-orders/InvoiceReceiveView";
 import InvoiceReviewView from "./InvoiceReviewView";
 
@@ -69,7 +69,7 @@ const ApprovalDot = ({ status }) => {
 // same pattern as the Tracking Order card's invoice table.
 const ItemsCell = ({ lines }) => {
   const list = lines || [];
-  const summary = list.map((l) => `${l.productName} (${l.receivedQuantity})`).join(", ");
+  const summary = list.map((l) => `${l.productName} (${l.receivedQuantity} ${unitLabel(l.unit)})`).join(", ");
   return (
     <div className="max-w-[240px]">
       <p className="truncate text-sm text-slate-700">{summary || "—"}</p>
@@ -109,7 +109,7 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
             {(invoice.lines || []).map((l, i) => (
               <tr key={i}>
                 <td className={`${itemTd} font-medium text-slate-900`}>{l.productName}</td>
-                <td className={itemTdRight}>{l.receivedQuantity}</td>
+                <td className={itemTdRight}>{l.receivedQuantity} {unitLabel(l.unit)}</td>
               </tr>
             ))}
           </tbody>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Download, CheckCircle2, XCircle } from "lucide-react";
-import { inputCls, money } from "@/modules/stock/shared/StockSharedUI";
+import { inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 const ROWS_PAGE_SIZE = 10;
 
@@ -181,8 +181,8 @@ const LineCard = ({ line, taxType }) => {
         </div>
 
         <div className="mb-4 grid grid-cols-3 gap-4">
-          <DetailField label="Qty Received (Paid)" value={line.receivedQuantity ?? 0} />
-          <DetailField label="FOC Qty" value={line.focQuantity ?? 0} />
+          <DetailField label="Qty Received (Paid)" value={`${line.receivedQuantity ?? 0} ${unitLabel(line.unit)}`} />
+          <DetailField label="FOC Qty" value={`${line.focQuantity ?? 0} ${unitLabel(line.unit)}`} />
           <DetailField label="Rating" value={line.rating?.rating ? `${line.rating.rating} / 5` : "—"} />
         </div>
         {line.rating?.notes && (

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
-import { Modal, inputCls } from "@/modules/stock/shared/StockSharedUI";
+import { Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { loadSavedName, saveName } from "./userName";
 
 async function fetchDetail(id) {
@@ -23,7 +23,7 @@ async function fetchAvailableUnits(warehouseId, productDefinitionId) {
   return json.data || [];
 }
 
-const unitLabel = (item) => {
+const serialLabel = (item) => {
   const fv = item.fieldValues || {};
   return fv.imei || fv.serial_no || item._id.slice(-6).toUpperCase();
 };
@@ -81,7 +81,7 @@ const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected
                   <li key={u._id}>
                     <label className={`flex items-center gap-2 px-3 py-1.5 text-sm ${disabled ? "cursor-not-allowed text-slate-300" : "cursor-pointer text-slate-700 hover:bg-slate-50"}`}>
                       <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggle(u._id)} />
-                      {unitLabel(u)}
+                      {serialLabel(u)}
                     </label>
                   </li>
                 );
@@ -194,15 +194,16 @@ const ProcessTransferRequestModal = ({ requestId, onClose, onDone }) => {
             {detail.lines.map((l) => {
               const st = lineState[l._id] || { transferQty: 0, selectedItemIds: [] };
               const isIndividual = l.trackingMethod === "individual";
+              const unit = unitLabel(l.unit);
               return (
                 <div key={l._id} className="rounded-xl border border-slate-200 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{l.productName}</p>
-                      <p className="text-xs text-slate-500">Requested: {l.requestedQty} {isIndividual ? "· Individual tracked" : "· Group tracked"}</p>
+                      <p className="text-xs text-slate-500">Requested: {l.requestedQty} {unit} {isIndividual ? "· Individual tracked" : "· Group tracked"}</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <label className="text-xs font-semibold text-slate-600">Transfer</label>
+                      <label className="text-xs font-semibold text-slate-600">Transfer ({unit})</label>
                       <input
                         type="number" min="0" max={l.requestedQty} value={st.transferQty}
                         onChange={(e) => {
@@ -224,7 +225,7 @@ const ProcessTransferRequestModal = ({ requestId, onClose, onDone }) => {
                   )}
                   {st.transferQty < l.requestedQty && (
                     <p className="mt-2 text-xs font-medium text-amber-600">
-                      Shortfall of {l.requestedQty - st.transferQty} will be auto-closed as rejected on this line.
+                      Shortfall of {l.requestedQty - st.transferQty} {unit} will be auto-closed as rejected on this line.
                     </p>
                   )}
                 </div>

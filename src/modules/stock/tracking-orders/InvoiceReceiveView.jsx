@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { pathLabel } from "@/shared/category/categoryPath";
+import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
@@ -226,6 +227,7 @@ const UnitPriceSummary = ({ poLine, taxType }) => {
 
 const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alreadyReceived, onOpenRating }) => {
   const isIndividual = productDef?.trackingMethod === "individual";
+  const unit = unitLabel(productDef?.unit);
   const orderedQty = poLine.quantity;
   const usedByOthers = alreadyReceived || 0;
   const paidRows = lineState.rows.filter((r) => !r.isFoc);
@@ -279,10 +281,10 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
-          {isIndividual ? "Received units" : "Received quantity"}
+          {isIndividual ? "Received units" : "Received quantity"} ({unit})
         </p>
         <p className={`text-xs font-semibold tabular-nums ${overLimit ? "text-rose-600" : "text-slate-500"}`}>
-          Ordered {orderedQty} · Already in other invoices {usedByOthers} · Remaining {remaining}
+          Ordered {orderedQty} {unit} · Already in other invoices {usedByOthers} · Remaining {remaining}
         </p>
       </div>
 
@@ -337,7 +339,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
           </div>
         ) : (
           <div className="max-w-xs">
-            <label className={labelCls}>Quantity received</label>
+            <label className={labelCls}>Quantity received ({unit})</label>
             <input
               type="number" min="0" value={lineState.quantity}
               onChange={(e) => onLineChange({ ...lineState, quantity: e.target.value })}

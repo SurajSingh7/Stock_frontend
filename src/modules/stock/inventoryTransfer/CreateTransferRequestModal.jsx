@@ -3,16 +3,16 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { Plus, Trash2 } from "lucide-react";
-import { Modal, SearchableSelect, inputCls } from "@/modules/stock/shared/StockSharedUI";
+import { Modal, SearchableSelect, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { loadSavedName, saveName } from "./userName";
 
 const EMPTY_LINE = { productDefinitionId: "", requestedQty: "" };
 
-async function fetchProductOptions() {
+async function fetchProducts() {
   const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions?limit=1000`, { credentials: "include" });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load products");
-  return (json.data || []).map((p) => ({ value: p._id, label: p.name }));
+  return json.data || [];
 }
 
 const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, onClose, onCreated }) => {
@@ -22,15 +22,17 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
   const [name, setName] = useState(loadSavedName());
   const [lines, setLines] = useState([{ ...EMPTY_LINE }]);
 
-  const [productOptions, setProductOptions] = useState([]);
+  const [products, setProducts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetchProductOptions().then(setProductOptions).catch(() => setProductOptions([]));
+    fetchProducts().then(setProducts).catch(() => setProducts([]));
   }, []);
 
   const locationOptions = useMemo(() => locations.map((l) => ({ value: l._id, label: `${l.name} (${l.code})` })), [locations]);
+  const productOptions = useMemo(() => products.map((p) => ({ value: p._id, label: p.name })), [products]);
+  const productById = useMemo(() => new Map(products.map((p) => [p._id, p])), [products]);
 
   const updateLine = (idx, field, value) => {
     setLines((prev) => prev.map((l, i) => (i === idx ? { ...l, [field]: value } : l)));
@@ -111,7 +113,9 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
             </button>
           </div>
           <div className="space-y-2">
-            {lines.map((line, idx) => (
+            {lines.map((line, idx) => {
+              const unit = unitLabel(productById.get(line.productDefinitionId)?.unit);
+              return (
               <div key={idx} className="flex items-center gap-2">
                 <div className="flex-1">
                   <SearchableSelect
@@ -121,11 +125,16 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
                     placeholder="Select product"
                   />
                 </div>
-                <input
-                  type="number" min="1" value={line.requestedQty}
-                  onChange={(e) => updateLine(idx, "requestedQty", e.target.value)}
-                  placeholder="Qty" className={`${inputCls} w-24`}
-                />
+                <div className="relative w-28">
+                  <input
+                    type="number" min="1" value={line.requestedQty}
+                    onChange={(e) => updateLine(idx, "requestedQty", e.target.value)}
+                    placeholder="Qty" className={`${inputCls} ${unit ? "pr-14" : ""}`}
+                  />
+                  {unit && (
+                    <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-gray-400">{unit}</span>
+                  )}
+                </div>
                 <button
                   type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1}
                   className="rounded-md border border-gray-200 bg-white p-2 text-gray-400 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
@@ -133,7 +142,8 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

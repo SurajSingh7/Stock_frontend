@@ -17,6 +17,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import SendMailPopup from "./SendMailPopup";
+import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants                                                      */
@@ -304,7 +305,7 @@ const ProductsPopup = ({ row, onClose }) => {
               <tr key={i} className="transition hover:bg-slate-50/60">
                 <td className={itemTd}>{it.categoryName}</td>
                 <td className={`${itemTd} font-medium text-slate-900`}>{it.productName}</td>
-                <td className={itemTdRight}>{it.quantity}</td>
+                <td className={itemTdRight}>{it.quantity} {unitLabel(it.unit)}</td>
                 <td className={itemTdRight}>{Number(it.unitPrice).toLocaleString("en-IN")}</td>
                 <td className={itemTdRight}>{it.gstRate}%</td>
                 <td className={itemTdRight}>{Number(it.gstAmount).toLocaleString("en-IN")}</td>
@@ -325,7 +326,7 @@ const InfoPopup = ({ row, onClose }) => (
         <div key={i} className="rounded-xl bg-amber-50 px-4 py-3 text-sm ring-1 ring-inset ring-amber-100">
           <p className="font-medium text-slate-900">
             {s.productName}{" "}
-            <span className="font-normal">· {s.categoryName} · qty {s.quantity}</span>
+            <span className="font-normal">· {s.categoryName} · qty {s.quantity} {unitLabel(s.unit)}</span>
           </p>
           <p className="mt-0.5 text-xs text-amber-700">Reason · {s.poSkipReason || "—"}</p>
         </div>

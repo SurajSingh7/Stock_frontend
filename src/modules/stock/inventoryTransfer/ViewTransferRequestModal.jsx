@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowRight } from "lucide-react";
-import { Modal } from "@/modules/stock/shared/StockSharedUI";
+import { Modal, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 const STATUS_META = {
   PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200" },
@@ -90,6 +90,7 @@ const ViewTransferRequestModal = ({ requestId, onClose }) => {
               <thead className="bg-slate-50">
                 <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
                   <th className="px-3 py-2.5">Product</th>
+                  <th className="px-3 py-2.5">Unit</th>
                   <th className="px-3 py-2.5 text-right">Requested</th>
                   <th className="px-3 py-2.5 text-right">Transferred</th>
                   <th className="px-3 py-2.5 text-right">Rejected</th>
@@ -99,6 +100,7 @@ const ViewTransferRequestModal = ({ requestId, onClose }) => {
                 {(detail.lines || []).map((l) => (
                   <tr key={l._id}>
                     <td className="px-3 py-2 font-medium text-slate-900">{l.productName}</td>
+                    <td className="px-3 py-2 text-slate-500">{unitLabel(l.unit)}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-slate-700">{l.requestedQty}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-emerald-700">{l.transferredQty}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-rose-600">{l.rejectedQty}</td>

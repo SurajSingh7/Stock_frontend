@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Download, ExternalLink } from "lucide-react";
+import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -273,7 +274,7 @@ const PODetailsView = ({ context = {}, onBack }) => {
                   <td className="px-3 py-2.5 align-top tabular-nums text-slate-500">{idx + 1}</td>
                   <td className="px-3 py-2.5 align-top text-slate-700">{it.categoryName}</td>
                   <td className="px-3 py-2.5 align-top font-medium text-slate-900">{it.productName}</td>
-                  <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{it.quantity}</td>
+                  <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{it.quantity} {unitLabel(it.unit)}</td>
                   <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(it.taxable)}</td>
                   {isSplit ? (
                     <>

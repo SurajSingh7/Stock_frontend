@@ -31,16 +31,41 @@ const isPdfPath = (p) => /\.pdf($|\?)/i.test(String(p || ""));
 const UNIT_TYPES = [
   { value: "pieces", label: "Pieces" },
   { value: "meter", label: "Meter" },
-  { value: "kg", label: "Kg" },
-  { value: "box", label: "Box" },
-  { value: "litre", label: "Litre" },
-  { value: "dozen", label: "Dozen" },
 ];
 
 const TRACKING_METHODS = [
   { value: "individual", label: "Individual", description: "Each unit tracked separately (serial no., IMEI, etc.)" },
   { value: "quantity", label: "Group", description: "Tracked as a bulk quantity (notebooks, pens, cables, etc.)" },
 ];
+
+// Unit and Tracking Method are independent — both are explicit choices the
+// user makes (e.g. Group+Pieces for bottles, Individual+Meter for a
+// serialized cable reel are both valid). Never derive one from the other.
+const UNIT_LABEL = Object.fromEntries(UNIT_TYPES.map((u) => [u.value, u.label]));
+const unitLabel = (value) => UNIT_LABEL[value] || value || "";
+
+// The two "crossed" combinations warrant a confirmation before saving —
+// Individual normally implies per-unit Pieces, Group normally implies bulk
+// Meter, so picking the other unit alongside either needs an explicit
+// "yes, I mean it". The two "matched" combinations (Individual+Pieces,
+// Group+Meter) never warn.
+const isUnusualCombo = (trackingMethod, unit) =>
+  (trackingMethod === "individual" && unit === "meter") || (trackingMethod === "quantity" && unit === "pieces");
+
+const COMBO_WARNING_COPY = {
+  individual: {
+    title: "Individual Tracking with Meter Unit",
+    message:
+      "Individual tracking is normally used when each physical item is tracked separately. You have selected " +
+      "Meter as the unit with Individual tracking. Please confirm that you want to continue with this combination.",
+  },
+  quantity: {
+    title: "Group Tracking with Pieces Unit",
+    message:
+      "Group tracking is normally used for bulk/batch quantities such as Meter. You have selected Pieces as the " +
+      "unit with Group tracking. Please confirm that you want to continue with this combination.",
+  },
+};
 
 // Type filter is a DROPDOWN now (was a pill group)
 const TRACKING_FILTER_OPTIONS = [
@@ -733,7 +758,7 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
     ["Fields Count", row.selectedFields?.length ?? 0],
     ["GST Rate", row.gstRate ? `${row.gstRate}%` : "\u2014"],
     ["Warranty", row.warrantyYears ? `${row.warrantyYears} Year${row.warrantyYears === 1 ? "" : "s"}` : "\u2014"],
-    ["Unit", row.unit || "\u2014"],
+    ["Unit", unitLabel(row.unit) || "\u2014"],
     ["Stock Alert Threshold", row.stockAlertThreshold ?? "\u2014"],
     ["Status", row.status],
     ["Active", row.isActive ? "Yes" : "No"],
@@ -830,6 +855,10 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
+  // Individual+Meter is valid but unusual — holds the change here until the
+  // user confirms via the warning modal, instead of applying it immediately.
+  const [pendingCombo, setPendingCombo] = useState(null); // { field: 'unit'|'trackingMethod', value }
+
   const [gstOptions, setGstOptions] = useState([]);
   const [gstLoading, setGstLoading] = useState(true);
 
@@ -893,12 +922,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     );
   }, [fieldDefs, form.trackingMethod]);
 
-  const handleTrackingMethodChange = (value) => {
-    setForm((f) => ({ ...f, trackingMethod: value }));
-    setErrors((e) => ({ ...e, trackingMethod: undefined }));
-    if (!fieldDefsLoaded) loadFieldDefinitions();
-  };
-
   // When the tracking method changes (or field defs finish loading), drop
   // any already-selected field that's no longer applicable to the new method.
   useEffect(() => {
@@ -936,11 +959,46 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     setErrors((e) => ({ ...e, [key]: undefined }));
   };
 
+  // Unit and Tracking Method are independent — picking either one only ever
+  // asks for confirmation (never silently overrides the other) when the
+  // result would be the unusual Individual+Meter combination.
+  const handleUnitChange = (value) => {
+    if (isUnusualCombo(form.trackingMethod, value)) {
+      setPendingCombo({ field: "unit", value });
+      return;
+    }
+    updateField("unit", value);
+  };
+
+  const applyTrackingMethodChange = (value) => {
+    setForm((f) => ({ ...f, trackingMethod: value }));
+    setErrors((e) => ({ ...e, trackingMethod: undefined }));
+    if (!fieldDefsLoaded) loadFieldDefinitions();
+  };
+
+  const handleTrackingMethodChange = (value) => {
+    if (isUnusualCombo(value, form.unit)) {
+      setPendingCombo({ field: "trackingMethod", value });
+      return;
+    }
+    applyTrackingMethodChange(value);
+  };
+
+  const confirmPendingCombo = () => {
+    if (!pendingCombo) return;
+    if (pendingCombo.field === "unit") updateField("unit", pendingCombo.value);
+    else applyTrackingMethodChange(pendingCombo.value);
+    setPendingCombo(null);
+  };
+
+  const cancelPendingCombo = () => setPendingCombo(null);
+
   const validate = () => {
     const next = {};
     if (!categoryLocked && !form.category) next.category = "Leaf category is required";
     if (!form.name.trim()) next.name = "Product name is required";
     if (!form.trackingMethod) next.trackingMethod = "Please select a tracking method";
+    if (!form.unit) next.unit = "Please select a unit";
     if (!form.selectedFields.length) next.selectedFields = "Select at least one field";
     if (
       !form.warrantyYears ||
@@ -1152,13 +1210,20 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                 <FieldError message={errors.warrantyYears} />
               </div>
               <div>
-                <label className={labelCls}>Unit</label>
-                <select value={form.unit} onChange={(e) => updateField("unit", e.target.value)} className={inputCls}>
+                <label className={labelCls}>
+                  Unit
+                  <RequiredMark />
+                </label>
+                <select
+                  value={form.unit} onChange={(e) => handleUnitChange(e.target.value)}
+                  className={errors.unit ? inputErrCls : inputCls}
+                >
                   <option value="">Select unit</option>
                   {UNIT_TYPES.map((u) => (
                     <option key={u.value} value={u.value}>{u.label}</option>
                   ))}
                 </select>
+                <FieldError message={errors.unit} />
               </div>
               <div>
                 <label className={labelCls}>Stock Alert Threshold</label>
@@ -1241,6 +1306,33 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
           </div>
         </div>
       </div>
+
+      {pendingCombo && (() => {
+        const effectiveTrackingMethod = pendingCombo.field === "trackingMethod" ? pendingCombo.value : form.trackingMethod;
+        const copy = COMBO_WARNING_COPY[effectiveTrackingMethod] || COMBO_WARNING_COPY.individual;
+        return (
+          <Modal onClose={cancelPendingCombo} title={copy.title} maxWidth="max-w-md">
+            <div className="flex gap-3">
+              <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+              <p className="text-sm text-slate-600">{copy.message}</p>
+            </div>
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button
+                type="button" onClick={cancelPendingCombo}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button" onClick={confirmPendingCombo}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+              >
+                Continue
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
@@ -1849,7 +1941,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
                     <td className="px-4 py-3.5 text-sm text-slate-700 tabular-nums">
                       {row.gstRate ? `${row.gstRate}%` : "\u2014"}
-                      {row.unit ? ` \u00b7 ${row.unit}` : ""}
+                      {row.unit ? ` \u00b7 ${unitLabel(row.unit)}` : ""}
                       {row.warrantyYears ? ` \u00b7 ${row.warrantyYears}yr` : ""}
                     </td>
 
