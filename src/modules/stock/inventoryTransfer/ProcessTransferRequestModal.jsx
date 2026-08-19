@@ -28,7 +28,9 @@ const serialLabel = (item) => {
   return fv.imei || fv.serial_no || item._id.slice(-6).toUpperCase();
 };
 
-/* Per-line serial/IMEI picker — individual-tracked products only. */
+/* Per-line serial/IMEI picker — individual-tracked products only.
+   Auto Select fills the first `need` available units for the user;
+   Manual opens the checklist so they can pick/override by hand. */
 const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected }) => {
   const [open, setOpen] = useState(false);
   const [units, setUnits] = useState(null);
@@ -39,9 +41,12 @@ const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected
     setLoading(true);
     setErr(null);
     try {
-      setUnits(await fetchAvailableUnits(sourceLocationId, line.productDefinitionId));
+      const data = await fetchAvailableUnits(sourceLocationId, line.productDefinitionId);
+      setUnits(data);
+      return data;
     } catch (e) {
       setErr(e.message);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -58,14 +63,42 @@ const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected
     }
   };
 
+  const handleAutoSelect = async () => {
+    setOpen(true);
+    const data = units === null ? await load() : units;
+    if (data) onChangeSelected(data.slice(0, need).map((u) => u._id));
+  };
+
+  const productFields = (units?.[0]?.productDefinitionId?.selectedFields || [])
+    .slice()
+    .sort((a, c) => (a.order ?? 0) - (c.order ?? 0))
+    .map((sf) => sf.fieldDefId)
+    .filter(Boolean);
+
   return (
     <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2.5">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between text-xs font-semibold text-slate-600">
-        <span>Select units ({selected.length}/{need} selected)</span>
-        {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-      </button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <button type="button" onClick={() => setOpen((o) => !o)} className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+          <span>Select units ({selected.length}/{need} selected)</span>
+          {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
+        <div className="flex gap-1.5">
+          <button
+            type="button" onClick={handleAutoSelect}
+            className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 transition hover:bg-indigo-100"
+          >
+            Auto Select
+          </button>
+          <button
+            type="button" onClick={() => setOpen(true)}
+            className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+          >
+            Manual
+          </button>
+        </div>
+      </div>
       {open && (
-        <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+        <div className="mt-2 max-h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
           {loading || units === null ? (
             <p className="p-3 text-xs text-slate-400">Loading available units…</p>
           ) : err ? (
@@ -73,20 +106,40 @@ const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected
           ) : units.length === 0 ? (
             <p className="p-3 text-xs text-slate-400">No available units at the source location.</p>
           ) : (
-            <ul className="divide-y divide-slate-100">
-              {units.map((u) => {
-                const checked = selected.includes(u._id);
-                const disabled = !checked && selected.length >= need;
-                return (
-                  <li key={u._id}>
-                    <label className={`flex items-center gap-2 px-3 py-1.5 text-sm ${disabled ? "cursor-not-allowed text-slate-300" : "cursor-pointer text-slate-700 hover:bg-slate-50"}`}>
-                      <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggle(u._id)} />
-                      {serialLabel(u)}
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
+            <table className="w-full min-w-full border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50 text-left font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="w-8 px-2 py-1.5"></th>
+                  <th className="px-2 py-1.5">Product</th>
+                  {productFields.length > 0
+                    ? productFields.map((fd) => <th key={fd._id} className="px-2 py-1.5">{fd.label}</th>)
+                    : <th className="px-2 py-1.5">Unit</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {units.map((u) => {
+                  const checked = selected.includes(u._id);
+                  const disabled = !checked && selected.length >= need;
+                  return (
+                    <tr key={u._id} className={checked ? "bg-indigo-50/60" : ""}>
+                      <td className="px-2 py-1.5">
+                        <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggle(u._id)} />
+                      </td>
+                      <td className={`px-2 py-1.5 font-medium ${disabled ? "text-slate-300" : "text-slate-700"}`}>
+                        {u.productDefinitionId?.name || line.productName}
+                      </td>
+                      {productFields.length > 0
+                        ? productFields.map((fd) => (
+                          <td key={fd._id} className={`px-2 py-1.5 ${disabled ? "text-slate-300" : "text-slate-600"}`}>
+                            {u.fieldValues?.[fd.code] ?? "—"}
+                          </td>
+                        ))
+                        : <td className={`px-2 py-1.5 ${disabled ? "text-slate-300" : "text-slate-600"}`}>{serialLabel(u)}</td>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       )}
