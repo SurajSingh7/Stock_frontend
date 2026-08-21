@@ -510,16 +510,18 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
         setLines(initialLines);
         setActiveTabId(detail.po?.items?.[0] ? String(detail.po.items[0].quotationItemId) : null);
 
-        const mainWarehouse = wh.find((w) => w.code === "MAIN") || wh[0];
+        // Just the first active warehouse as a form prefill — there is no
+        // designated "main" warehouse; the receiver picks the real one.
+        const defaultWarehouse = wh[0];
         if (isEdit) {
           setInvoiceNumber(invoice.invoiceNumber || "");
           setInvoiceDate(invoice.invoiceDate ? invoice.invoiceDate.slice(0, 10) : todayStr());
           setExistingFile(invoice.invoiceFile || "");
-          setWarehouseId(invoice.warehouseId || mainWarehouse?._id || "");
+          setWarehouseId(invoice.warehouseId || defaultWarehouse?._id || "");
           setReceivedByName(invoice.receivedByName || "");
           setExtraCharges(invoice.extraCharges || []);
         } else {
-          setWarehouseId(mainWarehouse?._id || "");
+          setWarehouseId(defaultWarehouse?._id || "");
         }
       } catch (err) {
         setError(err.message);

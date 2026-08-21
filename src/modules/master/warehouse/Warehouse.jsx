@@ -320,14 +320,7 @@ const FilterBar = ({ search, onSearchChange, statusFilter, onStatusFilterChange 
 
 const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
   <tr className="transition hover:bg-slate-50/60">
-    <td className="px-4 py-3.5 text-sm font-mono text-slate-700">
-      {item.code}
-      {item.code === 'MAIN' && (
-        <span className="ml-2 inline-flex items-center rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
-          Default
-        </span>
-      )}
-    </td>
+    <td className="px-4 py-3.5 text-sm font-mono text-slate-700">{item.code}</td>
     <td className="px-4 py-3.5 text-sm font-medium text-slate-900">{item.name}</td>
     <td className="px-4 py-3.5">
       <RoleBadge role={item.locationRole} />
@@ -344,12 +337,7 @@ const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
         <IconBtn onClick={() => onView(item)} title="View" tone="indigo">{Icon.eye}</IconBtn>
         <IconBtn onClick={() => onEdit(item)} title="Edit" tone="orange">{Icon.edit}</IconBtn>
         {item.isActive ? (
-          <IconBtn
-            onClick={() => onDelete(item)}
-            title={item.code === 'MAIN' ? "The default Main Warehouse can't be deleted" : 'Delete'}
-            tone="red"
-            disabled={item.code === 'MAIN'}
-          >
+          <IconBtn onClick={() => onDelete(item)} title="Delete" tone="red">
             {Icon.trash}
           </IconBtn>
         ) : (

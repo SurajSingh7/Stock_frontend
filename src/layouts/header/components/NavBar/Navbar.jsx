@@ -6,19 +6,16 @@ import { usePathname } from "next/navigation";
 import { ChevronDown, Menu, X } from "lucide-react";
 import { usePermissions } from "@/context/PermissionContext";
 import { useFilteredNav } from "./PermissionNavBuilder";
-import { navCategories } from "./NavCategories";
+import { navCategories, adminNavCategories } from "./NavCategories";
 
 export const Navbar = () => {
-  const { permissions, userData } = usePermissions();
+  const { permissions, isAdmin } = usePermissions();
 
-  let filteredCategories;
-
-  if ((userData?.role || "").toLowerCase() === "admin"  ) {
-    filteredCategories = navCategories;
-  } else {
-    // filteredCategories = useFilteredNav(navCategories, permissions);
-    filteredCategories = navCategories;
-  }
+  const filteredNav = useFilteredNav(navCategories, permissions);
+  // Admin bypasses per-module filtering (mirrors the backend's own admin
+  // bypass in requirePermission) and additionally gets the Access Control
+  // section, which isn't a regular module so it never appears in `permissions`.
+  const filteredCategories = isAdmin ? [...navCategories, ...adminNavCategories] : filteredNav;
 
 
   const pathname = usePathname();
