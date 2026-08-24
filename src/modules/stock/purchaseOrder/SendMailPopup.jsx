@@ -82,13 +82,15 @@ const EmailChips = ({ value, onChange, placeholder }) => {
   );
 };
 
-const SendMailPopup = ({ row, onClose, onDone }) => {
+/**
+ * Send-mail form state — the toggle, the To address and the CC list.
+ * Exported so the PO review popup can host the very same fields and approve
+ * + send in one step instead of making the accounts team come back for it.
+ */
+export const useSendMailForm = (row) => {
   const [sendEmail, setSendEmail] = useState(true);
   const [to, setTo] = useState(row.email || "");
   const [cc, setCc] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
-  const [result, setResult] = useState(null); // "SENT" | "MANUAL"
 
   // CC defaults from the vendor-assigned (or default) Email notification —
   // the From address is no longer configured per-notification; sending
@@ -109,20 +111,109 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
     })();
   }, [row.vendorId]);
 
+  return { sendEmail, setSendEmail, to, setTo, cc, setCc };
+};
+
+/** Fires the send-mail action. Resolves to the resulting mode: "SENT" | "MANUAL". */
+export const submitSendMail = async (poId, { sendEmail, to, cc }) => {
+  const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}/send-mail`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ sendEmail, to: to.trim(), cc }),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
+  return json.data?.mailResult?.mode || (sendEmail ? "SENT" : "MANUAL");
+};
+
+/** Vendor details + send toggle + To/CC — the whole body of this popup, also
+ *  embedded verbatim in the PO review popup. */
+export const SendMailFields = ({ row, form }) => {
+  const { sendEmail, setSendEmail, to, setTo, cc, setCc } = form;
+
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      {/* Left column */}
+      <div className="space-y-4">
+        <div className={cardCls}>
+          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Vendor Details</p>
+          <dl className="space-y-2 text-sm">
+            <div>
+              <dt className="text-xs text-slate-500">Vendor / Company Name</dt>
+              <dd className="font-medium text-slate-900">{row.vendorName || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Contact Name</dt>
+              <dd className="font-medium text-slate-900">{row.contactName || "—"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-slate-500">Primary Email</dt>
+              <dd className="font-medium text-slate-900">{row.email || "—"}</dd>
+            </div>
+          </dl>
+
+          <label className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+            <span className="text-sm font-medium text-slate-700">Send Email Notification</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={sendEmail}
+              onClick={() => setSendEmail((s) => !s)}
+              className={`relative h-6 w-11 shrink-0 rounded-full transition ${sendEmail ? "bg-indigo-600" : "bg-slate-300"}`}
+            >
+              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${sendEmail ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+          </label>
+          {!sendEmail && (
+            <p className="mt-2 text-xs text-slate-500">Email sending will be skipped — this PO will be marked <span className="font-medium">Manual</span>.</p>
+          )}
+        </div>
+
+        <div className={cardCls}>
+          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">PO Details</p>
+          <div>
+            <dt className="text-xs text-slate-500">PO Number</dt>
+            <dd className="text-sm font-medium text-indigo-600">{row.poNumber || "—"}</dd>
+          </div>
+        </div>
+      </div>
+
+      {/* Right column */}
+      <div className={cardCls}>
+        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Email Details</p>
+        <div className="space-y-3">
+          <div>
+            <label className={labelCls}>To (Primary Vendor Email)</label>
+            <input value={to} onChange={(e) => setTo(e.target.value)} disabled={!sendEmail} className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>CC</label>
+            <EmailChips value={cc} onChange={setCc} placeholder="Add CC email…" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SendMailPopup = ({ row, onClose, onDone }) => {
+  const form = useSendMailForm(row);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null); // "SENT" | "MANUAL"
+
+  // Reached from the row action, which only offers a resend once the PO has
+  // already left the building — first sends now happen inside Review PO.
+  const isResend = row.status === "SENT";
+  const title = `${isResend ? "Resend Mail" : "Send Mail"} · ${row.poNumber}`;
+
   const submit = async () => {
-    if (sendEmail && !to.trim()) return setError("A To email is required");
+    if (form.sendEmail && !form.to.trim()) return setError("A To email is required");
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/send-mail`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ sendEmail, to: to.trim(), cc }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
-      setResult(json.data?.mailResult?.mode || (sendEmail ? "SENT" : "MANUAL"));
+      setResult(await submitSendMail(row.poId, form));
       setTimeout(() => onDone(), 900);
     } catch (err) {
       setError(err.message);
@@ -133,7 +224,7 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
 
   if (result) {
     return (
-      <Modal onClose={onDone} title={`Send Mail · ${row.poNumber}`} maxWidth="max-w-md">
+      <Modal onClose={onDone} title={title} maxWidth="max-w-md">
         <div className="flex flex-col items-center gap-2 py-6 text-center">
           <span className={`inline-flex h-12 w-12 items-center justify-center rounded-full ${result === "SENT" ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-500"}`}>
             <Mail className="h-6 w-6" />
@@ -148,70 +239,10 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
   }
 
   return (
-    <Modal onClose={onClose} title={`Send Mail · ${row.poNumber}`}>
+    <Modal onClose={onClose} title={title}>
       {error && <div className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Left column */}
-        <div className="space-y-4">
-          <div className={cardCls}>
-            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Vendor Details</p>
-            <dl className="space-y-2 text-sm">
-              <div>
-                <dt className="text-xs text-slate-500">Vendor / Company Name</dt>
-                <dd className="font-medium text-slate-900">{row.vendorName || "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Contact Name</dt>
-                <dd className="font-medium text-slate-900">{row.contactName || "—"}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-slate-500">Primary Email</dt>
-                <dd className="font-medium text-slate-900">{row.email || "—"}</dd>
-              </div>
-            </dl>
-
-            <label className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5">
-              <span className="text-sm font-medium text-slate-700">Send Email Notification</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={sendEmail}
-                onClick={() => setSendEmail((s) => !s)}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition ${sendEmail ? "bg-indigo-600" : "bg-slate-300"}`}
-              >
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${sendEmail ? "translate-x-5" : "translate-x-0.5"}`} />
-              </button>
-            </label>
-            {!sendEmail && (
-              <p className="mt-2 text-xs text-slate-500">Email sending will be skipped — this PO will be marked <span className="font-medium">Manual</span>.</p>
-            )}
-          </div>
-
-          <div className={cardCls}>
-            <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">PO Details</p>
-            <div>
-              <dt className="text-xs text-slate-500">PO Number</dt>
-              <dd className="text-sm font-medium text-indigo-600">{row.poNumber || "—"}</dd>
-            </div>
-          </div>
-        </div>
-
-        {/* Right column */}
-        <div className={cardCls}>
-          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Email Details</p>
-          <div className="space-y-3">
-            <div>
-              <label className={labelCls}>To (Primary Vendor Email)</label>
-              <input value={to} onChange={(e) => setTo(e.target.value)} disabled={!sendEmail} className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>CC</label>
-              <EmailChips value={cc} onChange={setCc} placeholder="Add CC email…" />
-            </div>
-          </div>
-        </div>
-      </div>
+      <SendMailFields row={row} form={form} />
 
       <div className="mt-6 flex justify-end gap-2.5 border-t border-slate-200 pt-5">
         <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">
@@ -221,7 +252,7 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
           type="button" disabled={saving} onClick={submit}
           className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? "Sending…" : "Send"}
+          {saving ? (isResend ? "Resending…" : "Sending…") : isResend ? "Resend" : "Send"}
         </button>
       </div>
     </Modal>

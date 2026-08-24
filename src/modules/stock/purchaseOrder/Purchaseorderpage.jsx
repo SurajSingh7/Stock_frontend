@@ -16,7 +16,7 @@ import {
   Mail,
   CheckCircle2,
 } from "lucide-react";
-import SendMailPopup from "./SendMailPopup";
+import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields } from "./SendMailPopup";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
@@ -335,47 +335,105 @@ const InfoPopup = ({ row, onClose }) => (
   </Modal>
 );
 
+/**
+ * Review + send in one popup. The accounts team should never have to open the
+ * PO twice: approving it hands it straight to the vendor, so APPROVED and SENT
+ * both land from a single "Approve & Send PO" click. The mail fields are the
+ * exact ones from SendMailPopup, reused rather than re-implemented.
+ */
 const ReviewPopup = ({ row, onClose, onDone }) => {
+  const mail = useSendMailForm(row);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
+  const [approved, setApproved] = useState(false); // approve landed — only the send is left
+  const [result, setResult] = useState(null);      // "SENT" | "MANUAL"
 
-  const act = async (path, body) => {
-    setBusy(true); setError(null);
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/${path}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
-      onDone();
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  const patch = async (path, body) => {
+    const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/${path}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+    return json;
   };
 
+  // Once the approve has gone through the board is stale, so closing has to
+  // refresh it — otherwise the row would still offer "Review PO".
+  const close = () => (approved ? onDone() : onClose());
+
+  const reject = async () => {
+    setBusy(true); setError(null);
+    try { await patch("reject", { rejectedReason: reason }); onDone(); }
+    catch (e) { setError(e.message); setBusy(false); }
+  };
+
+  const approveAndSend = async () => {
+    if (mail.sendEmail && !mail.to.trim()) return setError("A To email is required");
+    setBusy(true); setError(null);
+    try {
+      // Skipped on a retry: the PO is already APPROVED, only the send failed.
+      if (!approved) { await patch("approve"); setApproved(true); }
+      setResult(await submitSendMail(row.poId, mail));
+      setTimeout(() => onDone(), 900);
+    } catch (e) { setError(e.message); setBusy(false); }
+  };
+
+  if (result) {
+    return (
+      <Modal onClose={onDone} title={`Review ${row.poNumber}`}>
+        <div className="flex flex-col items-center gap-2 py-6 text-center">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+            <CheckCircle2 className="h-6 w-6" />
+          </span>
+          <p className="text-base font-semibold text-slate-900">Approved &amp; {result === "SENT" ? "Mail Sent" : "Marked Manual"}</p>
+          <p className="text-sm text-slate-500">
+            {result === "SENT"
+              ? "The PO was approved and emailed to the vendor."
+              : "The PO was approved and marked as manually handled — no email was sent."}
+          </p>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal onClose={onClose} title={`Review ${row.poNumber}`}>
-      {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
+    <Modal onClose={close} title={`Review ${row.poNumber}`} maxWidth="max-w-3xl">
+      {error && (
+        <div className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">
+          {error}
+          {approved && <span className="mt-1 block text-xs">The PO is already approved — only the send needs retrying.</span>}
+        </div>
+      )}
+
       <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-slate-50 p-4 text-sm">
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Vendor</p><p className="mt-0.5 truncate text-slate-900">{row.vendorName}</p></div>
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Amount</p><p className="mt-0.5 font-semibold text-slate-900 tabular-nums">{money(row.totalAmount)}</p></div>
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Items</p><p className="mt-0.5 text-slate-900 tabular-nums">{row.items.length}</p></div>
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Entity</p><p className="mt-0.5 text-slate-900">{row.entityAlias || "—"}</p></div>
       </div>
+
       {rejecting ? (
         <>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (optional)" className={`${inputCls} mb-3`} />
           <div className="flex justify-end gap-2.5">
             <button type="button" onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Cancel</button>
-            <button type="button" disabled={busy} onClick={() => act("reject", { rejectedReason: reason })} className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60">Confirm reject</button>
+            <button type="button" disabled={busy} onClick={reject} className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60">Confirm reject</button>
           </div>
         </>
       ) : (
-        <div className="flex justify-end gap-2.5">
-          <button type="button" onClick={() => setRejecting(true)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50">Reject</button>
-          <button type="button" disabled={busy} onClick={() => act("approve")} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">Approve</button>
-        </div>
+        <>
+          <SendMailFields row={row} form={mail} />
+
+          <div className="mt-6 flex justify-end gap-2.5 border-t border-slate-200 pt-5">
+            <button type="button" onClick={() => setRejecting(true)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50">Reject</button>
+            <button type="button" disabled={busy} onClick={approveAndSend} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">
+              {busy ? "Working…" : approved ? "Retry send" : "Approve & Send PO"}
+            </button>
+          </div>
+        </>
       )}
     </Modal>
   );
@@ -510,11 +568,13 @@ const buildRowActions = (row) => {
     inline.push({ type: "iconText", key: "view", label: "View PO", text: "PO", icon: Eye, tone: "indigo" });
   }
 
-  // APPROVED: only before the first send (mailResult unset) — status moves
-  // to SENT the moment mail goes out. SENT: always available, so the PO can
-  // be resent as many times as needed.
+  // SENT: always available, so the PO can be resent as many times as needed.
+  // APPROVED is now only reachable when Review PO approved the PO but the send
+  // that follows it failed — the fallback keeps such a PO from being a dead
+  // end; on the happy path the row goes straight to SENT and never offers a
+  // first "Send Mail" of its own.
   if ((s === "APPROVED" && !row.mailResult?.mode) || s === "SENT") {
-    inline.push({ type: "icon", key: "sendMail", label: "Send Mail", icon: Mail, tone: "green" });
+    inline.push({ type: "icon", key: "sendMail", label: s === "SENT" ? "Resend Mail" : "Send Mail", icon: Mail, tone: "green" });
   }
 
   if (s === "GENERATED") {
