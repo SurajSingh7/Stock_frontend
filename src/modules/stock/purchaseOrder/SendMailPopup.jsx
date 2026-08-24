@@ -203,9 +203,9 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null); // "SENT" | "MANUAL"
 
-  // Reached from the row action, which only offers a resend once the PO has
-  // already left the building — first sends now happen inside Review PO.
-  const isResend = row.status === "SENT";
+  // First sends happen inside Review PO, so this popup is normally a resend.
+  // The mailResult (not the status — APPROVED is terminal) says which it is.
+  const isResend = !!row.mailResult?.mode;
   const title = `${isResend ? "Resend Mail" : "Send Mail"} · ${row.poNumber}`;
 
   const submit = async () => {

@@ -41,7 +41,6 @@ const STATUS_META = {
   GENERATED: { label: "PO Generated", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", border: "border-l-sky-400" },
   APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400" },
   REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400" },
-  SENT: { label: "Sent", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500", border: "border-l-indigo-400" },
 };
 
 const SHORT_STATUS_LABEL = {
@@ -49,7 +48,6 @@ const SHORT_STATUS_LABEL = {
   GENERATED: "Generated",
   APPROVED: "Approved",
   REJECTED: "Rejected",
-  SENT: "Sent",
 };
 
 const TAB_STYLES = {
@@ -568,13 +566,15 @@ const buildRowActions = (row) => {
     inline.push({ type: "iconText", key: "view", label: "View PO", text: "PO", icon: Eye, tone: "indigo" });
   }
 
-  // SENT: always available, so the PO can be resent as many times as needed.
-  // APPROVED is now only reachable when Review PO approved the PO but the send
-  // that follows it failed — the fallback keeps such a PO from being a dead
-  // end; on the happy path the row goes straight to SENT and never offers a
-  // first "Send Mail" of its own.
-  if ((s === "APPROVED" && !row.mailResult?.mode) || s === "SENT") {
-    inline.push({ type: "icon", key: "sendMail", label: s === "SENT" ? "Resend Mail" : "Send Mail", icon: Mail, tone: "green" });
+  // APPROVED is terminal — there is no SENT status. Whether the PO already
+  // reached the vendor is told by mailResult: once it exists the action is a
+  // resend, and it stays available indefinitely. Without it the PO was
+  // approved but the send that follows never landed, so offer the first send.
+  if (s === "APPROVED") {
+    inline.push({
+      type: "icon", key: "sendMail", icon: Mail, tone: "green",
+      label: row.mailResult?.mode ? "Resend Mail" : "Send Mail",
+    });
   }
 
   if (s === "GENERATED") {
@@ -623,7 +623,7 @@ const ActionBar = ({ row, on }) => {
 const PurchaseOrderPage = () => {
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
-  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
+  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
   const [entities, setEntities] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -670,7 +670,7 @@ const PurchaseOrderPage = () => {
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load board");
 
       setBoard(json.data?.board || []);
-      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
+      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
       setPagination(json.pagination || { total: 0, totalPages: 1 });
     } catch (e) {
       setError(e.message); setBoard([]);
@@ -820,7 +820,6 @@ const PurchaseOrderPage = () => {
     { key: "PO_PENDING", label: "PO Pending", count: counts.PO_PENDING },
     { key: "GENERATED", label: "PO Generated", count: counts.GENERATED },
     { key: "APPROVED", label: "PO Approved", count: counts.APPROVED },
-    { key: "SENT", label: "PO Sent", count: counts.SENT },
     { key: "REJECTED", label: "PO Rejected", count: counts.REJECTED },
   ];
 
@@ -960,7 +959,7 @@ const PurchaseOrderPage = () => {
                       <TruncateText text={row.entityAlias} title="Entity" />
                     </div>
                     <div className="col-span-3 flex flex-wrap items-center justify-end gap-1.5">
-                      {row.status === "SENT" && row.mailResult?.mode && (
+                      {row.mailResult?.mode && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
                           <CheckCircle2 className="h-3 w-3" />
                           {row.mailResult.mode === "SENT" ? "Mail Sent" : "Manual"}

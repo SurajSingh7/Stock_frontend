@@ -7,29 +7,27 @@ export const STAGES = [
   { key: "PO_PENDING", label: "PO Pending" },
   { key: "PO_GENERATED", label: "PO Generated" },
   { key: "PO_APPROVED", label: "PO Approved" },
-  { key: "PO_SENT", label: "PO Sent" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "PARTIAL", label: "Partial" },
   { key: "COMPLETED", label: "Completed" },
 ];
 
-// Tracking-order status -> stage index on the 8-node tracker above.
+// Tracking-order status -> stage index on the 7-node tracker above.
 export const stageIndexForStatus = (status) => {
   switch (status) {
     case "ENTITY_PENDING": return 0;
     case "PO_PENDING": return 1;
     case "PO_GENERATED": return 2;
     case "PO_APPROVED": return 3;
-    case "PO_SENT": return 4;
-    case "IN_PROGRESS": return 5;
-    case "PARTIAL": return 6;
-    case "COMPLETED": return 7;
+    case "IN_PROGRESS": return 4;
+    case "PARTIAL": return 5;
+    case "COMPLETED": return 6;
     default: return -1; // REJECTED / NOT_REQUIRED — off the happy path
   }
 };
 
 /**
- * Horizontal 8-stage progress tracker. `activeStage` (0-7, or -1/null for
+ * Horizontal 7-stage progress tracker. `activeStage` (0-6, or -1/null for
  * none) highlights every node up to and including it — completed nodes in
  * emerald, the active node in indigo, everything after stays neutral gray.
  * Pass null for the page's resting state; the Tracking Orders board updates

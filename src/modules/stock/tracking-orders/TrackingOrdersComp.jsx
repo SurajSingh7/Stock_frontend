@@ -37,7 +37,6 @@ const STATUS_META = {
   PO_PENDING: { label: "PO Pending", badge: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500", border: "border-l-orange-400", pill: "bg-orange-500 text-white" },
   PO_GENERATED: { label: "PO Generated", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", border: "border-l-sky-400", pill: "bg-sky-500 text-white" },
   PO_APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
-  PO_SENT: { label: "PO Sent", badge: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500", border: "border-l-orange-400", pill: "bg-orange-500 text-white" },
   IN_PROGRESS: { label: "In Progress", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", border: "border-l-amber-400", pill: "bg-amber-500 text-white" },
   PARTIAL: { label: "Partial", badge: "bg-yellow-50 text-yellow-700 ring-yellow-200", dot: "bg-yellow-500", border: "border-l-yellow-400", pill: "bg-yellow-500 text-white" },
   COMPLETED: { label: "Completed", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
@@ -51,7 +50,6 @@ const TAB_LIST = [
   { key: "PO_PENDING", label: "PO Pending" },
   { key: "PO_GENERATED", label: "PO Generated" },
   { key: "PO_APPROVED", label: "PO Approved" },
-  { key: "PO_SENT", label: "PO Sent" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "PARTIAL", label: "Partial" },
   { key: "COMPLETED", label: "Completed" },
@@ -61,13 +59,14 @@ const TAB_LIST = [
 
 const DEFAULT_COUNTS = {
   ALL: 0, ENTITY_PENDING: 0, PO_PENDING: 0, PO_GENERATED: 0,
-  PO_APPROVED: 0, PO_SENT: 0, IN_PROGRESS: 0, PARTIAL: 0, COMPLETED: 0, REJECTED: 0, NOT_REQUIRED: 0,
+  PO_APPROVED: 0, IN_PROGRESS: 0, PARTIAL: 0, COMPLETED: 0, REJECTED: 0, NOT_REQUIRED: 0,
 };
 
-// Add Items only while there's still something to receive.
-const RECEIVABLE_STATUSES = new Set(["PO_SENT", "IN_PROGRESS", "PARTIAL"]);
-// Overall Summary / Invoices are meaningful once the PO has been sent.
-const RECEIVING_FLOW_STATUSES = new Set(["PO_SENT", "IN_PROGRESS", "PARTIAL", "COMPLETED"]);
+// Add Items only while there's still something to receive. Receiving opens at
+// PO_APPROVED — there is no PO_SENT stage any more, approving a PO mails it.
+const RECEIVABLE_STATUSES = new Set(["PO_APPROVED", "IN_PROGRESS", "PARTIAL"]);
+// Overall Summary / Invoices are meaningful once the PO has been approved.
+const RECEIVING_FLOW_STATUSES = new Set(["PO_APPROVED", "IN_PROGRESS", "PARTIAL", "COMPLETED"]);
 
 /* ============================================================= */
 /* Searchable status filter — same pattern as the PO Approval     */
