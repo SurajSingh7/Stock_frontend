@@ -30,11 +30,13 @@ export const config = {
     /*
      * Match all routes except:
      * - api
+     * - erp-api (server-side proxy to the ERP backend, see next.config.mjs;
+     *   it serves JSON to fetch() and must not be redirected to /)
      * - _next
      * - static files
      * - favicon
      */
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)",
+    "/((?!api|erp-api|_next/static|_next/image|favicon.ico|.*\\..*).*)",
   ],
 };
 

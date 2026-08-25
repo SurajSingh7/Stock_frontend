@@ -65,50 +65,6 @@ export const buildStateOption = (key) => {
 
 export const STATE_OPTIONS = Object.keys(STATES).map((key) => buildStateOption(key));
 
-/*
- FUTURE GST API INTEGRATION
-
- Replace mock data with third party GST API.
-
- Expected API Response:
-
- {
-   gstNumber:"",
-   legalName:"",
-   tradeName:"",
-   panNumber:"",
-   state:"",
-   stateCode:"",
-   address:"",
-   verified:true
- }
-
- After successful verify auto fill:
- - Company Name
- - PAN Number
- - State
- - State Code
- - Address
-
- IMPORTANT: only replace the body of handleVerifyGST() / mockVerifyGST()
- below with the real API call. No UI changes required in Vendors.jsx or
- VendorForm.jsx — they only consume the shape returned here.
-*/
-export const mockVerifyGST = async (gstNumber) => {
-  await new Promise((resolve) => setTimeout(resolve, 900));
-
-  if (!gstNumber || gstNumber.trim().length < 15) {
-    throw new Error("Enter a valid 15-character GST number before verifying");
-  }
-
-  return {
-    gstNumber: gstNumber.toUpperCase(),
-    legalName: "Sample Legal Name Pvt Ltd",
-    tradeName: "Sample Trade Name",
-    panNumber: gstNumber.toUpperCase().substring(2, 12),
-    state: "Haryana",
-    stateCode: "06",
-    address: "Sample address auto-filled from GST verification",
-    verified: true,
-  };
-};
+// GST verification now calls the real third-party API through the ERP
+// backend — see ./gstVerification.js. It lives in its own module so this
+// file stays what its header promises: frontend constants only.

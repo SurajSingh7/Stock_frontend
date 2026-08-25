@@ -18,13 +18,11 @@ import {
 } from "lucide-react";
 import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields } from "./SendMailPopup";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 
 /* ============================================================= */
 /* Constants                                                      */
 /* ============================================================= */
-
-const INTERNAL_COMPANIES_URL =
-  "https://gist.githubusercontent.com/SurajSingh7/ac8ffea18746e9fea058db22054bd3f3/raw/internal-companies.json";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmt = (d) =>
@@ -624,7 +622,6 @@ const PurchaseOrderPage = () => {
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
   const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
-  const [entities, setEntities] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -684,10 +681,6 @@ const PurchaseOrderPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(INTERNAL_COMPANIES_URL); const j = await r.json();
-        setEntities((j.data || []).filter((e) => e.isActive !== false && e.isShownOnDropDown !== false));
-      } catch { }
-      try {
         const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
         const j = await r.json(); if (j.success) setVendors(j.data || []);
       } catch { }
@@ -698,7 +691,7 @@ const PurchaseOrderPage = () => {
     })();
   }, []);
 
-  const aliases = useMemo(() => [...new Set(entities.map((e) => e.alias).filter(Boolean))], [entities]);
+  const { aliases } = useInternalEntities();
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v._id, label: v.name })), [vendors]);
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })),

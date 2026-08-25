@@ -2,14 +2,21 @@
 
 import { useEffect, useState } from "react";
 
+// Internal companies come from the ERP backend's config master data. The call
+// goes through the same-origin /erp-api rewrite (next.config.mjs) because that
+// host only whitelists https://sales.gtel.in for CORS — a direct browser fetch
+// would fail in local dev.
+//
+// The endpoint is paginated (default limit 10), so ask for one large page:
+// the full list is ~24 rows and every consumer needs all of them to build the
+// Entity/State dropdowns.
 const INTERNAL_COMPANIES_URL =
-  "https://gist.githubusercontent.com/SurajSingh7/ac8ffea18746e9fea058db22054bd3f3/raw/internal-companies.json";
+  "/erp-api/config/internal/company/all?page=1&limit=1000&isActive=true";
 
-// Entity/State master data — same external source used by PO creation
-// (see stock-backend CLAUDE.md §1.11/18.9: a temporary stub pending a real
-// internal Entity API). Kept as one hook so every screen that needs
-// Entity/State dropdowns (Tracking Orders' "+ Add Entity" popup, and the
-// read-only display on PO Create/Edit) reads the exact same list.
+// Entity/State master data — same source used by PO creation. Kept as one hook
+// so every screen that needs Entity/State dropdowns (Tracking Orders'
+// "+ Add Entity" popup, the Purchase Order board filter, and the read-only
+// display on PO Create/Edit) reads the exact same list.
 export default function useInternalEntities() {
   const [entities, setEntities] = useState([]);
   const [loading, setLoading] = useState(true);
