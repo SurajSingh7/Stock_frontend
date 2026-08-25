@@ -1,10 +1,12 @@
 import Category from '@/modules/master/category/Category';
-import React from 'react'
+import React, { Suspense } from 'react'
 
 const page = () => {
   return (
     <div>
-        <Category/>
+        <Suspense fallback={null}>
+          <Category/>
+        </Suspense>
     </div>
   )
 }
