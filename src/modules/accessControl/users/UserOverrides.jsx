@@ -9,14 +9,22 @@ import {
   getScopePolicies,
   setScopePolicy,
   getEffectivePermissions,
+  getEntityAccess,
+  setEntityAccess,
 } from '../api';
 import { searchHrmsUsers } from '../hrmsDirectory';
+import useInternalEntities from '@/modules/stock/shared/useInternalEntities';
 import { PageHeader, Card, Field, PrimaryButton, ActionChecklist, Picker, inputCls, th, EmptyRow } from '../shared';
 
 const SCOPES = [
   { value: 'OWN_BRANCH', label: 'Own branch only' },
   { value: 'ALL_BRANCHES', label: 'All branches' },
   { value: 'SPECIFIC_BRANCHES', label: 'Specific branches' },
+];
+
+const ENTITY_SCOPES = [
+  { value: 'ALL_ENTITIES', label: 'All entities' },
+  { value: 'SPECIFIC_ENTITIES', label: 'Specific entities' },
 ];
 
 const getActiveWarehouses = async () => {
@@ -37,11 +45,22 @@ const UserOverrides = () => {
   const [scope, setScope] = useState('OWN_BRANCH');
   const [allowedBranchIds, setAllowedBranchIds] = useState([]);
 
+  // Entity access is per-user, so it lives outside the module-dependent state.
+  const [entityScope, setEntityScope] = useState('ALL_ENTITIES');
+  const [allowedEntityAliases, setAllowedEntityAliases] = useState([]);
+  const [savingEntity, setSavingEntity] = useState(false);
+
   const [overrides, setOverrides] = useState([]);
   const [scopePolicies, setScopePolicies] = useState([]);
   const [effective, setEffective] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Reuses the same master-data hook the Tracking Orders and PO screens use, so
+  // the alias list can never drift from the one people actually pick entities
+  // from. Only the aliases are used here — a grant of "GTEL" is meant to cover
+  // every one of that company's state registrations.
+  const { aliases, loading: aliasesLoading } = useInternalEntities();
 
   useEffect(() => {
     getModules().then((res) => setModules(res.data || [])).catch((err) => toast.error(err.message));
@@ -55,13 +74,23 @@ const UserOverrides = () => {
       setOverrides([]);
       setScopePolicies([]);
       setEffective([]);
+      setEntityScope('ALL_ENTITIES');
+      setAllowedEntityAliases([]);
       return;
     }
     setLoading(true);
     try {
-      const [ov, sp] = await Promise.all([getUserOverrides(u.id), getScopePolicies(u.id)]);
+      const [ov, sp, ea] = await Promise.all([
+        getUserOverrides(u.id),
+        getScopePolicies(u.id),
+        getEntityAccess(u.id),
+      ]);
       setOverrides(ov.data || []);
       setScopePolicies(sp.data || []);
+      // The API returns the effective state (ALL_ENTITIES) even when no row
+      // exists yet, so this always reflects reality rather than a blank form.
+      setEntityScope(ea.data?.scope || 'ALL_ENTITIES');
+      setAllowedEntityAliases(ea.data?.allowedEntityAliases || []);
       if (u.roleId) {
         const eff = await getEffectivePermissions(u.id, u.roleId);
         setEffective(eff.data || []);
@@ -101,6 +130,28 @@ const UserOverrides = () => {
 
   const toggleBranch = (id) =>
     setAllowedBranchIds((prev) => (prev.includes(id) ? prev.filter((b) => b !== id) : [...prev, id]));
+
+  const toggleAlias = (alias) =>
+    setAllowedEntityAliases((prev) =>
+      prev.includes(alias) ? prev.filter((a) => a !== alias) : [...prev, alias]
+    );
+
+  const handleSaveEntityAccess = async () => {
+    if (!user) return toast.error('Pick a user first.');
+    if (entityScope === 'SPECIFIC_ENTITIES' && allowedEntityAliases.length === 0) {
+      return toast.error('Pick at least one entity, or choose All entities.');
+    }
+    setSavingEntity(true);
+    try {
+      await setEntityAccess({ userId: user.id, scope: entityScope, allowedEntityAliases });
+      toast.success('Entity access saved.');
+      await loadUser(user);
+    } catch (err) {
+      toast.error(err.message || 'Failed to save entity access.');
+    } finally {
+      setSavingEntity(false);
+    }
+  };
 
   const handleSaveOverride = async () => {
     if (!user || !moduleId) return toast.error('Pick a user and a module first.');
@@ -159,6 +210,57 @@ const UserOverrides = () => {
                   {modules.map((m) => <option key={m._id} value={m._id}>{m.name}</option>)}
                 </select>
               </Field>
+            </div>
+          </Card>
+
+          <Card
+            title="Entity access"
+            description="Which company's paperwork this person handles — Purchase Orders, Invoices and Tracking Orders. Applies to the person, not to one module, so it can't differ between those screens."
+          >
+            <div className="space-y-4">
+              <div className="space-y-2">
+                {ENTITY_SCOPES.map((s) => (
+                  <label key={s.value} className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="entityScope"
+                      checked={entityScope === s.value}
+                      onChange={() => setEntityScope(s.value)}
+                      disabled={!user}
+                    />
+                    {s.label}
+                  </label>
+                ))}
+              </div>
+
+              {entityScope === 'SPECIFIC_ENTITIES' && (
+                <div className="flex flex-wrap gap-2">
+                  {aliasesLoading ? (
+                    <p className="text-sm text-slate-400">Loading entities…</p>
+                  ) : aliases.length === 0 ? (
+                    <p className="text-sm text-rose-600">Couldn’t load the entity list.</p>
+                  ) : (
+                    aliases.map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => toggleAlias(a)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                          allowedEntityAliases.includes(a)
+                            ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                            : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50'
+                        }`}
+                      >
+                        {a}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+
+              <PrimaryButton onClick={handleSaveEntityAccess} disabled={savingEntity || !user}>
+                {savingEntity ? 'Saving…' : 'Save entity access'}
+              </PrimaryButton>
             </div>
           </Card>
 
@@ -221,7 +323,7 @@ const UserOverrides = () => {
                 {!user ? (
                   <EmptyRow colSpan={3}>Pick a user to preview their effective access.</EmptyRow>
                 ) : !user.roleId ? (
-                  <EmptyRow colSpan={3}>This user has no role on HRMS yet — can't compute effective access.</EmptyRow>
+                  <EmptyRow colSpan={3}>This user has no role on HRMS yet — can’t compute effective access.</EmptyRow>
                 ) : loading ? (
                   <EmptyRow colSpan={3}>Loading…</EmptyRow>
                 ) : effective.length === 0 ? (

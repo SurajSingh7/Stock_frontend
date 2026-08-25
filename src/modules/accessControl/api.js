@@ -33,6 +33,10 @@ export const setUserOverride = (payload) => post(`${BASE}/user-overrides`, paylo
 export const getScopePolicies = (userId) => get(`${BASE}/scope-policies?userId=${encodeURIComponent(userId)}`);
 export const setScopePolicy = (payload) => post(`${BASE}/scope-policies`, payload);
 
+// ─── Entity access — per USER, so no moduleId ───────────────────────────────
+export const getEntityAccess = (userId) => get(`${BASE}/entity-access?userId=${encodeURIComponent(userId)}`);
+export const setEntityAccess = (payload) => post(`${BASE}/entity-access`, payload);
+
 // ─── Effective permissions preview ──────────────────────────────────────────
 export const getEffectivePermissions = (userId, roleId) =>
   get(`${BASE}/effective-permissions?userId=${encodeURIComponent(userId)}&roleId=${encodeURIComponent(roleId)}`);
