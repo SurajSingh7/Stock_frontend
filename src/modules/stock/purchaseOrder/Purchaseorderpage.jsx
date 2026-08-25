@@ -16,14 +16,13 @@ import {
   Mail,
   CheckCircle2,
 } from "lucide-react";
-import SendMailPopup from "./SendMailPopup";
+import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields } from "./SendMailPopup";
+import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 
 /* ============================================================= */
 /* Constants                                                      */
 /* ============================================================= */
-
-const INTERNAL_COMPANIES_URL =
-  "https://gist.githubusercontent.com/SurajSingh7/ac8ffea18746e9fea058db22054bd3f3/raw/internal-companies.json";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmt = (d) =>
@@ -40,7 +39,6 @@ const STATUS_META = {
   GENERATED: { label: "PO Generated", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", border: "border-l-sky-400" },
   APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400" },
   REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400" },
-  SENT: { label: "Sent", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500", border: "border-l-indigo-400" },
 };
 
 const SHORT_STATUS_LABEL = {
@@ -48,7 +46,6 @@ const SHORT_STATUS_LABEL = {
   GENERATED: "Generated",
   APPROVED: "Approved",
   REJECTED: "Rejected",
-  SENT: "Sent",
 };
 
 const TAB_STYLES = {
@@ -304,7 +301,7 @@ const ProductsPopup = ({ row, onClose }) => {
               <tr key={i} className="transition hover:bg-slate-50/60">
                 <td className={itemTd}>{it.categoryName}</td>
                 <td className={`${itemTd} font-medium text-slate-900`}>{it.productName}</td>
-                <td className={itemTdRight}>{it.quantity}</td>
+                <td className={itemTdRight}>{it.quantity} {unitLabel(it.unit)}</td>
                 <td className={itemTdRight}>{Number(it.unitPrice).toLocaleString("en-IN")}</td>
                 <td className={itemTdRight}>{it.gstRate}%</td>
                 <td className={itemTdRight}>{Number(it.gstAmount).toLocaleString("en-IN")}</td>
@@ -325,7 +322,7 @@ const InfoPopup = ({ row, onClose }) => (
         <div key={i} className="rounded-xl bg-amber-50 px-4 py-3 text-sm ring-1 ring-inset ring-amber-100">
           <p className="font-medium text-slate-900">
             {s.productName}{" "}
-            <span className="font-normal">· {s.categoryName} · qty {s.quantity}</span>
+            <span className="font-normal">· {s.categoryName} · qty {s.quantity} {unitLabel(s.unit)}</span>
           </p>
           <p className="mt-0.5 text-xs text-amber-700">Reason · {s.poSkipReason || "—"}</p>
         </div>
@@ -334,47 +331,105 @@ const InfoPopup = ({ row, onClose }) => (
   </Modal>
 );
 
+/**
+ * Review + send in one popup. The accounts team should never have to open the
+ * PO twice: approving it hands it straight to the vendor, so APPROVED and SENT
+ * both land from a single "Approve & Send PO" click. The mail fields are the
+ * exact ones from SendMailPopup, reused rather than re-implemented.
+ */
 const ReviewPopup = ({ row, onClose, onDone }) => {
+  const mail = useSendMailForm(row);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
+  const [approved, setApproved] = useState(false); // approve landed — only the send is left
+  const [result, setResult] = useState(null);      // "SENT" | "MANUAL"
 
-  const act = async (path, body) => {
-    setBusy(true); setError(null);
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/${path}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
-      onDone();
-    } catch (e) { setError(e.message); } finally { setBusy(false); }
+  const patch = async (path, body) => {
+    const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/${path}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+    return json;
   };
 
+  // Once the approve has gone through the board is stale, so closing has to
+  // refresh it — otherwise the row would still offer "Review PO".
+  const close = () => (approved ? onDone() : onClose());
+
+  const reject = async () => {
+    setBusy(true); setError(null);
+    try { await patch("reject", { rejectedReason: reason }); onDone(); }
+    catch (e) { setError(e.message); setBusy(false); }
+  };
+
+  const approveAndSend = async () => {
+    if (mail.sendEmail && !mail.to.trim()) return setError("A To email is required");
+    setBusy(true); setError(null);
+    try {
+      // Skipped on a retry: the PO is already APPROVED, only the send failed.
+      if (!approved) { await patch("approve"); setApproved(true); }
+      setResult(await submitSendMail(row.poId, mail));
+      setTimeout(() => onDone(), 900);
+    } catch (e) { setError(e.message); setBusy(false); }
+  };
+
+  if (result) {
+    return (
+      <Modal onClose={onDone} title={`Review ${row.poNumber}`}>
+        <div className="flex flex-col items-center gap-2 py-6 text-center">
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+            <CheckCircle2 className="h-6 w-6" />
+          </span>
+          <p className="text-base font-semibold text-slate-900">Approved &amp; {result === "SENT" ? "Mail Sent" : "Marked Manual"}</p>
+          <p className="text-sm text-slate-500">
+            {result === "SENT"
+              ? "The PO was approved and emailed to the vendor."
+              : "The PO was approved and marked as manually handled — no email was sent."}
+          </p>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal onClose={onClose} title={`Review ${row.poNumber}`}>
-      {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
+    <Modal onClose={close} title={`Review ${row.poNumber}`} maxWidth="max-w-3xl">
+      {error && (
+        <div className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">
+          {error}
+          {approved && <span className="mt-1 block text-xs">The PO is already approved — only the send needs retrying.</span>}
+        </div>
+      )}
+
       <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-slate-50 p-4 text-sm">
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Vendor</p><p className="mt-0.5 truncate text-slate-900">{row.vendorName}</p></div>
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Amount</p><p className="mt-0.5 font-semibold text-slate-900 tabular-nums">{money(row.totalAmount)}</p></div>
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Items</p><p className="mt-0.5 text-slate-900 tabular-nums">{row.items.length}</p></div>
         <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Entity</p><p className="mt-0.5 text-slate-900">{row.entityAlias || "—"}</p></div>
       </div>
+
       {rejecting ? (
         <>
           <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (optional)" className={`${inputCls} mb-3`} />
           <div className="flex justify-end gap-2.5">
             <button type="button" onClick={() => setRejecting(false)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Cancel</button>
-            <button type="button" disabled={busy} onClick={() => act("reject", { rejectedReason: reason })} className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60">Confirm reject</button>
+            <button type="button" disabled={busy} onClick={reject} className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60">Confirm reject</button>
           </div>
         </>
       ) : (
-        <div className="flex justify-end gap-2.5">
-          <button type="button" onClick={() => setRejecting(true)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50">Reject</button>
-          <button type="button" disabled={busy} onClick={() => act("approve")} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">Approve</button>
-        </div>
+        <>
+          <SendMailFields row={row} form={mail} />
+
+          <div className="mt-6 flex justify-end gap-2.5 border-t border-slate-200 pt-5">
+            <button type="button" onClick={() => setRejecting(true)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50">Reject</button>
+            <button type="button" disabled={busy} onClick={approveAndSend} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">
+              {busy ? "Working…" : approved ? "Retry send" : "Approve & Send PO"}
+            </button>
+          </div>
+        </>
       )}
     </Modal>
   );
@@ -509,11 +564,15 @@ const buildRowActions = (row) => {
     inline.push({ type: "iconText", key: "view", label: "View PO", text: "PO", icon: Eye, tone: "indigo" });
   }
 
-  // APPROVED: only before the first send (mailResult unset) — status moves
-  // to SENT the moment mail goes out. SENT: always available, so the PO can
-  // be resent as many times as needed.
-  if ((s === "APPROVED" && !row.mailResult?.mode) || s === "SENT") {
-    inline.push({ type: "icon", key: "sendMail", label: "Send Mail", icon: Mail, tone: "green" });
+  // APPROVED is terminal — there is no SENT status. Whether the PO already
+  // reached the vendor is told by mailResult: once it exists the action is a
+  // resend, and it stays available indefinitely. Without it the PO was
+  // approved but the send that follows never landed, so offer the first send.
+  if (s === "APPROVED") {
+    inline.push({
+      type: "icon", key: "sendMail", icon: Mail, tone: "green",
+      label: row.mailResult?.mode ? "Resend Mail" : "Send Mail",
+    });
   }
 
   if (s === "GENERATED") {
@@ -562,8 +621,7 @@ const ActionBar = ({ row, on }) => {
 const PurchaseOrderPage = () => {
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
-  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
-  const [entities, setEntities] = useState([]);
+  const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -609,7 +667,7 @@ const PurchaseOrderPage = () => {
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load board");
 
       setBoard(json.data?.board || []);
-      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, SENT: 0, REJECTED: 0 });
+      setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
       setPagination(json.pagination || { total: 0, totalPages: 1 });
     } catch (e) {
       setError(e.message); setBoard([]);
@@ -623,10 +681,6 @@ const PurchaseOrderPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(INTERNAL_COMPANIES_URL); const j = await r.json();
-        setEntities((j.data || []).filter((e) => e.isActive !== false && e.isShownOnDropDown !== false));
-      } catch { }
-      try {
         const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
         const j = await r.json(); if (j.success) setVendors(j.data || []);
       } catch { }
@@ -637,7 +691,7 @@ const PurchaseOrderPage = () => {
     })();
   }, []);
 
-  const aliases = useMemo(() => [...new Set(entities.map((e) => e.alias).filter(Boolean))], [entities]);
+  const { aliases } = useInternalEntities();
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v._id, label: v.name })), [vendors]);
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })),
@@ -759,7 +813,6 @@ const PurchaseOrderPage = () => {
     { key: "PO_PENDING", label: "PO Pending", count: counts.PO_PENDING },
     { key: "GENERATED", label: "PO Generated", count: counts.GENERATED },
     { key: "APPROVED", label: "PO Approved", count: counts.APPROVED },
-    { key: "SENT", label: "PO Sent", count: counts.SENT },
     { key: "REJECTED", label: "PO Rejected", count: counts.REJECTED },
   ];
 
@@ -899,7 +952,7 @@ const PurchaseOrderPage = () => {
                       <TruncateText text={row.entityAlias} title="Entity" />
                     </div>
                     <div className="col-span-3 flex flex-wrap items-center justify-end gap-1.5">
-                      {row.status === "SENT" && row.mailResult?.mode && (
+                      {row.mailResult?.mode && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
                           <CheckCircle2 className="h-3 w-3" />
                           {row.mailResult.mode === "SENT" ? "Mail Sent" : "Manual"}

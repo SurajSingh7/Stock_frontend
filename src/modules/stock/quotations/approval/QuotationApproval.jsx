@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Check, X, Pencil } from "lucide-react";
-import { money } from "@/modules/stock/shared/StockSharedUI";
+import { money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -94,11 +94,20 @@ const groupCatProductVendor = (items = []) => {
     if (!cats.has(cId)) cats.set(cId, { categoryId: cId, categoryName: it.categoryName || "", products: new Map() });
     const cat = cats.get(cId);
     const pId = idOf(it.productDefinitionId);
-    if (!cat.products.has(pId)) cat.products.set(pId, { productDefinitionId: pId, productName: it.productName || "", vendors: [] });
+    if (!cat.products.has(pId))
+      cat.products.set(pId, {
+        productDefinitionId: pId,
+        productName: it.productName || "",
+        trackingMethod: it.trackingMethod || it.productDefinitionId?.trackingMethod || "",
+        unit: it.unit || it.productDefinitionId?.unit || "",
+        vendors: [],
+      });
     cat.products.get(pId).vendors.push({
       itemId: idOf(it._id),
       vendorId: idOf(it.vendorId),
       vendorName: it.vendorName || "",
+      trackingMethod: it.trackingMethod || it.productDefinitionId?.trackingMethod || "",
+      unit: it.unit || it.productDefinitionId?.unit || "",
       quantity: it.quantity,
       unitPrice: it.unitPrice,
       warrantyYears: it.warrantyYears,
@@ -137,7 +146,7 @@ const VendorLine = ({ v, selectable = false, checked = false, disabled = false, 
         <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700">approved</span>
       )}
     </span>
-    <span className="text-xs text-slate-600">Qty <span className="font-semibold text-slate-900 tabular-nums">{v.quantity}</span></span>
+    <span className="text-xs text-slate-600">Qty <span className="font-semibold text-slate-900 tabular-nums">{v.quantity} {unitLabel(v.unit)}</span></span>
     <span className="text-xs text-slate-600">Unit price <span className="font-semibold text-slate-900 tabular-nums">{inr(v.unitPrice)}</span></span>
     <span className="text-xs text-slate-600">
       Warranty <span className="font-semibold text-slate-900 tabular-nums">{v.warrantyYears ? `${v.warrantyYears} yr${v.warrantyYears === 1 ? "" : "s"}` : "—"}</span>

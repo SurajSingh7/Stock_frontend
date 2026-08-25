@@ -10,7 +10,8 @@ import {
   LucideDelete,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { PAYMENT_TERMS, STATE_OPTIONS, mockVerifyGST } from "./vendorConstants";
+import { PAYMENT_TERMS, STATE_OPTIONS } from "./vendorConstants";
+import { verifyGST } from "./gstVerification";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
 
 /* ------------------------------------------------------------------ */
@@ -274,15 +275,12 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified }) 
 
   const setGst = (patch) => setVendor((v) => ({ ...v, gst: { ...v.gst, ...patch } }));
 
-  /*
-   FUTURE GST API INTEGRATION — see vendorConstants.js mockVerifyGST() for the
-   exact expected response shape. Only that function needs to change.
-  */
+  // Real GST verification — see ./gstVerification.js for the response shape.
   const handleVerifyGST = async () => {
     setVerifying(true);
     setVerifyError(null);
     try {
-      const result = await mockVerifyGST(vendor.gst.gstNumber);
+      const result = await verifyGST(vendor.gst.gstNumber);
       const matchedState = STATE_OPTIONS.find((s) => s.code === result.stateCode || s.name === result.state);
       const gstState = matchedState
         ? { key: matchedState.key, name: matchedState.name, code: matchedState.code }

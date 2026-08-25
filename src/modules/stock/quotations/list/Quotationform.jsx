@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Plus, Trash2, Star } from "lucide-react";
-import { SearchableSelect } from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -92,13 +92,16 @@ const ProductSection = ({ product, quantityEditable, onToggle, onPriceChange, on
               </td>
               <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{row.vendorName}</td>
               <td className="px-3 py-2.5">
-                <input
-                  type="number" value={row.quantity} readOnly={!quantityEditable}
-                  onChange={(e) => onQtyChange(row.vendorId, row.productDefinitionId, e.target.value)}
-                  className={`h-8 w-16 rounded-lg border px-2 text-sm tabular-nums shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-100 ${
-                    quantityEditable ? "border-slate-200 bg-white text-slate-900" : "border-transparent bg-slate-50 text-slate-500"
-                  }`}
-                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number" value={row.quantity} readOnly={!quantityEditable}
+                    onChange={(e) => onQtyChange(row.vendorId, row.productDefinitionId, e.target.value)}
+                    className={`h-8 w-16 rounded-lg border px-2 text-sm tabular-nums shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-100 ${
+                      quantityEditable ? "border-slate-200 bg-white text-slate-900" : "border-transparent bg-slate-50 text-slate-500"
+                    }`}
+                  />
+                  <span className="text-xs text-slate-400">{unitLabel(row.unit)}</span>
+                </div>
               </td>
               <td className="px-3 py-2.5 text-sm text-slate-700 tabular-nums">
                 {row.warrantyYears ? `${row.warrantyYears} yr${row.warrantyYears === 1 ? "" : "s"}` : "—"}
@@ -110,7 +113,9 @@ const ProductSection = ({ product, quantityEditable, onToggle, onPriceChange, on
                   className="h-8 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-900 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
                 />
               </td>
-              <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">{dash(row.previousQuantity)}</td>
+              <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">
+                {dash(row.previousQuantity)}{row.previousQuantity != null ? ` ${unitLabel(row.unit)}` : ""}
+              </td>
               <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">{dash(row.previousPrice)}</td>
               <td className="px-3 py-2.5 text-sm text-slate-500">
                 {row.averageRating == null ? (
@@ -187,6 +192,8 @@ const QuotationForm = ({ quotationId = null }) => {
         cat.vendors.get(venId).products.push({
           productDefinitionId: String(it.productDefinitionId?._id || it.productDefinitionId),
           name: it.productName || it.productDefinitionId?.name || "",
+          trackingMethod: it.trackingMethod || it.productDefinitionId?.trackingMethod || "",
+          unit: it.unit || it.productDefinitionId?.unit || "",
           quantity: it.quantity, unitPrice: it.unitPrice, warrantyYears: it.warrantyYears, gstRate: it.gstRate,
           previousQuantity: it.previousQuantity, previousPrice: it.previousPrice,
           averageRating: it.averageRating, checked: true,
@@ -213,6 +220,8 @@ const QuotationForm = ({ quotationId = null }) => {
         vendorId: String(v.vendorId), vendorName: v.vendorName,
         products: (v.products || []).map((p) => ({
           productDefinitionId: String(p.productDefinitionId), name: p.name, gstRate: p.gstRate,
+          trackingMethod: p.trackingMethod || "",
+          unit: p.unit || "",
           warrantyYears: p.warrantyYears ?? null,
           quantity: Number(globalQty) || 1, unitPrice: "", previousQuantity: null, previousPrice: null, averageRating: null,
           checked: autoSelectAll, // auto-select toggle drives the initial state

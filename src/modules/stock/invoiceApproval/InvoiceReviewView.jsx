@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Download, CheckCircle2, XCircle } from "lucide-react";
-import { inputCls, money } from "@/modules/stock/shared/StockSharedUI";
+import { inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 const ROWS_PAGE_SIZE = 10;
 
@@ -59,10 +59,14 @@ const DetailField = ({ label, value }) => (
   </div>
 );
 
-const UnitStat = ({ label, value }) => (
-  <div className="rounded-lg bg-slate-50 px-3 py-2 text-center">
-    <p className="text-sm font-bold tabular-nums text-slate-900">{money(value)}</p>
-    <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+const UNIT_STAT_TONES = {
+  green: "bg-green-50 text-green-700",
+  orange: "bg-orange-50 text-orange-700",
+};
+const UnitStat = ({ label, unitPrice, qty, value, tone = "green" }) => (
+  <div className={`rounded-lg px-3 py-2 text-center ${UNIT_STAT_TONES[tone] || UNIT_STAT_TONES.green}`}>
+    <p className="text-[10px] font-semibold uppercase tracking-wide opacity-80">{label}</p>
+    <p className="mt-0.5 text-sm font-bold tabular-nums">{money(unitPrice)} × {qty} = {money(value)}</p>
   </div>
 );
 
@@ -74,15 +78,24 @@ const UnitStat = ({ label, value }) => (
 
 const LineCard = ({ line, taxType }) => {
   const [visible, setVisible] = useState(ROWS_PAGE_SIZE);
+  const [showFoc, setShowFoc] = useState(false);
   const isIndividual = line.trackingMethod === "individual";
   const b = unitPriceBreakdown(line.unitPrice, line.gstRate, taxType);
   const qty = line.receivedQuantity || 0;
+  const focQty = line.focQuantity || 0;
   const lineTotals = {
     basic: round2(b.basic * qty),
     cgst: round2(b.cgst * qty),
     sgst: round2(b.sgst * qty),
     igst: round2(b.igst * qty),
     grandTotal: round2(b.total * qty),
+  };
+  const focTotals = {
+    basic: round2(b.basic * focQty),
+    cgst: round2(b.cgst * focQty),
+    sgst: round2(b.sgst * focQty),
+    igst: round2(b.igst * focQty),
+    grandTotal: round2(b.total * focQty),
   };
   const selectedFields = (line.productDef?.selectedFields || [])
     .slice()
@@ -100,89 +113,54 @@ const LineCard = ({ line, taxType }) => {
           <p className="text-xs text-slate-500">{line.categoryName}</p>
         </div>
         <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
-          {isIndividual ? "Individual Tracking" : "Quantity Tracking"}
+          {isIndividual ? "Individual Tracking" : "Group Tracking"}
         </span>
       </div>
 
       <div className="p-5">
-        <div className="mb-4 rounded-lg border border-green-200 bg-gradient-to-r from-green-50 to-emerald-50 p-2.5 shadow-sm">
-          <div className="mb-1.5 flex items-center justify-between border-b border-green-200 pb-1">
-            <h3 className="text-xs font-semibold text-green-900">
-              Per Unit Cost Summary
-            </h3>
-          </div>
 
-          <div
-            className={`grid items-center gap-2 ${taxType === "IGST" ? "grid-cols-3" : "grid-cols-4"
-              }`}
-          >
-            <div className="text-center">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-green-700">
-                Basic
-              </p>
-              <p className="mt-0.5 text-sm font-bold text-slate-900">
-                ₹{Number(b.basic || 0).toFixed(2)}
-              </p>
-            </div>
-
-            {taxType === "IGST" ? (
-              <div className="text-center border-x border-green-200">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-green-700">
-                  IGST
-                </p>
-                <p className="mt-0.5 text-sm font-bold text-slate-900">
-                  ₹{Number(b.igst || 0).toFixed(2)}
-                </p>
+          {focQty > 0 && (
+          <div className="mb-4">
+            <button
+              type="button" onClick={() => setShowFoc((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 shadow-sm transition hover:bg-orange-100"
+            >
+              {showFoc ? "Hide" : "Show"} FOC Cost Breakdown
+            </button>
+            {showFoc && (
+              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                <UnitStat label="FOC Basic" unitPrice={b.basic} qty={focQty} value={focTotals.basic} tone="orange" />
+                {taxType === "IGST" ? (
+                  <UnitStat label="FOC IGST" unitPrice={b.igst} qty={focQty} value={focTotals.igst} tone="orange" />
+                ) : (
+                  <>
+                    <UnitStat label="FOC CGST" unitPrice={b.cgst} qty={focQty} value={focTotals.cgst} tone="orange" />
+                    <UnitStat label="FOC SGST" unitPrice={b.sgst} qty={focQty} value={focTotals.sgst} tone="orange" />
+                  </>
+                )}
+                <UnitStat label="FOC Total" unitPrice={b.total} qty={focQty} value={focTotals.grandTotal} tone="orange" />
               </div>
-            ) : (
-              <>
-                <div className="text-center border-l border-green-200">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-green-700">
-                    CGST
-                  </p>
-                  <p className="mt-0.5 text-sm font-bold text-slate-900">
-                    ₹{Number(b.cgst || 0).toFixed(2)}
-                  </p>
-                </div>
-
-                <div className="text-center border-l border-green-200">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-green-700">
-                    SGST
-                  </p>
-                  <p className="mt-0.5 text-sm font-bold text-slate-900">
-                    ₹{Number(b.sgst || 0).toFixed(2)}
-                  </p>
-                </div>
-              </>
             )}
-
-            <div className="rounded-md bg-green-100 px-2 py-1 text-center">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-green-800">
-                Total Cost
-              </p>
-              <p className="mt-0.5 text-base font-extrabold text-green-950">
-                ₹{Number(b.total || 0).toFixed(2)}
-              </p>
-            </div>
           </div>
-        </div>
-
+        )}
         <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
-          <UnitStat label="Basic" value={lineTotals.basic} />
+          <UnitStat label="Basic" unitPrice={b.basic} qty={qty} value={lineTotals.basic} tone="green" />
           {taxType === "IGST" ? (
-            <UnitStat label="IGST" value={lineTotals.igst} />
+            <UnitStat label="IGST" unitPrice={b.igst} qty={qty} value={lineTotals.igst} tone="green" />
           ) : (
             <>
-              <UnitStat label="CGST" value={lineTotals.cgst} />
-              <UnitStat label="SGST" value={lineTotals.sgst} />
+              <UnitStat label="CGST" unitPrice={b.cgst} qty={qty} value={lineTotals.cgst} tone="green" />
+              <UnitStat label="SGST" unitPrice={b.sgst} qty={qty} value={lineTotals.sgst} tone="green" />
             </>
           )}
-          <UnitStat label="Grand Total" value={lineTotals.grandTotal} />
+          <UnitStat label="Grand Total" unitPrice={b.total} qty={qty} value={lineTotals.grandTotal} tone="green" />
         </div>
 
+      
+
         <div className="mb-4 grid grid-cols-3 gap-4">
-          <DetailField label="Qty Received (Paid)" value={line.receivedQuantity ?? 0} />
-          <DetailField label="FOC Qty" value={line.focQuantity ?? 0} />
+          <DetailField label="Qty Received (Paid)" value={`${line.receivedQuantity ?? 0} ${unitLabel(line.unit)}`} />
+          <DetailField label="FOC Qty" value={`${line.focQuantity ?? 0} ${unitLabel(line.unit)}`} />
           <DetailField label="Rating" value={line.rating?.rating ? `${line.rating.rating} / 5` : "—"} />
         </div>
         {line.rating?.notes && (

@@ -1,7 +1,8 @@
 
 // FOR FRONTEND MAPPING PART: "DSR", path: "/dsr?form=create",
 // FOR BACKEND MAPPING PART:
-// moduleName: "dsr", url: "/dsr", action: ["CREATE", "UPDATE", "READ"], exceptions: ["canViewAll"]
+// moduleKey must equal the backend Module's `key` exactly — see
+// stock-backend/seeders/stock.module.seeder.js for the canonical list.
 
 import { SHOW_DEV } from "@/config/getEnvVariables";
 
@@ -12,8 +13,7 @@ export const navCategories = [
       {
         name: "track",
         path: "/stock/tracking-orders",
-        moduleName: "tracking-orders",
-        url: "/stock/tracking-orders",
+        moduleKey: "tracking-orders",
         action: ["READ"],
       },
     ],
@@ -25,21 +25,19 @@ export const navCategories = [
       {
         name: "Quotations",
         path: "/stock/quotations/list",
-        moduleName: "Stock Category",
-        url: "/stock/quotations/list",
+        moduleKey: "quotations",
         action: ["READ"],
       },
     ],
   },
-  
+
   {
     category: "Vendor",
     items: [
       {
         name: "Vendors List",
         path: "/stock/vendors",
-        moduleName: "vendor",
-        url: "/stock/vendors",
+        moduleKey: "vendors",
         action: ["READ"],
       },
     ],
@@ -50,8 +48,7 @@ export const navCategories = [
       {
         name: "Quotations",
         path: "/stock/quotations/approval",
-        moduleName: "Stock Category",
-        url: "/stock/quotations/approval",
+        moduleKey: "quotations",
         action: ["READ"],
       },
     ],
@@ -62,15 +59,13 @@ export const navCategories = [
       {
         name: "Po Approval",
         path: "/stock/purchase-orders",
-        moduleName: "Stock purchase-orders",
-        url: "/stock/master/purchase-orders",
+        moduleKey: "purchase-orders",
         action: ["READ"],
       },
       {
         name: "Invoice Approval",
         path: "/stock/invoice-approval",
-        moduleName: "Stock Invoice Approval",
-        url: "/stock/invoice-approval",
+        moduleKey: "invoices",
         action: ["READ"],
       },
     ],
@@ -82,15 +77,37 @@ export const navCategories = [
       {
         name: "Product Inventory",
         path: "/stock/product-inventory",
-        moduleName: "Stock Product Inventory",
-        url: "/stock/product-inventory",
+        moduleKey: "inventory-items",
         action: ["READ"],
       },
       {
         name: "Item Inventory",
         path: "/stock/item-inventory",
-        moduleName: "Stock Item Inventory",
-        url: "/stock/item-inventory",
+        moduleKey: "inventory-items",
+        action: ["READ"],
+      },
+    ],
+  },
+
+  {
+    category: "Transfer",
+    items: [
+      {
+        name: "Transfer Requests",
+        path: "/stock/transfer-requests",
+        moduleKey: "transfer-requests",
+        action: ["READ"],
+      },
+      {
+        name: "Incoming Requests",
+        path: "/stock/incoming-requests",
+        moduleKey: "transfer-requests",
+        action: ["READ"],
+      },
+      {
+        name: "Transfer History",
+        path: "/stock/transfer-history",
+        moduleKey: "transfer-requests",
         action: ["READ"],
       },
     ],
@@ -102,45 +119,54 @@ export const navCategories = [
       {
         name: "Product Definition",
         path: "/master/product-definition",
-        moduleName: "Stock Product Definition",
-        url: "/stock/master/product-definition",
+        moduleKey: "product-definitions",
         action: ["READ"],
       },
       {
         name: "Category",
         path: "/master/category",
-        moduleName: "Stock Category",
-        url: "/stock/master/category",
+        moduleKey: "categories",
         action: ["READ"],
       },
       {
         name: "Field Definition",
         path: "/master/field-definition",
-        moduleName: "Stock Field Definition",
-        url: "/stock/master/field-definition",
+        moduleKey: "field-definitions",
         action: ["READ"],
       },
       {
         name: "Terms & Conditions",
         path: "/master/terms-condition",
-        moduleName: "Stock Terms Condition",
-        url: "/stock/master/terms-condition",
+        moduleKey: "terms-conditions",
         action: ["READ"],
       },
       {
         name: "Notification",
         path: "/master/notification",
-        moduleName: "Stock Notification",
-        url: "/stock/master/notification",
+        moduleKey: "notifications",
         action: ["READ"],
       },
       {
         name: "Warehouses",
         path: "/master/warehouse",
-        moduleName: "Stock Warehouse",
-        url: "/master/warehouse",
+        moduleKey: "warehouses",
         action: ["READ"],
       },
+    ],
+  },
+];
+
+// Admin-only — these endpoints are gated by requireAdmin on the backend, not
+// by a per-module permission grant, so they're shown purely off isAdmin
+// (see Navbar.jsx) rather than run through useFilteredNav.
+export const adminNavCategories = [
+  {
+    category: "Access Control",
+    items: [
+      { name: "Roles & Permissions", path: "/access-control/roles" },
+      { name: "User Overrides", path: "/access-control/users" },
+      { name: "Delegate Access", path: "/access-control/delegate" },
+      { name: "Audit Log", path: "/access-control/audit-log" },
     ],
   },
 ];

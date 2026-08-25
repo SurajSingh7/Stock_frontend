@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 const SHIPMENT_PREFERENCE_OPTIONS = [
   "Self Pickup", "Vendor Delivery", "Courier", "Transport", "Third-Party Logistics", "Hand Delivery",
@@ -354,6 +355,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                 <th className="px-3 py-2.5">Description</th>
                 <th className="px-3 py-2.5">Product</th>
                 <th className="px-3 py-2.5 text-right">Qty</th>
+                <th className="px-3 py-2.5 text-right">Unit Price</th>
                 <th className="px-3 py-2.5 text-right">Basic Price</th>
                 {taxType === "CGST_SGST" ? (
                   <>
@@ -390,7 +392,8 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                       <td className="px-3 py-2.5 align-top tabular-nums text-slate-500">{idx + 1}</td>
                       <td className={`px-3 py-2.5 align-top ${skipped ? "text-slate-400 line-through" : "text-slate-700"}`}>{r.categoryName}</td>
                       <td className={`px-3 py-2.5 align-top font-medium ${skipped ? "text-slate-400 line-through" : "text-slate-900"}`}>{r.productName}</td>
-                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{r.quantity}</td>
+                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{r.quantity} {unitLabel(r.unit)}</td>
+                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(r.unitPrice)}</td>
                       <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.base)}</td>
                       {taxType === "CGST_SGST" ? (
                         <>
@@ -406,7 +409,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                     </tr>
                     {!LOCK_CHECKBOX && !isEdit && !r.checked && (
                       <tr>
-                        <td colSpan={9} className="px-3 pb-2.5">
+                        <td colSpan={10} className="px-3 pb-2.5">
                           <input
                             value={r.reason} onChange={(e) => setReason(r.quotationItemId, e.target.value)}
                             placeholder="Reason for skipping (required)"

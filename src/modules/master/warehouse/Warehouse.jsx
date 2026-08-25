@@ -16,7 +16,13 @@ const STATUS_FILTERS = [
 
 const DEFAULT_ITEMS_PER_PAGE = 10;
 
-const EMPTY_FORM = { name: '', code: '', address: '', description: '' };
+const LOCATION_ROLES = [
+  { value: 'CENTRAL', label: 'Central' },
+  { value: 'REGIONAL', label: 'Regional' },
+  { value: 'NORMAL', label: 'Normal' },
+];
+
+const EMPTY_FORM = { name: '', code: '', address: '', description: '', city: '', state: '', locationRole: 'NORMAL' };
 
 /* ---------- Design tokens — SAME as FieldDefinition/VendorsComp ---------- */
 
@@ -95,6 +101,9 @@ const mapWarehouseResponse = (item) => ({
   code: item.code,
   address: item.address || '',
   description: item.description || '',
+  city: item.city || '',
+  state: item.state || '',
+  locationRole: item.locationRole || 'NORMAL',
   isActive: item.isActive !== false,
 });
 
@@ -165,6 +174,20 @@ const StatusBadge = ({ isActive }) => (
   >
     <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
     {isActive ? 'Active' : 'Inactive'}
+  </span>
+);
+
+const ROLE_BADGE_CLS = {
+  CENTRAL: 'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  REGIONAL: 'bg-sky-50 text-sky-700 ring-sky-200',
+  NORMAL: 'bg-slate-100 text-slate-600 ring-slate-200',
+};
+
+const RoleBadge = ({ role }) => (
+  <span
+    className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${ROLE_BADGE_CLS[role] || ROLE_BADGE_CLS.NORMAL}`}
+  >
+    {LOCATION_ROLES.find((r) => r.value === role)?.label || role}
   </span>
 );
 
@@ -297,17 +320,15 @@ const FilterBar = ({ search, onSearchChange, statusFilter, onStatusFilterChange 
 
 const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
   <tr className="transition hover:bg-slate-50/60">
-    <td className="px-4 py-3.5 text-sm font-mono text-slate-700">
-      {item.code}
-      {item.code === 'MAIN' && (
-        <span className="ml-2 inline-flex items-center rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-600">
-          Default
-        </span>
-      )}
-    </td>
+    <td className="px-4 py-3.5 text-sm font-mono text-slate-700">{item.code}</td>
     <td className="px-4 py-3.5 text-sm font-medium text-slate-900">{item.name}</td>
+    <td className="px-4 py-3.5">
+      <RoleBadge role={item.locationRole} />
+    </td>
+    <td className="px-4 py-3.5 text-sm text-slate-500">
+      {[item.city, item.state].filter(Boolean).join(', ') || <span className="text-slate-300">—</span>}
+    </td>
     <td className="px-4 py-3.5 text-sm text-slate-500">{item.address || <span className="text-slate-300">—</span>}</td>
-    <td className="px-4 py-3.5 text-sm text-slate-500">{item.description || <span className="text-slate-300">—</span>}</td>
     <td className="px-4 py-3.5">
       <StatusBadge isActive={item.isActive} />
     </td>
@@ -316,12 +337,7 @@ const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
         <IconBtn onClick={() => onView(item)} title="View" tone="indigo">{Icon.eye}</IconBtn>
         <IconBtn onClick={() => onEdit(item)} title="Edit" tone="orange">{Icon.edit}</IconBtn>
         {item.isActive ? (
-          <IconBtn
-            onClick={() => onDelete(item)}
-            title={item.code === 'MAIN' ? "The default Main Warehouse can't be deleted" : 'Delete'}
-            tone="red"
-            disabled={item.code === 'MAIN'}
-          >
+          <IconBtn onClick={() => onDelete(item)} title="Delete" tone="red">
             {Icon.trash}
           </IconBtn>
         ) : (
@@ -339,19 +355,20 @@ const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, 
         <tr>
           <th className={th}>Code</th>
           <th className={th}>Name</th>
+          <th className={th}>Role</th>
+          <th className={th}>Location</th>
           <th className={th}>Address</th>
-          <th className={th}>Description</th>
           <th className={th}>Status</th>
           <th className={thRight}>Action</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-100">
         {error ? (
-          <ErrorState colSpan={6} message={error} onRetry={onRetry} />
+          <ErrorState colSpan={7} message={error} onRetry={onRetry} />
         ) : loading ? (
-          <LoadingRows columns={6} />
+          <LoadingRows columns={7} />
         ) : items.length === 0 ? (
-          <EmptyState colSpan={6} onCreateClick={onCreateClick} />
+          <EmptyState colSpan={7} onCreateClick={onCreateClick} />
         ) : (
           items.map((item) => (
             <TableRow key={item.id} item={item} onView={onView} onEdit={onEdit} onDelete={onDelete} onRestore={onRestore} />
@@ -477,6 +494,43 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           </Field>
         </div>
 
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Field label="Role" hint="Descriptive only — doesn't restrict transfers.">
+            <select
+              value={formData.locationRole}
+              disabled={isView}
+              onChange={(e) => onChange('locationRole', e.target.value)}
+              className={`${fieldInputClass} appearance-none`}
+            >
+              {LOCATION_ROLES.map((r) => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="City">
+            <input
+              type="text"
+              value={formData.city}
+              disabled={isView}
+              onChange={(e) => onChange('city', e.target.value)}
+              placeholder="e.g. Delhi"
+              className={fieldInputClass}
+            />
+          </Field>
+
+          <Field label="State">
+            <input
+              type="text"
+              value={formData.state}
+              disabled={isView}
+              onChange={(e) => onChange('state', e.target.value)}
+              placeholder="e.g. Delhi"
+              className={fieldInputClass}
+            />
+          </Field>
+        </div>
+
         <Field label="Address">
           <textarea
             value={formData.address}
@@ -594,14 +648,20 @@ const Warehouse = () => {
   };
 
   const openEditModal = (item) => {
-    setFormData({ name: item.name, code: item.code, address: item.address, description: item.description });
+    setFormData({
+      name: item.name, code: item.code, address: item.address, description: item.description,
+      city: item.city, state: item.state, locationRole: item.locationRole,
+    });
     setFormErrors({});
     setActiveItemId(item.id);
     setModalMode('edit');
   };
 
   const openViewModal = (item) => {
-    setFormData({ name: item.name, code: item.code, address: item.address, description: item.description });
+    setFormData({
+      name: item.name, code: item.code, address: item.address, description: item.description,
+      city: item.city, state: item.state, locationRole: item.locationRole,
+    });
     setFormErrors({});
     setActiveItemId(item.id);
     setModalMode('view');
@@ -637,6 +697,9 @@ const Warehouse = () => {
         code: formData.code.trim(),
         address: formData.address.trim(),
         description: formData.description.trim(),
+        city: formData.city.trim(),
+        state: formData.state.trim(),
+        locationRole: formData.locationRole,
       };
 
       if (modalMode === 'create') {

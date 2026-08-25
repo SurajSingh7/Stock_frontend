@@ -31,22 +31,49 @@ const isPdfPath = (p) => /\.pdf($|\?)/i.test(String(p || ""));
 const UNIT_TYPES = [
   { value: "pieces", label: "Pieces" },
   { value: "meter", label: "Meter" },
-  { value: "kg", label: "Kg" },
-  { value: "box", label: "Box" },
-  { value: "litre", label: "Litre" },
-  { value: "dozen", label: "Dozen" },
 ];
 
 const TRACKING_METHODS = [
   { value: "individual", label: "Individual", description: "Each unit tracked separately (serial no., IMEI, etc.)" },
-  { value: "quantity", label: "Quantity", description: "Tracked as a bulk quantity (notebooks, pens, cables, etc.)" },
+  { value: "quantity", label: "Group", description: "Tracked as a bulk quantity (notebooks, pens, cables, etc.)" },
 ];
+
+// Unit and Tracking Method are independent — both are explicit choices the
+// user makes (e.g. Group+Pieces for bottles, Individual+Meter for a
+// serialized cable reel are both valid). Never derive one from the other.
+const UNIT_LABEL = Object.fromEntries(UNIT_TYPES.map((u) => [u.value, u.label]));
+const unitLabel = (value) => UNIT_LABEL[value] || value || "";
+
+// The two "crossed" combinations warrant a confirmation before saving —
+// Individual normally implies per-unit Pieces, Group normally implies bulk
+// Meter, so picking the other unit alongside either needs an explicit
+// "yes, I mean it". The two "matched" combinations (Individual+Pieces,
+// Group+Meter) never warn.
+const isUnusualCombo = (trackingMethod, unit) =>
+  (trackingMethod === "individual" && unit === "meter") || (trackingMethod === "quantity" && unit === "pieces");
+
+const COMBO_WARNING_COPY = {
+  individual: {
+    title: "Individual Tracking with Meter Unit",
+    message:
+      "Individual tracking is normally used when each physical item is tracked separately. You have selected " +
+      "Meter as the unit with Individual tracking. Please confirm that you want to continue with this combination.",
+  },
+  quantity: {
+    title: "Group Tracking with Pieces Unit",
+    message:
+      "Group tracking is normally used for bulk/batch quantities such as Meter. You have selected Pieces as the " +
+      "unit with Group tracking. Please confirm that you want to continue with this combination.",
+  },
+};
 
 // Type filter is a DROPDOWN now (was a pill group)
 const TRACKING_FILTER_OPTIONS = [
   { value: "individual", label: "Individual" },
-  { value: "quantity", label: "Quantity" },
+  { value: "quantity", label: "Group" },
 ];
+
+const TRACKING_METHOD_LABELS = Object.fromEntries(TRACKING_METHODS.map((m) => [m.value, m.label]));
 
 const PRODUCT_STATUS = [
   { value: "ACTIVE", label: "Active" },
@@ -71,7 +98,12 @@ const emptyForm = {
   gstRate: "",
   warrantyYears: "",
   unit: "",
-  stockAlertThreshold: "",
+  // Fallback for any warehouse created AFTER this product was last saved
+  // (see the model comment), and the source value for "Apply default to all".
+  defaultStockAlertThreshold: "",
+  // { [warehouseId]: "12" } — a keyed map of raw input strings while editing,
+  // flattened to the API's [{ warehouseId, threshold }] array on submit.
+  warehouseThresholds: {},
   trackingMethod: "",
   status: "ACTIVE",
   selectedFields: [],
@@ -85,6 +117,13 @@ const inputCls =
 const inputErrCls =
   "w-full rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-100";
 const labelCls = "mb-1.5 block text-xs font-semibold text-slate-700";
+// Compact, fixed-width number input for the per-warehouse threshold rows.
+// Deliberately NOT inputCls: that token is `w-full`, which wins the Tailwind
+// width conflict and squeezes the warehouse name sharing the row with it.
+const thresholdInputBase =
+  "w-24 shrink-0 rounded-lg bg-white px-2 py-1.5 text-center text-sm font-semibold text-slate-900 shadow-sm transition focus:outline-none focus:ring-2";
+const thresholdInputCls = `${thresholdInputBase} border border-slate-200 focus:border-indigo-400 focus:ring-indigo-100`;
+const thresholdInputErrCls = `${thresholdInputBase} border border-rose-300 focus:border-rose-400 focus:ring-rose-100`;
 const cardTitleCls = "text-xs font-bold uppercase tracking-wider text-slate-600";
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-700";
 const thRight = `${th} text-right`;
@@ -116,6 +155,17 @@ async function apiFetchFieldDefinitions() {
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load field definitions");
   return json.data?.data || json.data || [];
+}
+
+// Every ACTIVE warehouse needs its own stock alert threshold on the product,
+// so the form renders one row per warehouse from this list. Deliberately the
+// unfiltered /active list (not branch-scoped): thresholds are master data
+// covering the whole network, not just the editor's own branch.
+async function apiFetchActiveWarehouses() {
+  const res = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { credentials: "include" });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load warehouses");
+  return json.data || [];
 }
 
 // Create/update send multipart/form-data so the optional file travels with the
@@ -348,9 +398,9 @@ function TrackingPill({ value }) {
   };
   const dot = { individual: "bg-indigo-500", quantity: "bg-sky-500" };
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium capitalize ring-1 ring-inset ${map[value] || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${map[value] || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${dot[value] || "bg-slate-400"}`} />
-      {value || "\u2014"}
+      {TRACKING_METHOD_LABELS[value] || value || "\u2014"}
     </span>
   );
 }
@@ -727,16 +777,25 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
   const pdf = isPdfPath(attachment);
 
   const rows = [
-    ["Tracking Method", row.trackingMethod],
+    ["Tracking Method", TRACKING_METHOD_LABELS[row.trackingMethod] || row.trackingMethod],
     ["Fields Count", row.selectedFields?.length ?? 0],
     ["GST Rate", row.gstRate ? `${row.gstRate}%` : "\u2014"],
     ["Warranty", row.warrantyYears ? `${row.warrantyYears} Year${row.warrantyYears === 1 ? "" : "s"}` : "\u2014"],
-    ["Unit", row.unit || "\u2014"],
-    ["Stock Alert Threshold", row.stockAlertThreshold ?? "\u2014"],
+    ["Unit", unitLabel(row.unit) || "\u2014"],
+    ["Default Alert Threshold", row.defaultStockAlertThreshold ?? "\u2014"],
     ["Status", row.status],
     ["Active", row.isActive ? "Yes" : "No"],
     ["Product ID", row._id],
   ];
+
+  // The API populates warehouseId to { _id, name, code } — fall back to the
+  // raw id in case an unpopulated row is ever handed in.
+  const thresholdRows = (row.warehouseThresholds || []).map((t) => ({
+    id: String(t.warehouseId?._id || t.warehouseId),
+    name: t.warehouseId?.name || String(t.warehouseId),
+    code: t.warehouseId?.code || "",
+    threshold: t.threshold,
+  }));
 
   return (
     <Modal onClose={onClose} title={row.name} maxWidth="max-w-lg">
@@ -776,6 +835,25 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
           </span>
         </div>
       ))}
+
+      {thresholdRows.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
+            Stock Alert Threshold — Per Warehouse
+          </p>
+          <div className="rounded-lg border border-slate-200">
+            {thresholdRows.map((t) => (
+              <div key={t.id} className="flex items-center justify-between gap-4 border-b border-slate-100 px-3 py-2 last:border-0">
+                <span className="min-w-0 truncate text-sm text-slate-700">
+                  {t.name}
+                  {t.code && <span className="ml-1.5 text-xs text-slate-400">({t.code})</span>}
+                </span>
+                <span className="shrink-0 text-sm font-semibold text-slate-900">{t.threshold}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -828,8 +906,19 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
+  // Individual+Meter is valid but unusual — holds the change here until the
+  // user confirms via the warning modal, instead of applying it immediately.
+  const [pendingCombo, setPendingCombo] = useState(null); // { field: 'unit'|'trackingMethod', value }
+
   const [gstOptions, setGstOptions] = useState([]);
   const [gstLoading, setGstLoading] = useState(true);
+
+  // Drives the per-warehouse threshold rows. The row set comes from THIS list,
+  // never from whatever the product saved earlier — that is what makes a newly
+  // created warehouse show up (and become mandatory) on the next edit.
+  const [warehouses, setWarehouses] = useState([]);
+  const [warehousesLoading, setWarehousesLoading] = useState(true);
+  const [warehousesError, setWarehousesError] = useState("");
 
   const [fieldDefs, setFieldDefs] = useState([]);
   const [fieldDefsLoading, setFieldDefsLoading] = useState(false);
@@ -862,6 +951,19 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     }
   }, []);
 
+  const loadWarehouses = useCallback(async () => {
+    setWarehousesLoading(true);
+    setWarehousesError("");
+    try {
+      setWarehouses(await apiFetchActiveWarehouses());
+    } catch (err) {
+      setWarehouses([]);
+      setWarehousesError(err.message || "Failed to load warehouses");
+    } finally {
+      setWarehousesLoading(false);
+    }
+  }, []);
+
   const loadFieldDefinitions = useCallback(async () => {
     setFieldDefsLoading(true);
     try {
@@ -877,15 +979,31 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   useEffect(() => {
     loadGstRates();
     loadCategories();
+    loadWarehouses();
     if (initialData.trackingMethod) loadFieldDefinitions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleTrackingMethodChange = (value) => {
-    setForm((f) => ({ ...f, trackingMethod: value }));
-    setErrors((e) => ({ ...e, trackingMethod: undefined }));
-    if (!fieldDefsLoaded) loadFieldDefinitions();
-  };
+  // Only offer fields that are applicable to the currently selected tracking
+  // method (set per field-definition — see Field Definitions > "Applicable
+  // to"). Fields with no applicability set are treated as applicable to both.
+  const applicableFieldDefs = useMemo(() => {
+    if (!form.trackingMethod) return fieldDefs;
+    return fieldDefs.filter(
+      (f) => !f.applicableTrackingMethods?.length || f.applicableTrackingMethods.includes(form.trackingMethod)
+    );
+  }, [fieldDefs, form.trackingMethod]);
+
+  // When the tracking method changes (or field defs finish loading), drop
+  // any already-selected field that's no longer applicable to the new method.
+  useEffect(() => {
+    if (!fieldDefsLoaded || !form.trackingMethod) return;
+    const applicableIds = new Set(applicableFieldDefs.map((f) => f._id));
+    setForm((f) => {
+      const filtered = f.selectedFields.filter((sf) => applicableIds.has(sf.fieldDefId));
+      return filtered.length === f.selectedFields.length ? f : { ...f, selectedFields: filtered };
+    });
+  }, [form.trackingMethod, fieldDefsLoaded, applicableFieldDefs]);
 
   const toggleFieldDef = (fieldDefId) => {
     setForm((f) => {
@@ -908,16 +1026,91 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     }));
   };
 
+  // form.warehouseThresholds only holds warehouses the user (or a previous
+  // save) set EXPLICITLY. Anything else — most importantly a warehouse created
+  // since this product was last saved — falls back to the product default here,
+  // which is the same rule the backend applies between saves. Derived rather
+  // than backfilled into state, so editing the default still flows through to
+  // every row nobody has overridden yet.
+  const thresholdFor = (warehouseId) => {
+    const explicit = form.warehouseThresholds[warehouseId];
+    return explicit === undefined ? String(form.defaultStockAlertThreshold ?? "") : explicit;
+  };
+
+  // Header counter — the fastest way for the user to see the section is complete
+  // without scanning every row (it jumps to N of N as soon as a default is typed).
+  const filledThresholdCount = warehouses.filter((w) => thresholdFor(w._id) !== "").length;
+
+  const updateWarehouseThreshold = (warehouseId, value) => {
+    setForm((f) => ({
+      ...f,
+      warehouseThresholds: { ...f.warehouseThresholds, [warehouseId]: value },
+    }));
+    setErrors((e) => {
+      if (!e.warehouseThresholds && !e.warehouseThresholdsSummary) return e;
+      const rest = { ...(e.warehouseThresholds || {}) };
+      delete rest[warehouseId];
+      return { ...e, warehouseThresholds: rest, warehouseThresholdsSummary: undefined };
+    });
+  };
+
+  // Freezes the current default into every row as an explicit override — the
+  // one-click way to undo per-row edits, and with a dozen-plus branches it saves
+  // retyping the same number into each box.
+  const applyDefaultToAllWarehouses = () => {
+    const value = String(form.defaultStockAlertThreshold);
+    setForm((f) => ({
+      ...f,
+      warehouseThresholds: Object.fromEntries(warehouses.map((w) => [w._id, value])),
+    }));
+    setErrors((e) => ({ ...e, warehouseThresholds: undefined, warehouseThresholdsSummary: undefined }));
+  };
+
   const updateField = (key, value) => {
     setForm((f) => ({ ...f, [key]: value }));
     setErrors((e) => ({ ...e, [key]: undefined }));
   };
+
+  // Unit and Tracking Method are independent — picking either one only ever
+  // asks for confirmation (never silently overrides the other) when the
+  // result would be the unusual Individual+Meter combination.
+  const handleUnitChange = (value) => {
+    if (isUnusualCombo(form.trackingMethod, value)) {
+      setPendingCombo({ field: "unit", value });
+      return;
+    }
+    updateField("unit", value);
+  };
+
+  const applyTrackingMethodChange = (value) => {
+    setForm((f) => ({ ...f, trackingMethod: value }));
+    setErrors((e) => ({ ...e, trackingMethod: undefined }));
+    if (!fieldDefsLoaded) loadFieldDefinitions();
+  };
+
+  const handleTrackingMethodChange = (value) => {
+    if (isUnusualCombo(value, form.unit)) {
+      setPendingCombo({ field: "trackingMethod", value });
+      return;
+    }
+    applyTrackingMethodChange(value);
+  };
+
+  const confirmPendingCombo = () => {
+    if (!pendingCombo) return;
+    if (pendingCombo.field === "unit") updateField("unit", pendingCombo.value);
+    else applyTrackingMethodChange(pendingCombo.value);
+    setPendingCombo(null);
+  };
+
+  const cancelPendingCombo = () => setPendingCombo(null);
 
   const validate = () => {
     const next = {};
     if (!categoryLocked && !form.category) next.category = "Leaf category is required";
     if (!form.name.trim()) next.name = "Product name is required";
     if (!form.trackingMethod) next.trackingMethod = "Please select a tracking method";
+    if (!form.unit) next.unit = "Please select a unit";
     if (!form.selectedFields.length) next.selectedFields = "Select at least one field";
     if (
       !form.warrantyYears ||
@@ -927,11 +1120,33 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     ) {
       next.warrantyYears = "Warranty must be a whole number of at least 1 year";
     }
-    if (
-      form.stockAlertThreshold !== "" &&
-      (isNaN(Number(form.stockAlertThreshold)) || Number(form.stockAlertThreshold) < 0)
-    ) {
-      next.stockAlertThreshold = "Must be a non-negative number";
+    // 0 is a legitimate threshold (alert only once that warehouse is empty),
+    // so "" is the only "not filled in" state here.
+    const isThreshold = (v) =>
+      v !== "" &&
+      v !== null &&
+      v !== undefined &&
+      !isNaN(Number(v)) &&
+      Number.isInteger(Number(v)) &&
+      Number(v) >= 0;
+
+    if (!isThreshold(form.defaultStockAlertThreshold)) {
+      next.defaultStockAlertThreshold = "Enter a whole number of 0 or more";
+    }
+
+    if (!warehousesLoading && warehouses.length === 0) {
+      next.warehouseThresholdsSummary =
+        warehousesError || "No active warehouse found — add a warehouse before defining a product";
+    } else {
+      const rowErrors = {};
+      warehouses.forEach((w) => {
+        if (!isThreshold(thresholdFor(w._id))) rowErrors[w._id] = true;
+      });
+      if (Object.keys(rowErrors).length > 0) {
+        next.warehouseThresholds = rowErrors;
+        next.warehouseThresholdsSummary =
+          "Every warehouse needs a stock alert threshold (whole number, 0 or more)";
+      }
     }
     if (errors.imageFile) next.imageFile = errors.imageFile; // keep an unresolved upload error
     setErrors(next);
@@ -967,7 +1182,13 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
         gstRate: form.gstRate || null,
         warrantyYears: Number(form.warrantyYears),
         unit: form.unit || null,
-        stockAlertThreshold: form.stockAlertThreshold === "" ? null : Number(form.stockAlertThreshold),
+        defaultStockAlertThreshold: Number(form.defaultStockAlertThreshold),
+        // Built from the live warehouse list rather than the form map's keys, so a
+        // warehouse deleted while this form was open is never posted back.
+        warehouseThresholds: warehouses.map((w) => ({
+          warehouseId: w._id,
+          threshold: Number(thresholdFor(w._id)),
+        })),
         // Explicit null tells the backend "clear the file" when the user hit
         // Remove without picking a new one. Omitting the key (undefined) would
         // leave the stored file untouched.
@@ -1129,24 +1350,101 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                 <FieldError message={errors.warrantyYears} />
               </div>
               <div>
-                <label className={labelCls}>Unit</label>
-                <select value={form.unit} onChange={(e) => updateField("unit", e.target.value)} className={inputCls}>
+                <label className={labelCls}>
+                  Unit
+                  <RequiredMark />
+                </label>
+                <select
+                  value={form.unit} onChange={(e) => handleUnitChange(e.target.value)}
+                  className={errors.unit ? inputErrCls : inputCls}
+                >
                   <option value="">Select unit</option>
                   {UNIT_TYPES.map((u) => (
                     <option key={u.value} value={u.value}>{u.label}</option>
                   ))}
                 </select>
+                <FieldError message={errors.unit} />
               </div>
               <div>
-                <label className={labelCls}>Stock Alert Threshold</label>
+                <label className={labelCls}>
+                  Default Alert Threshold
+                  <RequiredMark />
+                </label>
                 <input
-                  type="number" min="0" value={form.stockAlertThreshold}
-                  onChange={(e) => updateField("stockAlertThreshold", e.target.value)}
+                  type="number" min="0" step="1" value={form.defaultStockAlertThreshold}
+                  onChange={(e) => updateField("defaultStockAlertThreshold", e.target.value)}
                   placeholder="e.g. 5"
-                  className={errors.stockAlertThreshold ? inputErrCls : inputCls}
+                  className={errors.defaultStockAlertThreshold ? inputErrCls : inputCls}
                 />
-                <FieldError message={errors.stockAlertThreshold} />
+                <FieldError message={errors.defaultStockAlertThreshold} />
               </div>
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Stock Alert Threshold Per Warehouse
+                  <RequiredMark />
+                  {warehouses.length > 0 && (
+                    <span className="ml-2 text-xs font-normal text-slate-400">
+                      ({filledThresholdCount} of {warehouses.length} set)
+                    </span>
+                  )}
+                </label>
+                <button
+                  type="button" onClick={applyDefaultToAllWarehouses}
+                  disabled={form.defaultStockAlertThreshold === "" || warehousesLoading || warehouses.length === 0}
+                  className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  Apply default to all
+                </button>
+              </div>
+              <p className="mb-3 text-xs text-slate-400">
+                Alerts are raised per warehouse, so each one carries its own threshold. 0 means
+                alert only once that warehouse is completely out.
+              </p>
+
+              {warehousesLoading ? (
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 py-8 text-sm text-slate-400">
+                  <Loader2 size={16} className="animate-spin" /> Loading warehouses...
+                </div>
+              ) : warehouses.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
+                  {warehousesError ||
+                    "No active warehouse found. Add a warehouse before defining a product."}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {warehouses.map((w) => {
+                    const rowInvalid = Boolean(errors.warehouseThresholds?.[w._id]);
+                    return (
+                      <div
+                        key={w._id}
+                        className={`flex items-center gap-3 rounded-xl border px-4 py-3 transition ${
+                          rowInvalid ? "border-rose-300 bg-rose-50/40" : "border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-800" title={w.name}>
+                            {w.name}
+                          </p>
+                          <p className="mt-0.5 truncate text-xs text-slate-400">{w.code}</p>
+                        </div>
+                        <input
+                          type="number" min="0" step="1"
+                          value={thresholdFor(w._id)}
+                          onChange={(e) => updateWarehouseThreshold(w._id, e.target.value)}
+                          placeholder="0"
+                          aria-label={`Stock alert threshold for ${w.name}`}
+                          className={rowInvalid ? thresholdInputErrCls : thresholdInputCls}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <FieldError message={errors.warehouseThresholdsSummary} />
             </div>
 
             <div>
@@ -1188,7 +1486,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                   <span className="ml-2 text-xs font-normal text-slate-400">({form.selectedFields.length} selected)</span>
                 </label>
                 <FieldDefinitionMultiSelect
-                  fields={fieldDefs}
+                  fields={applicableFieldDefs}
                   loading={fieldDefsLoading}
                   selectedFields={form.selectedFields}
                   onToggle={toggleFieldDef}
@@ -1218,6 +1516,33 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
           </div>
         </div>
       </div>
+
+      {pendingCombo && (() => {
+        const effectiveTrackingMethod = pendingCombo.field === "trackingMethod" ? pendingCombo.value : form.trackingMethod;
+        const copy = COMBO_WARNING_COPY[effectiveTrackingMethod] || COMBO_WARNING_COPY.individual;
+        return (
+          <Modal onClose={cancelPendingCombo} title={copy.title} maxWidth="max-w-md">
+            <div className="flex gap-3">
+              <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+              <p className="text-sm text-slate-600">{copy.message}</p>
+            </div>
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button
+                type="button" onClick={cancelPendingCombo}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button" onClick={confirmPendingCombo}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+              >
+                Continue
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }
@@ -1539,7 +1864,17 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
         gstRate: full.gstRate ?? "",
         warrantyYears: full.warrantyYears ?? "",
         unit: full.unit ?? "",
-        stockAlertThreshold: full.stockAlertThreshold ?? "",
+        defaultStockAlertThreshold: full.defaultStockAlertThreshold ?? "",
+        // Keyed by warehouse id (the API populates warehouseId to {_id,name,code}).
+        // Only warehouses this product actually saved a threshold for; any warehouse
+        // created since then is absent here and falls back to the default via
+        // thresholdFor() in the form.
+        warehouseThresholds: Object.fromEntries(
+          (full.warehouseThresholds || []).map((t) => [
+            String(t.warehouseId?._id || t.warehouseId),
+            String(t.threshold),
+          ])
+        ),
         trackingMethod: full.trackingMethod || "",
         status: full.status || "ACTIVE",
         image: full.image || null,
@@ -1826,7 +2161,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
                     <td className="px-4 py-3.5 text-sm text-slate-700 tabular-nums">
                       {row.gstRate ? `${row.gstRate}%` : "\u2014"}
-                      {row.unit ? ` \u00b7 ${row.unit}` : ""}
+                      {row.unit ? ` \u00b7 ${unitLabel(row.unit)}` : ""}
                       {row.warrantyYears ? ` \u00b7 ${row.warrantyYears}yr` : ""}
                     </td>
 
