@@ -1,10 +1,12 @@
 import ProductionDefinition from '@/modules/master/productDefinition/ProductionDefinition'
-import React from 'react'
+import React, { Suspense } from 'react'
 
 const page = () => {
   return (
     <div>
-        <ProductionDefinition/>
+        <Suspense fallback={null}>
+          <ProductionDefinition/>
+        </Suspense>
     </div>
   )
 }
