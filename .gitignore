@@ -21,6 +21,9 @@ CLAUDE.md
 
 # production
 /build
+/prod*
+/staging-builds
+/production-builds
 
 # misc
 .DS_Store
