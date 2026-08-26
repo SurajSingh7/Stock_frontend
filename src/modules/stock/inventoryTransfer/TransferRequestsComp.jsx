@@ -8,7 +8,7 @@ import CreateTransferRequestModal from "./CreateTransferRequestModal";
 import ViewTransferRequestModal from "./ViewTransferRequestModal";
 import {
   STATUS_TAB_STYLES, th, thRight,
-  StatusBadge, LocationPair, ItemsCell, fetchActiveLocations, fetchTransferBoard,
+  StatusBadge, LocationPair, ItemsCell, fetchTransferLocations, fetchTransferBoard,
 } from "./shared";
 
 /*
@@ -19,6 +19,10 @@ import {
 */
 const TransferRequestsComp = () => {
   const [locations, setLocations] = useState([]);
+  // The branch this user raises requests *for* — read-only in the create form.
+  // Kept apart from `locations`, which is every warehouse and feeds the
+  // source/counterparty picker.
+  const [defaultLocationId, setDefaultLocationId] = useState("");
   // Plain in-memory state, no persistence — "viewing as location" is a
   // temporary filter for this page session, not a saved preference. Always
   // starts at "" (All Locations) and resets on every page load/refresh.
@@ -41,7 +45,12 @@ const TransferRequestsComp = () => {
   const [viewingId, setViewingId] = useState(null);
 
   useEffect(() => {
-    fetchActiveLocations().then(setLocations).catch(() => setLocations([]));
+    fetchTransferLocations()
+      .then(({ locations: locs, defaultLocationId: own }) => {
+        setLocations(locs);
+        setDefaultLocationId(own);
+      })
+      .catch(() => setLocations([]));
   }, []);
 
   useEffect(() => {
@@ -188,7 +197,7 @@ const TransferRequestsComp = () => {
       {showCreate && (
         <CreateTransferRequestModal
           locations={locations}
-          defaultRequestingLocationId={viewLocationId}
+          defaultRequestingLocationId={defaultLocationId}
           onClose={() => setShowCreate(false)}
           onCreated={() => { setShowCreate(false); loadList(); }}
         />

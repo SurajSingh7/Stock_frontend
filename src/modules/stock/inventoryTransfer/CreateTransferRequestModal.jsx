@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { Plus, Trash2 } from "lucide-react";
+import { usePermissions } from "@/context/PermissionContext";
 import { Modal, SearchableSelect, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
-import { loadSavedName, saveName } from "./userName";
 
 const EMPTY_LINE = { productDefinitionId: "", requestedQty: "" };
 
@@ -16,10 +16,19 @@ async function fetchProducts() {
 }
 
 const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, onClose, onCreated }) => {
-  const [requestingLocationId, setRequestingLocationId] = useState(defaultRequestingLocationId || "");
+  // Requester identity is the signed-in user, not a remembered free-text
+  // string — the request lands on another branch's board, so who asked has to
+  // be the person who actually asked. The backend falls back to the session
+  // user's name, so a still-loading context can never submit a blank.
+  const { userData } = usePermissions();
+  const name = [userData?.firstName, userData?.lastName].filter(Boolean).join(" ");
+
+  // You always request stock *for* your own branch, so this is a fact to show,
+  // not a field to fill — resolved by the backend and read-only here.
+  const requestingLocationId = defaultRequestingLocationId || "";
+
   const [sourceLocationId, setSourceLocationId] = useState("");
   const [remarks, setRemarks] = useState("");
-  const [name, setName] = useState(loadSavedName());
   const [lines, setLines] = useState([{ ...EMPTY_LINE }]);
 
   const [products, setProducts] = useState([]);
@@ -31,6 +40,16 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
   }, []);
 
   const locationOptions = useMemo(() => locations.map((l) => ({ value: l._id, label: `${l.name} (${l.code})` })), [locations]);
+  const requestingLocation = useMemo(
+    () => locationOptions.find((o) => String(o.value) === requestingLocationId) || null,
+    [locationOptions, requestingLocationId]
+  );
+  // A branch cannot transfer to itself — leave it out of the source list
+  // entirely rather than letting it be picked and rejected on submit.
+  const sourceOptions = useMemo(
+    () => locationOptions.filter((o) => String(o.value) !== requestingLocationId),
+    [locationOptions, requestingLocationId]
+  );
   const productOptions = useMemo(() => products.map((p) => ({ value: p._id, label: p.name })), [products]);
   const productById = useMemo(() => new Map(products.map((p) => [p._id, p])), [products]);
 
@@ -41,10 +60,10 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
   const removeLine = (idx) => setLines((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
   const validate = () => {
-    if (!requestingLocationId) return "Requesting location is required";
+    if (!requestingLocationId) {
+      return "You do not have access to any branch/warehouse. Ask an administrator to assign you a branch before raising a transfer request.";
+    }
     if (!sourceLocationId) return "Source location is required";
-    if (requestingLocationId === sourceLocationId) return "Requesting and source location must be different";
-    if (!name.trim()) return "Your name is required";
     const validLines = lines.filter((l) => l.productDefinitionId);
     if (validLines.length === 0) return "Add at least one product";
     for (const l of validLines) {
@@ -60,12 +79,11 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
     setBusy(true);
     setError(null);
     try {
-      saveName(name);
       const payload = {
         requestingLocationId,
         sourceLocationId,
         remarks: remarks.trim(),
-        requestedByName: name.trim(),
+        requestedByName: name || undefined,
         lines: lines
           .filter((l) => l.productDefinitionId)
           .map((l) => ({ productDefinitionId: l.productDefinitionId, requestedQty: Number(l.requestedQty) })),
@@ -87,22 +105,35 @@ const CreateTransferRequestModal = ({ locations, defaultRequestingLocationId, on
   };
 
   return (
-    <Modal title="New Transfer Request" onClose={onClose} maxWidth="max-w-2xl">
+    <Modal title="New Transfer Request" onClose={onClose} maxWidth="max-w-4xl">
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700">Requesting location (needs stock)</label>
-            <SearchableSelect value={requestingLocationId} onChange={setRequestingLocationId} options={locationOptions} placeholder="Select location" />
+            {requestingLocation ? (
+              <>
+                <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-slate-900">
+                  {requestingLocation.label}
+                </p>
+                {/* <p className="mt-1.5 text-xs text-slate-500">
+                  Your assigned branch — the stock is being requested for this location.
+                </p> */}
+              </>
+            ) : (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                You do not have access to any branch/warehouse — ask an administrator to assign you one.
+              </p>
+            )}
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-700">Source location (provides stock)</label>
-            <SearchableSelect value={sourceLocationId} onChange={setSourceLocationId} options={locationOptions} placeholder="Select location" />
+            <SearchableSelect value={sourceLocationId} onChange={setSourceLocationId} options={sourceOptions} placeholder="Select location" />
           </div>
         </div>
 
         <div>
-          <label className="mb-1.5 block text-xs font-semibold text-slate-700">Your name</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className={inputCls} />
+          <label className="mb-1.5 block text-xs font-semibold text-slate-700">Requested by</label>
+          <p className="text-sm font-medium text-slate-900">{name || "—"}</p>
         </div>
 
         <div>

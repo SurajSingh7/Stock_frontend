@@ -48,11 +48,26 @@ export const ItemsCell = ({ row }) => (
   </div>
 );
 
-export async function fetchActiveLocations() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { credentials: "include" });
+// Location pickers for every transfer screen. Served by the transfer-requests
+// module rather than /warehouses/active, so branch staff don't need the
+// Master > Warehouse permission just to name a location.
+//
+// `locations` is every active warehouse (a transfer's counterparty is by
+// definition another branch); `defaultLocationId` is the caller's own branch,
+// the only location they may raise a request on behalf of.
+export async function fetchTransferLocations() {
+  const res = await fetch(`${API_BACKEND_URL}/stock/transfer-requests/locations`, { credentials: "include" });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load locations");
-  return json.data || [];
+  return {
+    locations: json.data?.locations || [],
+    defaultLocationId: json.data?.defaultLocationId ? String(json.data.defaultLocationId) : "",
+  };
+}
+
+// For the screens that only ever need the flat list.
+export async function fetchActiveLocations() {
+  return (await fetchTransferLocations()).locations;
 }
 
 // One shared fetch for the /transfer-requests/board endpoint — each page
