@@ -147,9 +147,9 @@ export const navCategories = [
         action: ["READ"],
       },
       {
-        name: "Warehouses",
-        path: "/master/warehouse",
-        moduleKey: "warehouses",
+        name: "Branches",
+        path: "/master/branch",
+        moduleKey: "branches",
         action: ["READ"],
       },
     ],

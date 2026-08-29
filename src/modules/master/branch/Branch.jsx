@@ -7,7 +7,7 @@ import toast from 'react-hot-toast';
 
 /* ======================== CONSTANTS ======================== */
 
-const WAREHOUSES_API = `${API_BACKEND_URL}/stock/warehouses`;
+const BRANCHES_API = `${API_BACKEND_URL}/stock/branches`;
 
 const STATUS_FILTERS = [
   { value: 'active', label: 'Active' },
@@ -16,13 +16,13 @@ const STATUS_FILTERS = [
 
 const DEFAULT_ITEMS_PER_PAGE = 10;
 
-const LOCATION_ROLES = [
+const BRANCH_ROLES = [
   { value: 'CENTRAL', label: 'Central' },
   { value: 'REGIONAL', label: 'Regional' },
   { value: 'NORMAL', label: 'Normal' },
 ];
 
-const EMPTY_FORM = { name: '', code: '', address: '', description: '', city: '', state: '', locationRole: 'NORMAL' };
+const EMPTY_FORM = { name: '', code: '', address: '', description: '', city: '', state: '', branchRole: 'NORMAL' };
 
 /* ---------- Design tokens — SAME as FieldDefinition/VendorsComp ---------- */
 
@@ -34,68 +34,68 @@ const thRight = `${th} text-right`;
 
 /* ======================== API FUNCTIONS ======================== */
 
-const getWarehouses = async ({ page, limit, search, showInactive }) => {
+const getBranches = async ({ page, limit, search, showInactive }) => {
   const params = new URLSearchParams();
   params.set('page', page);
   params.set('limit', limit);
   if (search) params.set('search', search);
   if (showInactive) params.set('showInactive', 'true');
 
-  const response = await fetch(`${WAREHOUSES_API}?${params.toString()}`, {
+  const response = await fetch(`${BRANCHES_API}?${params.toString()}`, {
     method: 'GET',
     credentials: 'include',
   });
-  if (!response.ok) throw new Error('Failed to fetch warehouses');
+  if (!response.ok) throw new Error('Failed to fetch branches');
   return response.json();
 };
 
-const createWarehouse = async (payload) => {
-  const response = await fetch(WAREHOUSES_API, {
+const createBranch = async (payload) => {
+  const response = await fetch(BRANCHES_API, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to create warehouse');
+  if (!response.ok) throw new Error(data?.message || 'Failed to create branch');
   return data;
 };
 
-const updateWarehouse = async (id, payload) => {
-  const response = await fetch(`${WAREHOUSES_API}/${id}`, {
+const updateBranch = async (id, payload) => {
+  const response = await fetch(`${BRANCHES_API}/${id}`, {
     method: 'PUT',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to update warehouse');
+  if (!response.ok) throw new Error(data?.message || 'Failed to update branch');
   return data;
 };
 
-const deleteWarehouse = async (id) => {
-  const response = await fetch(`${WAREHOUSES_API}/${id}`, {
+const deleteBranch = async (id) => {
+  const response = await fetch(`${BRANCHES_API}/${id}`, {
     method: 'DELETE',
     credentials: 'include',
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to delete warehouse');
+  if (!response.ok) throw new Error(data?.message || 'Failed to delete branch');
   return data;
 };
 
-const restoreWarehouse = async (id) => {
-  const response = await fetch(`${WAREHOUSES_API}/${id}/restore`, {
+const restoreBranch = async (id) => {
+  const response = await fetch(`${BRANCHES_API}/${id}/restore`, {
     method: 'PATCH',
     credentials: 'include',
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to restore warehouse');
+  if (!response.ok) throw new Error(data?.message || 'Failed to restore branch');
   return data;
 };
 
 /* ======================== UTILITY FUNCTIONS ======================== */
 
-const mapWarehouseResponse = (item) => ({
+const mapBranchResponse = (item) => ({
   id: item._id,
   name: item.name,
   code: item.code,
@@ -103,7 +103,7 @@ const mapWarehouseResponse = (item) => ({
   description: item.description || '',
   city: item.city || '',
   state: item.state || '',
-  locationRole: item.locationRole || 'NORMAL',
+  branchRole: item.branchRole || 'NORMAL',
   isActive: item.isActive !== false,
 });
 
@@ -187,7 +187,7 @@ const RoleBadge = ({ role }) => (
   <span
     className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${ROLE_BADGE_CLS[role] || ROLE_BADGE_CLS.NORMAL}`}
   >
-    {LOCATION_ROLES.find((r) => r.value === role)?.label || role}
+    {BRANCH_ROLES.find((r) => r.value === role)?.label || role}
   </span>
 );
 
@@ -229,13 +229,13 @@ const EmptyState = ({ colSpan, onCreateClick }) => (
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-50 text-slate-300">
           {Icon.empty}
         </div>
-        <p className="mt-4 text-sm font-medium text-slate-700">No warehouses yet</p>
-        <p className="mt-1 text-sm text-slate-400">Adjust your filters, or add a new warehouse to get started.</p>
+        <p className="mt-4 text-sm font-medium text-slate-700">No branches yet</p>
+        <p className="mt-1 text-sm text-slate-400">Adjust your filters, or add a new branch to get started.</p>
         <button
           onClick={onCreateClick}
           className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
         >
-          {Icon.plus} Add warehouse
+          {Icon.plus} Add branch
         </button>
       </div>
     </td>
@@ -249,7 +249,7 @@ const ErrorState = ({ colSpan, message, onRetry }) => (
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-500">
           {Icon.alert}
         </div>
-        <p className="mt-3 text-sm font-medium text-slate-800">Couldn&apos;t load warehouses</p>
+        <p className="mt-3 text-sm font-medium text-slate-800">Couldn&apos;t load branches</p>
         <p className="mt-1 max-w-sm text-sm text-slate-400">{message}</p>
         <button
           onClick={onRetry}
@@ -267,17 +267,17 @@ const ErrorState = ({ colSpan, message, onRetry }) => (
 const Header = ({ totalItems, onCreateClick }) => (
   <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
     <div>
-      <h1 className="text-xl font-semibold tracking-tight text-slate-900">Warehouses</h1>
+      <h1 className="text-xl font-semibold tracking-tight text-slate-900">Branches</h1>
       <p className="mt-0.5 text-sm text-slate-500">
-        {typeof totalItems === 'number' ? `${totalItems} warehouse${totalItems === 1 ? '' : 's'} · ` : ''}
-        Physical stock locations used across receiving and inventory.
+        {typeof totalItems === 'number' ? `${totalItems} branch${totalItems === 1 ? '' : 's'} · ` : ''}
+        Physical stock branches used across receiving and inventory.
       </p>
     </div>
     <button
       onClick={onCreateClick}
       className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
     >
-      {Icon.plus} Add warehouse
+      {Icon.plus} Add branch
     </button>
   </div>
 );
@@ -323,7 +323,7 @@ const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
     <td className="px-4 py-3.5 text-sm font-mono text-slate-700">{item.code}</td>
     <td className="px-4 py-3.5 text-sm font-medium text-slate-900">{item.name}</td>
     <td className="px-4 py-3.5">
-      <RoleBadge role={item.locationRole} />
+      <RoleBadge role={item.branchRole} />
     </td>
     <td className="px-4 py-3.5 text-sm text-slate-500">
       {[item.city, item.state].filter(Boolean).join(', ') || <span className="text-slate-300">—</span>}
@@ -356,7 +356,7 @@ const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, 
           <th className={th}>Code</th>
           <th className={th}>Name</th>
           <th className={th}>Role</th>
-          <th className={th}>Location</th>
+          <th className={th}>Branch</th>
           <th className={th}>Address</th>
           <th className={th}>Status</th>
           <th className={thRight}>Action</th>
@@ -477,7 +477,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
               value={formData.name}
               disabled={isView}
               onChange={(e) => onChange('name', e.target.value)}
-              placeholder="e.g. Main Warehouse"
+              placeholder="e.g. Main Branch"
               className={fieldInputClass}
             />
           </Field>
@@ -497,12 +497,12 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Role" hint="Descriptive only — doesn't restrict transfers.">
             <select
-              value={formData.locationRole}
+              value={formData.branchRole}
               disabled={isView}
-              onChange={(e) => onChange('locationRole', e.target.value)}
+              onChange={(e) => onChange('branchRole', e.target.value)}
               className={`${fieldInputClass} appearance-none`}
             >
-              {LOCATION_ROLES.map((r) => (
+              {BRANCH_ROLES.map((r) => (
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>
@@ -537,7 +537,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             disabled={isView}
             onChange={(e) => onChange('address', e.target.value)}
             rows={2}
-            placeholder="Physical address of this warehouse"
+            placeholder="Physical address of this branch"
             className={fieldInputClass}
           />
         </Field>
@@ -548,7 +548,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             disabled={isView}
             onChange={(e) => onChange('description', e.target.value)}
             rows={2}
-            placeholder="Optional notes about this warehouse"
+            placeholder="Optional notes about this branch"
             className={fieldInputClass}
           />
         </Field>
@@ -574,7 +574,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             disabled={submitting}
             className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {submitting ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create warehouse'}
+            {submitting ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create branch'}
           </button>
         )}
       </div>
@@ -584,7 +584,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
 
 /* ======================== MAIN COMPONENT ======================== */
 
-const Warehouse = () => {
+const Branch = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -605,17 +605,17 @@ const Warehouse = () => {
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const loadWarehouses = useCallback(async () => {
+  const loadBranches = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await getWarehouses({
+      const response = await getBranches({
         page: currentPage,
         limit: itemsPerPage,
         search,
         showInactive: statusFilter !== 'active',
       });
-      let mapped = (response?.data || []).map(mapWarehouseResponse);
+      let mapped = (response?.data || []).map(mapBranchResponse);
       let total = response?.pagination?.total ?? mapped.length;
 
       if (statusFilter === 'inactive') {
@@ -626,15 +626,15 @@ const Warehouse = () => {
       setItems(mapped);
       setTotalItems(total);
     } catch (err) {
-      setError(err.message || 'Something went wrong while loading warehouses.');
+      setError(err.message || 'Something went wrong while loading branches.');
     } finally {
       setLoading(false);
     }
   }, [currentPage, itemsPerPage, search, statusFilter]);
 
   useEffect(() => {
-    loadWarehouses();
-  }, [loadWarehouses]);
+    loadBranches();
+  }, [loadBranches]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -650,7 +650,7 @@ const Warehouse = () => {
   const openEditModal = (item) => {
     setFormData({
       name: item.name, code: item.code, address: item.address, description: item.description,
-      city: item.city, state: item.state, locationRole: item.locationRole,
+      city: item.city, state: item.state, branchRole: item.branchRole,
     });
     setFormErrors({});
     setActiveItemId(item.id);
@@ -660,7 +660,7 @@ const Warehouse = () => {
   const openViewModal = (item) => {
     setFormData({
       name: item.name, code: item.code, address: item.address, description: item.description,
-      city: item.city, state: item.state, locationRole: item.locationRole,
+      city: item.city, state: item.state, branchRole: item.branchRole,
     });
     setFormErrors({});
     setActiveItemId(item.id);
@@ -699,21 +699,21 @@ const Warehouse = () => {
         description: formData.description.trim(),
         city: formData.city.trim(),
         state: formData.state.trim(),
-        locationRole: formData.locationRole,
+        branchRole: formData.branchRole,
       };
 
       if (modalMode === 'create') {
-        await createWarehouse(payload);
-        toast.success('Warehouse created successfully.');
+        await createBranch(payload);
+        toast.success('Branch created successfully.');
       } else if (modalMode === 'edit') {
-        await updateWarehouse(activeItemId, payload);
-        toast.success('Warehouse updated successfully.');
+        await updateBranch(activeItemId, payload);
+        toast.success('Branch updated successfully.');
       }
 
       closeModal();
-      await loadWarehouses();
+      await loadBranches();
     } catch (err) {
-      const message = err.message || 'Failed to save warehouse.';
+      const message = err.message || 'Failed to save branch.';
       setFormErrors({ general: message });
       toast.error(message);
     } finally {
@@ -727,12 +727,12 @@ const Warehouse = () => {
     if (!confirmTarget) return;
     setDeleting(true);
     try {
-      await deleteWarehouse(confirmTarget.id);
-      toast.success('Warehouse deleted successfully.');
+      await deleteBranch(confirmTarget.id);
+      toast.success('Branch deleted successfully.');
       setConfirmTarget(null);
-      await loadWarehouses();
+      await loadBranches();
     } catch (err) {
-      toast.error(err.message || 'Failed to delete warehouse.');
+      toast.error(err.message || 'Failed to delete branch.');
     } finally {
       setDeleting(false);
     }
@@ -740,16 +740,16 @@ const Warehouse = () => {
 
   const handleRestore = async (item) => {
     try {
-      await restoreWarehouse(item.id);
-      toast.success('Warehouse restored successfully.');
-      await loadWarehouses();
+      await restoreBranch(item.id);
+      toast.success('Branch restored successfully.');
+      await loadBranches();
     } catch (err) {
-      toast.error(err.message || 'Failed to restore warehouse.');
+      toast.error(err.message || 'Failed to restore branch.');
     }
   };
 
   const modalTitle =
-    modalMode === 'create' ? 'Add warehouse' : modalMode === 'edit' ? 'Edit warehouse' : 'Warehouse details';
+    modalMode === 'create' ? 'Add branch' : modalMode === 'edit' ? 'Edit branch' : 'Branch details';
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -761,7 +761,7 @@ const Warehouse = () => {
         items={items}
         loading={loading}
         error={error}
-        onRetry={loadWarehouses}
+        onRetry={loadBranches}
         onCreateClick={openCreateModal}
         onView={openViewModal}
         onEdit={openEditModal}
@@ -800,7 +800,7 @@ const Warehouse = () => {
 
       <ConfirmModal
         open={!!confirmTarget}
-        message="Are you sure you want to delete this warehouse?"
+        message="Are you sure you want to delete this branch?"
         onCancel={() => setConfirmTarget(null)}
         onConfirm={handleConfirmDelete}
         loading={deleting}
@@ -809,4 +809,4 @@ const Warehouse = () => {
   );
 };
 
-export default Warehouse;
+export default Branch;

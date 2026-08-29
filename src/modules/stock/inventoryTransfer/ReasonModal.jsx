@@ -7,7 +7,7 @@ import { loadSavedName, saveName } from "./userName";
 
 /*
   Generic "close this request with a reason" modal — used by the source
-  location to reject a request outright (PATCH { reason, processedByName }).
+  branch to reject a request outright (PATCH { reason, processedByName }).
   `path` is relative to `${API_BACKEND_URL}/stock/`.
 */
 const ReasonModal = ({ title, description, confirmLabel, path, onClose, onDone }) => {

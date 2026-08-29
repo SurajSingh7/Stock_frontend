@@ -8,25 +8,25 @@ import CreateTransferRequestModal from "./CreateTransferRequestModal";
 import ViewTransferRequestModal from "./ViewTransferRequestModal";
 import {
   STATUS_TAB_STYLES, th, thRight,
-  StatusBadge, LocationPair, ItemsCell, fetchTransferLocations, fetchTransferBoard,
+  StatusBadge, BranchPair, ItemsCell, fetchTransferBranches, fetchTransferBoard,
 } from "./shared";
 
 /*
-  "Transfer Requests" — everything THIS location has asked for from other
-  locations (role=requesting on the API). Create new requests here, or just
+  "Transfer Requests" — everything THIS branch has asked for from other
+  branches (role=requesting on the API). Create new requests here, or just
   review past ones. Once created, a request can only be closed by the source
-  location (Full/Partial transfer or Reject) — the requester cannot withdraw it.
+  branch (Full/Partial transfer or Reject) — the requester cannot withdraw it.
 */
 const TransferRequestsComp = () => {
-  const [locations, setLocations] = useState([]);
+  const [branches, setBranches] = useState([]);
   // The branch this user raises requests *for* — read-only in the create form.
-  // Kept apart from `locations`, which is every warehouse and feeds the
+  // Kept apart from `branches`, which is every branch and feeds the
   // source/counterparty picker.
-  const [defaultLocationId, setDefaultLocationId] = useState("");
-  // Plain in-memory state, no persistence — "viewing as location" is a
+  const [defaultBranchId, setDefaultBranchId] = useState("");
+  // Plain in-memory state, no persistence — "viewing as branch" is a
   // temporary filter for this page session, not a saved preference. Always
-  // starts at "" (All Locations) and resets on every page load/refresh.
-  const [viewLocationId, setViewLocationId] = useState("");
+  // starts at "" (All Branches) and resets on every page load/refresh.
+  const [viewBranchId, setViewBranchId] = useState("");
 
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -45,12 +45,12 @@ const TransferRequestsComp = () => {
   const [viewingId, setViewingId] = useState(null);
 
   useEffect(() => {
-    fetchTransferLocations()
-      .then(({ locations: locs, defaultLocationId: own }) => {
-        setLocations(locs);
-        setDefaultLocationId(own);
+    fetchTransferBranches()
+      .then(({ branches: locs, defaultBranchId: own }) => {
+        setBranches(locs);
+        setDefaultBranchId(own);
       })
-      .catch(() => setLocations([]));
+      .catch(() => setBranches([]));
   }, []);
 
   useEffect(() => {
@@ -62,7 +62,7 @@ const TransferRequestsComp = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchTransferBoard({ locationId: viewLocationId, role: "requesting", status, search: debouncedSearch, page, limit });
+      const result = await fetchTransferBoard({ branchId: viewBranchId, role: "requesting", status, search: debouncedSearch, page, limit });
       setRows(result.rows);
       setCounts(result.counts);
       setTotal(result.total);
@@ -73,12 +73,12 @@ const TransferRequestsComp = () => {
     } finally {
       setLoading(false);
     }
-  }, [viewLocationId, status, debouncedSearch, page, limit]);
+  }, [viewBranchId, status, debouncedSearch, page, limit]);
 
   useEffect(() => { loadList(); }, [loadList]);
-  useEffect(() => { setPage(1); }, [viewLocationId, status, debouncedSearch]);
+  useEffect(() => { setPage(1); }, [viewBranchId, status, debouncedSearch]);
 
-  const locationOptions = useMemo(() => locations.map((l) => ({ value: l._id, label: `${l.name} (${l.code})` })), [locations]);
+  const branchOptions = useMemo(() => branches.map((l) => ({ value: l._id, label: `${l.name} (${l.code})` })), [branches]);
 
   const statusTabs = [
     { key: "", label: "All", count: counts.ALL },
@@ -92,7 +92,7 @@ const TransferRequestsComp = () => {
       <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-slate-900">Transfer Requests</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Requests your location has raised for stock from other branches or warehouses.</p>
+          <p className="mt-0.5 text-sm text-slate-500">Requests your branch has raised for stock from other branches or branches.</p>
         </div>
         <button
           type="button" onClick={() => setShowCreate(true)}
@@ -112,8 +112,8 @@ const TransferRequestsComp = () => {
       <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-slate-600">Requesting location (you)</label>
-            <SearchableSelect value={viewLocationId} onChange={setViewLocationId} options={locationOptions} placeholder="All locations" />
+            <label className="mb-1.5 block text-xs font-semibold text-slate-600">Requesting branch (you)</label>
+            <SearchableSelect value={viewBranchId} onChange={setViewBranchId} options={branchOptions} placeholder="All branches" />
           </div>
           <div className="lg:col-span-2">
             <label className="mb-1.5 block text-xs font-semibold text-slate-600">Search</label>
@@ -162,13 +162,13 @@ const TransferRequestsComp = () => {
             ) : rows.length === 0 ? (
               <tr><td colSpan={6} className="px-4 py-16 text-center">
                 <p className="text-sm font-medium text-slate-700">No transfer requests found</p>
-                <p className="mt-1 text-sm text-slate-400">Create a new request to pull stock from another location.</p>
+                <p className="mt-1 text-sm text-slate-400">Create a new request to pull stock from another branch.</p>
               </td></tr>
             ) : (
               rows.map((row) => (
                 <tr key={row._id} className="transition hover:bg-slate-50/60">
                   <td className="px-4 py-3 text-sm font-semibold text-indigo-600">{row.requestNumber}</td>
-                  <td className="px-4 py-3"><LocationPair from={row.sourceLocationId} to={row.requestingLocationId} /></td>
+                  <td className="px-4 py-3"><BranchPair from={row.sourceBranchId} to={row.requestingBranchId} /></td>
                   <td className="px-4 py-3"><ItemsCell row={row} /></td>
                   <td className="px-4 py-3 text-sm text-slate-500">{new Date(row.requestedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}</td>
                   <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
@@ -196,8 +196,8 @@ const TransferRequestsComp = () => {
 
       {showCreate && (
         <CreateTransferRequestModal
-          locations={locations}
-          defaultRequestingLocationId={defaultLocationId}
+          branches={branches}
+          defaultRequestingBranchId={defaultBranchId}
           onClose={() => setShowCreate(false)}
           onCreated={() => { setShowCreate(false); loadList(); }}
         />

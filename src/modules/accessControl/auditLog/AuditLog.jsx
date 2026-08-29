@@ -9,7 +9,7 @@ import { PageHeader, Card, Field, Picker, inputCls, th, EmptyRow } from '../shar
 const ENTITY_TYPES = [
   'field-definitions', 'categories', 'product-definitions', 'vendors', 'terms-conditions',
   'inventory-items', 'quotations', 'purchase-orders', 'tracking-orders', 'invoices',
-  'warehouses', 'transfer-requests', 'notifications', 'Permission',
+  'branches', 'transfer-requests', 'notifications', 'Permission',
 ];
 
 const fmtDate = (iso) => new Date(iso).toLocaleString();

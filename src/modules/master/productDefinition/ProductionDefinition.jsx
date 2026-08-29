@@ -98,12 +98,12 @@ const emptyForm = {
   gstRate: "",
   warrantyYears: "",
   unit: "",
-  // Fallback for any warehouse created AFTER this product was last saved
+  // Fallback for any branch created AFTER this product was last saved
   // (see the model comment), and the source value for "Apply default to all".
   defaultStockAlertThreshold: "",
-  // { [warehouseId]: "12" } — a keyed map of raw input strings while editing,
-  // flattened to the API's [{ warehouseId, threshold }] array on submit.
-  warehouseThresholds: {},
+  // { [branchId]: "12" } — a keyed map of raw input strings while editing,
+  // flattened to the API's [{ branchId, threshold }] array on submit.
+  branchThresholds: {},
   trackingMethod: "",
   status: "ACTIVE",
   selectedFields: [],
@@ -117,9 +117,9 @@ const inputCls =
 const inputErrCls =
   "w-full rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-100";
 const labelCls = "mb-1.5 block text-xs font-semibold text-slate-700";
-// Compact, fixed-width number input for the per-warehouse threshold rows.
+// Compact, fixed-width number input for the per-branch threshold rows.
 // Deliberately NOT inputCls: that token is `w-full`, which wins the Tailwind
-// width conflict and squeezes the warehouse name sharing the row with it.
+// width conflict and squeezes the branch name sharing the row with it.
 const thresholdInputBase =
   "w-24 shrink-0 rounded-lg bg-white px-2 py-1.5 text-center text-sm font-semibold text-slate-900 shadow-sm transition focus:outline-none focus:ring-2";
 const thresholdInputCls = `${thresholdInputBase} border border-slate-200 focus:border-indigo-400 focus:ring-indigo-100`;
@@ -157,14 +157,14 @@ async function apiFetchFieldDefinitions() {
   return json.data?.data || json.data || [];
 }
 
-// Every ACTIVE warehouse needs its own stock alert threshold on the product,
-// so the form renders one row per warehouse from this list. Deliberately the
+// Every ACTIVE branch needs its own stock alert threshold on the product,
+// so the form renders one row per branch from this list. Deliberately the
 // unfiltered /active list (not branch-scoped): thresholds are master data
 // covering the whole network, not just the editor's own branch.
-async function apiFetchActiveWarehouses() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { credentials: "include" });
+async function apiFetchActiveBranches() {
+  const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
   const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load warehouses");
+  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
   return json.data || [];
 }
 
@@ -788,12 +788,12 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
     ["Product ID", row._id],
   ];
 
-  // The API populates warehouseId to { _id, name, code } — fall back to the
+  // The API populates branchId to { _id, name, code } — fall back to the
   // raw id in case an unpopulated row is ever handed in.
-  const thresholdRows = (row.warehouseThresholds || []).map((t) => ({
-    id: String(t.warehouseId?._id || t.warehouseId),
-    name: t.warehouseId?.name || String(t.warehouseId),
-    code: t.warehouseId?.code || "",
+  const thresholdRows = (row.branchThresholds || []).map((t) => ({
+    id: String(t.branchId?._id || t.branchId),
+    name: t.branchId?.name || String(t.branchId),
+    code: t.branchId?.code || "",
     threshold: t.threshold,
   }));
 
@@ -839,7 +839,7 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
       {thresholdRows.length > 0 && (
         <div className="mt-4">
           <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-            Stock Alert Threshold — Per Warehouse
+            Stock Alert Threshold — Per Branch
           </p>
           <div className="rounded-lg border border-slate-200">
             {thresholdRows.map((t) => (
@@ -913,12 +913,12 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   const [gstOptions, setGstOptions] = useState([]);
   const [gstLoading, setGstLoading] = useState(true);
 
-  // Drives the per-warehouse threshold rows. The row set comes from THIS list,
+  // Drives the per-branch threshold rows. The row set comes from THIS list,
   // never from whatever the product saved earlier — that is what makes a newly
-  // created warehouse show up (and become mandatory) on the next edit.
-  const [warehouses, setWarehouses] = useState([]);
-  const [warehousesLoading, setWarehousesLoading] = useState(true);
-  const [warehousesError, setWarehousesError] = useState("");
+  // created branch show up (and become mandatory) on the next edit.
+  const [branches, setBranches] = useState([]);
+  const [branchesLoading, setBranchesLoading] = useState(true);
+  const [branchesError, setBranchesError] = useState("");
 
   const [fieldDefs, setFieldDefs] = useState([]);
   const [fieldDefsLoading, setFieldDefsLoading] = useState(false);
@@ -951,16 +951,16 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     }
   }, []);
 
-  const loadWarehouses = useCallback(async () => {
-    setWarehousesLoading(true);
-    setWarehousesError("");
+  const loadBranches = useCallback(async () => {
+    setBranchesLoading(true);
+    setBranchesError("");
     try {
-      setWarehouses(await apiFetchActiveWarehouses());
+      setBranches(await apiFetchActiveBranches());
     } catch (err) {
-      setWarehouses([]);
-      setWarehousesError(err.message || "Failed to load warehouses");
+      setBranches([]);
+      setBranchesError(err.message || "Failed to load branches");
     } finally {
-      setWarehousesLoading(false);
+      setBranchesLoading(false);
     }
   }, []);
 
@@ -979,7 +979,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   useEffect(() => {
     loadGstRates();
     loadCategories();
-    loadWarehouses();
+    loadBranches();
     if (initialData.trackingMethod) loadFieldDefinitions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1026,44 +1026,44 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     }));
   };
 
-  // form.warehouseThresholds only holds warehouses the user (or a previous
-  // save) set EXPLICITLY. Anything else — most importantly a warehouse created
+  // form.branchThresholds only holds branches the user (or a previous
+  // save) set EXPLICITLY. Anything else — most importantly a branch created
   // since this product was last saved — falls back to the product default here,
   // which is the same rule the backend applies between saves. Derived rather
   // than backfilled into state, so editing the default still flows through to
   // every row nobody has overridden yet.
-  const thresholdFor = (warehouseId) => {
-    const explicit = form.warehouseThresholds[warehouseId];
+  const thresholdFor = (branchId) => {
+    const explicit = form.branchThresholds[branchId];
     return explicit === undefined ? String(form.defaultStockAlertThreshold ?? "") : explicit;
   };
 
   // Header counter — the fastest way for the user to see the section is complete
   // without scanning every row (it jumps to N of N as soon as a default is typed).
-  const filledThresholdCount = warehouses.filter((w) => thresholdFor(w._id) !== "").length;
+  const filledThresholdCount = branches.filter((w) => thresholdFor(w._id) !== "").length;
 
-  const updateWarehouseThreshold = (warehouseId, value) => {
+  const updateBranchThreshold = (branchId, value) => {
     setForm((f) => ({
       ...f,
-      warehouseThresholds: { ...f.warehouseThresholds, [warehouseId]: value },
+      branchThresholds: { ...f.branchThresholds, [branchId]: value },
     }));
     setErrors((e) => {
-      if (!e.warehouseThresholds && !e.warehouseThresholdsSummary) return e;
-      const rest = { ...(e.warehouseThresholds || {}) };
-      delete rest[warehouseId];
-      return { ...e, warehouseThresholds: rest, warehouseThresholdsSummary: undefined };
+      if (!e.branchThresholds && !e.branchThresholdsSummary) return e;
+      const rest = { ...(e.branchThresholds || {}) };
+      delete rest[branchId];
+      return { ...e, branchThresholds: rest, branchThresholdsSummary: undefined };
     });
   };
 
   // Freezes the current default into every row as an explicit override — the
   // one-click way to undo per-row edits, and with a dozen-plus branches it saves
   // retyping the same number into each box.
-  const applyDefaultToAllWarehouses = () => {
+  const applyDefaultToAllBranches = () => {
     const value = String(form.defaultStockAlertThreshold);
     setForm((f) => ({
       ...f,
-      warehouseThresholds: Object.fromEntries(warehouses.map((w) => [w._id, value])),
+      branchThresholds: Object.fromEntries(branches.map((w) => [w._id, value])),
     }));
-    setErrors((e) => ({ ...e, warehouseThresholds: undefined, warehouseThresholdsSummary: undefined }));
+    setErrors((e) => ({ ...e, branchThresholds: undefined, branchThresholdsSummary: undefined }));
   };
 
   const updateField = (key, value) => {
@@ -1120,7 +1120,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     ) {
       next.warrantyYears = "Warranty must be a whole number of at least 1 year";
     }
-    // 0 is a legitimate threshold (alert only once that warehouse is empty),
+    // 0 is a legitimate threshold (alert only once that branch is empty),
     // so "" is the only "not filled in" state here.
     const isThreshold = (v) =>
       v !== "" &&
@@ -1134,18 +1134,18 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
       next.defaultStockAlertThreshold = "Enter a whole number of 0 or more";
     }
 
-    if (!warehousesLoading && warehouses.length === 0) {
-      next.warehouseThresholdsSummary =
-        warehousesError || "No active warehouse found — add a warehouse before defining a product";
+    if (!branchesLoading && branches.length === 0) {
+      next.branchThresholdsSummary =
+        branchesError || "No active branch found — add a branch before defining a product";
     } else {
       const rowErrors = {};
-      warehouses.forEach((w) => {
+      branches.forEach((w) => {
         if (!isThreshold(thresholdFor(w._id))) rowErrors[w._id] = true;
       });
       if (Object.keys(rowErrors).length > 0) {
-        next.warehouseThresholds = rowErrors;
-        next.warehouseThresholdsSummary =
-          "Every warehouse needs a stock alert threshold (whole number, 0 or more)";
+        next.branchThresholds = rowErrors;
+        next.branchThresholdsSummary =
+          "Every branch needs a stock alert threshold (whole number, 0 or more)";
       }
     }
     if (errors.imageFile) next.imageFile = errors.imageFile; // keep an unresolved upload error
@@ -1183,10 +1183,10 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
         warrantyYears: Number(form.warrantyYears),
         unit: form.unit || null,
         defaultStockAlertThreshold: Number(form.defaultStockAlertThreshold),
-        // Built from the live warehouse list rather than the form map's keys, so a
-        // warehouse deleted while this form was open is never posted back.
-        warehouseThresholds: warehouses.map((w) => ({
-          warehouseId: w._id,
+        // Built from the live branch list rather than the form map's keys, so a
+        // branch deleted while this form was open is never posted back.
+        branchThresholds: branches.map((w) => ({
+          branchId: w._id,
           threshold: Number(thresholdFor(w._id)),
         })),
         // Explicit null tells the backend "clear the file" when the user hit
@@ -1383,40 +1383,40 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
             <div>
               <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                 <label className="block text-xs font-semibold text-slate-700">
-                  Stock Alert Threshold Per Warehouse
+                  Stock Alert Threshold Per Branch
                   <RequiredMark />
-                  {warehouses.length > 0 && (
+                  {branches.length > 0 && (
                     <span className="ml-2 text-xs font-normal text-slate-400">
-                      ({filledThresholdCount} of {warehouses.length} set)
+                      ({filledThresholdCount} of {branches.length} set)
                     </span>
                   )}
                 </label>
                 <button
-                  type="button" onClick={applyDefaultToAllWarehouses}
-                  disabled={form.defaultStockAlertThreshold === "" || warehousesLoading || warehouses.length === 0}
+                  type="button" onClick={applyDefaultToAllBranches}
+                  disabled={form.defaultStockAlertThreshold === "" || branchesLoading || branches.length === 0}
                   className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
                 >
                   Apply default to all
                 </button>
               </div>
               <p className="mb-3 text-xs text-slate-400">
-                Alerts are raised per warehouse, so each one carries its own threshold. 0 means
-                alert only once that warehouse is completely out.
+                Alerts are raised per branch, so each one carries its own threshold. 0 means
+                alert only once that branch is completely out.
               </p>
 
-              {warehousesLoading ? (
+              {branchesLoading ? (
                 <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 py-8 text-sm text-slate-400">
-                  <Loader2 size={16} className="animate-spin" /> Loading warehouses...
+                  <Loader2 size={16} className="animate-spin" /> Loading branches...
                 </div>
-              ) : warehouses.length === 0 ? (
+              ) : branches.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
-                  {warehousesError ||
-                    "No active warehouse found. Add a warehouse before defining a product."}
+                  {branchesError ||
+                    "No active branch found. Add a branch before defining a product."}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {warehouses.map((w) => {
-                    const rowInvalid = Boolean(errors.warehouseThresholds?.[w._id]);
+                  {branches.map((w) => {
+                    const rowInvalid = Boolean(errors.branchThresholds?.[w._id]);
                     return (
                       <div
                         key={w._id}
@@ -1433,7 +1433,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                         <input
                           type="number" min="0" step="1"
                           value={thresholdFor(w._id)}
-                          onChange={(e) => updateWarehouseThreshold(w._id, e.target.value)}
+                          onChange={(e) => updateBranchThreshold(w._id, e.target.value)}
                           placeholder="0"
                           aria-label={`Stock alert threshold for ${w.name}`}
                           className={rowInvalid ? thresholdInputErrCls : thresholdInputCls}
@@ -1444,7 +1444,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                 </div>
               )}
 
-              <FieldError message={errors.warehouseThresholdsSummary} />
+              <FieldError message={errors.branchThresholdsSummary} />
             </div>
 
             <div>
@@ -1865,13 +1865,13 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
         warrantyYears: full.warrantyYears ?? "",
         unit: full.unit ?? "",
         defaultStockAlertThreshold: full.defaultStockAlertThreshold ?? "",
-        // Keyed by warehouse id (the API populates warehouseId to {_id,name,code}).
-        // Only warehouses this product actually saved a threshold for; any warehouse
+        // Keyed by branch id (the API populates branchId to {_id,name,code}).
+        // Only branches this product actually saved a threshold for; any branch
         // created since then is absent here and falls back to the default via
         // thresholdFor() in the form.
-        warehouseThresholds: Object.fromEntries(
-          (full.warehouseThresholds || []).map((t) => [
-            String(t.warehouseId?._id || t.warehouseId),
+        branchThresholds: Object.fromEntries(
+          (full.branchThresholds || []).map((t) => [
+            String(t.branchId?._id || t.branchId),
             String(t.threshold),
           ])
         ),

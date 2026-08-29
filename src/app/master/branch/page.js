@@ -1,10 +1,10 @@
-import Warehouse from '@/modules/master/warehouse/Warehouse';
+import Branch from '@/modules/master/branch/Branch';
 import React from 'react'
 
 const page = () => {
   return (
     <div>
-        <Warehouse/>
+        <Branch/>
     </div>
   )
 }

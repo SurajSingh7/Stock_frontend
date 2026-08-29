@@ -27,16 +27,16 @@ const ENTITY_SCOPES = [
   { value: 'SPECIFIC_ENTITIES', label: 'Specific entities' },
 ];
 
-const getActiveWarehouses = async () => {
-  const res = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { method: 'GET', credentials: 'include' });
+const getActiveBranches = async () => {
+  const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { method: 'GET', credentials: 'include' });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.message || 'Failed to load warehouses');
+  if (!res.ok) throw new Error(data?.message || 'Failed to load branches');
   return data.data || [];
 };
 
 const UserOverrides = () => {
   const [modules, setModules] = useState([]);
-  const [warehouses, setWarehouses] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [user, setUser] = useState(null); // { id, label, description, roleId, roleName }
   const [moduleId, setModuleId] = useState('');
 
@@ -64,7 +64,7 @@ const UserOverrides = () => {
 
   useEffect(() => {
     getModules().then((res) => setModules(res.data || [])).catch((err) => toast.error(err.message));
-    getActiveWarehouses().then(setWarehouses).catch((err) => toast.error(err.message));
+    getActiveBranches().then(setBranches).catch((err) => toast.error(err.message));
   }, []);
 
   const selectedModule = modules.find((m) => m._id === moduleId);
@@ -286,7 +286,7 @@ const UserOverrides = () => {
               </div>
               {scope === 'SPECIFIC_BRANCHES' && (
                 <div className="flex flex-wrap gap-2">
-                  {warehouses.map((w) => (
+                  {branches.map((w) => (
                     <button
                       key={w._id}
                       type="button"
