@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { getModules, delegateAccess } from '../api';
 import { searchHrmsUsers } from '../hrmsDirectory';
-import { PageHeader, Card, Field, PrimaryButton, Picker, th, Banner, EmptyRow } from '../shared';
+import { PageShell, Card, Field, PrimaryButton, Picker, Banner, TableShell, EmptyRow, Mono, ActionPill } from '../shared';
 
 const DelegateAccess = () => {
   const [modules, setModules] = useState([]);
@@ -52,11 +52,11 @@ const DelegateAccess = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/60 p-6">
-      <PageHeader
-        title="Delegate Access"
-        description="Copy everything User A can currently do onto User B — a one-time snapshot, not a live link. B keeps their own role's baseline; this only ever adds."
-      />
+    <PageShell
+      question="One-time copy"
+      title="Delegate Access"
+      description="Copy everything User A can currently do onto User B — a snapshot, not a live link. Changing A afterwards never touches B, and B keeps their own role's baseline underneath. This only ever adds."
+    >
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card className="lg:col-span-1">
@@ -101,33 +101,31 @@ const DelegateAccess = () => {
                 <span className="font-mono">{result.delegation.toUserId}</span> — batch{' '}
                 <span className="font-mono">{result.delegation.batchId}</span>
               </Banner>
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="min-w-full divide-y divide-slate-200">
-                  <thead className="bg-slate-50/60">
-                    <tr>
-                      <th className={th}>Module</th>
-                      <th className={th}>Actions granted to B</th>
+              <TableShell head={['Module', 'Actions granted to B']}>
+                {result.copied.length === 0 ? (
+                  <EmptyRow colSpan={2}>Nothing to copy — A has no access on the selected modules.</EmptyRow>
+                ) : (
+                  result.copied.map((c) => (
+                    <tr key={c.moduleId} className="align-top">
+                      <td className="px-4 py-3.5"><Mono>{c.moduleKey}</Mono></td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex flex-wrap gap-1.5">
+                          {c.actions.length === 0 ? (
+                            <span className="text-xs text-slate-400">none</span>
+                          ) : (
+                            c.actions.map((a) => <ActionPill key={a} state="added">{a}</ActionPill>)
+                          )}
+                        </div>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {result.copied.length === 0 ? (
-                      <EmptyRow colSpan={2}>Nothing to copy — A has no access on the selected modules.</EmptyRow>
-                    ) : (
-                      result.copied.map((c) => (
-                        <tr key={c.moduleId}>
-                          <td className="px-4 py-3 text-sm font-medium text-slate-900">{c.moduleKey}</td>
-                          <td className="px-4 py-3 text-sm text-slate-600">{c.actions.join(', ') || <span className="text-slate-300">none</span>}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                  ))
+                )}
+              </TableShell>
             </div>
           )}
         </Card>
       </div>
-    </div>
+    </PageShell>
   );
 };
 

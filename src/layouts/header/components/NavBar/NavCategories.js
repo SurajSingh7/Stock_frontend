@@ -162,9 +162,14 @@ export const navCategories = [
 export const adminNavCategories = [
   {
     category: "Access Control",
+    // Ordered the way an admin actually sets someone up: see what exists,
+    // grant it to a role, narrow it per department, then handle the one person
+    // who is an exception.
     items: [
+      { name: "Modules & Actions", path: "/access-control/modules" },
       { name: "Roles & Permissions", path: "/access-control/roles" },
-      { name: "User Overrides", path: "/access-control/users" },
+      { name: "Department Restrictions", path: "/access-control/departments" },
+      { name: "User Access", path: "/access-control/users" },
       { name: "Delegate Access", path: "/access-control/delegate" },
       { name: "Audit Log", path: "/access-control/audit-log" },
     ],

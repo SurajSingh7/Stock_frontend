@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import Pagination from '@/shared/ui/pagination/Pagination';
 import { getActivityLog, getEntityHistory } from '../api';
 import { searchHrmsUsers } from '../hrmsDirectory';
-import { PageHeader, Card, Field, Picker, inputCls, th, EmptyRow } from '../shared';
+import { PageShell, Card, Field, Picker, inputCls, th, EmptyRow, Mono } from '../shared';
 
 const ENTITY_TYPES = [
   'field-definitions', 'categories', 'product-definitions', 'vendors', 'terms-conditions',
@@ -117,16 +117,18 @@ const AuditLog = () => {
   useEffect(() => setPage(1), [mode, user, entityType, from, to, lookupEntityType, entityId]);
 
   return (
-    <div className="min-h-screen bg-slate-50/60 p-6">
-      <PageHeader title="Audit Log" description="Who did what, when — every create, update, delete, approve and permission change." />
-
+    <PageShell
+      question="Accountability"
+      title="Audit Log"
+      description="Who did what, when — every create, update, delete and approve, plus every permission and data-scope change. Permission changes are recorded here too, so “who granted this access” is always answerable."
+    >
       <div className="mb-5 inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
         {['activity', 'entity'].map((m) => (
           <button
             key={m}
             onClick={() => setMode(m)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-              mode === m ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50'
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
+              mode === m ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'
             }`}
           >
             {m === 'activity' ? 'Global activity' : 'One record’s history'}
@@ -170,7 +172,7 @@ const AuditLog = () => {
           <Pagination currentPage={page} totalItems={total} itemsPerPage={limit} onPageChange={setPage} onItemsPerPageChange={(v) => { setLimit(v); setPage(1); }} />
         </div>
       )}
-    </div>
+    </PageShell>
   );
 };
 
