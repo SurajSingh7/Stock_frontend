@@ -89,8 +89,19 @@ const EmailChips = ({ value, onChange, placeholder }) => {
  */
 export const useSendMailForm = (row) => {
   const [sendEmail, setSendEmail] = useState(true);
-  const [to, setTo] = useState(row.email || "");
-  const [cc, setCc] = useState([]);
+
+  // Recipients come from the VENDOR's contacts, split by the Recipient Type
+  // set on each one — not from a single primary email. A vendor can address
+  // two buyers and copy their accounts desk, and that is configured once on
+  // the vendor rather than retyped on every PO.
+  const vendorTo = (row.mailTo || []).map((c) => c.email).filter(Boolean);
+  const vendorCc = (row.mailCc || []).map((c) => c.email).filter(Boolean);
+
+  const [to, setTo] = useState(vendorTo);
+  // Internal CC is OUR side — colleagues copied on every mail under this
+  // notification. Kept separate from the vendor's own CC so it is obvious
+  // which addresses are the vendor's and which are ours.
+  const [internalCc, setInternalCc] = useState([]);
 
   // CC defaults from the vendor-assigned (or default) Email notification —
   // the From address is no longer configured per-notification; sending
@@ -103,7 +114,7 @@ export const useSendMailForm = (row) => {
         });
         const json = await res.json();
         if (res.ok && json.success) {
-          setCc(json.data?.notification?.ccEmails || []);
+          setInternalCc(json.data?.notification?.ccEmails || []);
         }
       } catch {
         // non-fatal — send still works without a resolved default
@@ -111,7 +122,32 @@ export const useSendMailForm = (row) => {
     })();
   }, [row.vendorId]);
 
-  return { sendEmail, setSendEmail, to, setTo, cc, setCc };
+  return {
+    sendEmail, setSendEmail,
+    to, setTo,
+    internalCc, setInternalCc,
+    vendorCc,
+    // What actually goes on the wire: the vendor's CC contacts plus ours.
+    cc: [...new Set([...vendorCc, ...internalCc])],
+  };
+};
+
+/** True when the vendor has nobody marked To — the send is refused. */
+export const hasNoRecipient = (row) => !(row.mailTo || []).some((c) => c.email);
+
+const RecipientList = ({ items, empty, tone = "slate" }) => {
+  if (!items.length) return <p className="text-xs italic text-slate-400">{empty}</p>;
+  const ring = tone === "amber" ? "ring-amber-200 bg-amber-50" : "ring-slate-200 bg-white";
+  return (
+    <ul className="space-y-1.5">
+      {items.map((c) => (
+        <li key={c.email} className={`rounded-lg px-2.5 py-1.5 text-sm ring-1 ring-inset ${ring}`}>
+          <span className="font-medium text-slate-900">{c.name || c.email}</span>
+          {c.name ? <span className="ml-1.5 text-xs text-slate-500">{c.email}</span> : null}
+        </li>
+      ))}
+    </ul>
+  );
 };
 
 /** Fires the send-mail action. Resolves to the resulting mode: "SENT" | "MANUAL". */
@@ -120,7 +156,8 @@ export const submitSendMail = async (poId, { sendEmail, to, cc }) => {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ sendEmail, to: to.trim(), cc }),
+    // `to` is a list now — a vendor can have several contacts marked To.
+    body: JSON.stringify({ sendEmail, to, cc }),
   });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
@@ -130,12 +167,16 @@ export const submitSendMail = async (poId, { sendEmail, to, cc }) => {
 /** Vendor details + send toggle + To/CC — the whole body of this popup, also
  *  embedded verbatim in the PO review popup. */
 export const SendMailFields = ({ row, form }) => {
-  const { sendEmail, setSendEmail, to, setTo, cc, setCc } = form;
+  const { sendEmail, setSendEmail, internalCc, setInternalCc } = form;
+  const missingTo = hasNoRecipient(row);
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      {/* Left column */}
-      <div className="space-y-4">
+      {/* Left column — one card: what is being sent, and whether to send it.
+          Vendor name + PO number identify the mail; the contact names live in
+          the Recipients card on the right, so repeating one here only invited
+          the question of why that name and not the others. */}
+      <div>
         <div className={cardCls}>
           <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Vendor Details</p>
           <dl className="space-y-2 text-sm">
@@ -144,12 +185,8 @@ export const SendMailFields = ({ row, form }) => {
               <dd className="font-medium text-slate-900">{row.vendorName || "—"}</dd>
             </div>
             <div>
-              <dt className="text-xs text-slate-500">Contact Name</dt>
-              <dd className="font-medium text-slate-900">{row.contactName || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-slate-500">Primary Email</dt>
-              <dd className="font-medium text-slate-900">{row.email || "—"}</dd>
+              <dt className="text-xs text-slate-500">PO Number</dt>
+              <dd className="font-medium text-indigo-600">{row.poNumber || "—"}</dd>
             </div>
           </dl>
 
@@ -169,28 +206,36 @@ export const SendMailFields = ({ row, form }) => {
             <p className="mt-2 text-xs text-slate-500">Email sending will be skipped — this PO will be marked <span className="font-medium">Manual</span>.</p>
           )}
         </div>
-
-        <div className={cardCls}>
-          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">PO Details</p>
-          <div>
-            <dt className="text-xs text-slate-500">PO Number</dt>
-            <dd className="text-sm font-medium text-indigo-600">{row.poNumber || "—"}</dd>
-          </div>
-        </div>
       </div>
 
-      {/* Right column */}
-      <div className={cardCls}>
-        <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Email Details</p>
-        <div className="space-y-3">
-          <div>
-            <label className={labelCls}>To (Primary Vendor Email)</label>
-            <input value={to} onChange={(e) => setTo(e.target.value)} disabled={!sendEmail} className={inputCls} />
+      {/* Right column — who this mail actually reaches */}
+      <div className="space-y-4">
+        <div className={cardCls}>
+          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Vendor Recipients</p>
+
+          <div className="mb-4">
+            <label className={labelCls}>To</label>
+            <RecipientList
+              items={row.mailTo || []}
+              empty="No contact on this vendor is marked To — the mail cannot be sent."
+              tone={missingTo ? "amber" : "slate"}
+            />
           </div>
+
           <div>
             <label className={labelCls}>CC</label>
-            <EmailChips value={cc} onChange={setCc} placeholder="Add CC email…" />
+            <RecipientList items={row.mailCc || []} empty="None" />
           </div>
+
+          <p className="mt-3 text-xs text-slate-400">
+            Set on the vendor, per contact. Change them under Master → Vendors.
+          </p>
+        </div>
+
+        <div className={cardCls}>
+          <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-700">Internal CC Emails</p>
+          <p className="mb-3 text-xs text-slate-400">Our own people, copied on every mail under this notification.</p>
+          <EmailChips value={internalCc} onChange={setInternalCc} placeholder="Add internal CC email…" />
         </div>
       </div>
     </div>
@@ -208,8 +253,18 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
   const isResend = !!row.mailResult?.mode;
   const title = `${isResend ? "Resend Mail" : "Send Mail"} · ${row.poNumber}`;
 
+  // Only blocks an actual send — "Manual" is still allowed, because marking a
+  // PO as handled outside the system does not need a recipient.
+  const missingTo = hasNoRecipient(row);
+
   const submit = async () => {
-    if (form.sendEmail && !form.to.trim()) return setError("A To email is required");
+    if (form.sendEmail && missingTo) {
+      return setError(
+        "This vendor has no contact marked To. Open Master → Vendors, edit " +
+          (row.vendorName || "the vendor") +
+          ", and set at least one contact's Recipient Type to To."
+      );
+    }
     setSaving(true);
     setError(null);
     try {
@@ -242,6 +297,16 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
     <Modal onClose={onClose} title={title}>
       {error && <div className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
 
+      {missingTo && form.sendEmail && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+          <span className="mt-0.5 shrink-0">⚠</span>
+          <span>
+            <strong>{row.vendorName || "This vendor"}</strong> has no contact marked <strong>To</strong>.
+            Edit the vendor and set one, or switch off Send Email Notification to mark this PO manual.
+          </span>
+        </div>
+      )}
+
       <SendMailFields row={row} form={form} />
 
       <div className="mt-6 flex justify-end gap-2.5 border-t border-slate-200 pt-5">
@@ -249,7 +314,7 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
           Cancel
         </button>
         <button
-          type="button" disabled={saving} onClick={submit}
+          type="button" disabled={saving || (form.sendEmail && missingTo)} onClick={submit}
           className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? (isResend ? "Resending…" : "Sending…") : isResend ? "Resend" : "Send"}

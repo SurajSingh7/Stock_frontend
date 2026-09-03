@@ -241,7 +241,12 @@ const LabelTabs = ({ items, activeIdx, onSelect, onAdd, errorsByIdx = [], sugges
 /* Defaults                                                            */
 /* ------------------------------------------------------------------ */
 
-const emptyContact = (label) => ({ label, name: "", email: "", phone: "", designation: "", department: "" });
+const emptyContact = (label) => ({
+  label, name: "", email: "", phone: "", designation: "", department: "",
+  // Mirrors the backend default (models/stock.vendor.model.js): the primary
+  // contact is the one you write to; every other contact is opt-in.
+  recipientType: label === "PRIMARY" ? "TO" : "NONE",
+});
 
 const emptyBankAccount = (label) => ({
   label, ifsc: "", bankName: "", branch: "", branchAddress: "",
@@ -560,6 +565,34 @@ const ContactDetailsCard = ({ vendor, setVendor, errors }) => {
             </Field>
             <Field label="Department">
               <input className={inputCls} value={contact.department} title={contact.department} onChange={(ev) => updateContact({ department: ev.target.value })} />
+            </Field>
+            <Field label="Recipient Type" required>
+              {/* Three-way, and emailing is opt-IN: most contacts on a vendor
+                  are reference people who should not be mailed. PRIMARY is the
+                  exception and defaults to To, so a new vendor can send its
+                  first PO without an extra click.
+
+                  To / CC / None are short and self-explanatory, so they sit on
+                  one row: the field keeps the same height as its neighbours
+                  instead of stretching the card by two extra lines. */}
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2">
+                {[
+                  { v: "TO", label: "To" },
+                  { v: "CC", label: "CC" },
+                  { v: "NONE", label: "None" },
+                ].map((o) => (
+                  <label key={o.v} className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+                    <input
+                      type="radio"
+                      name={`recipientType-${contact.label || "contact"}`}
+                      checked={(contact.recipientType || "NONE") === o.v}
+                      onChange={() => updateContact({ recipientType: o.v })}
+                      className="h-4 w-4 accent-indigo-600"
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
             </Field>
           </div>
         </div>

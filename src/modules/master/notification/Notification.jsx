@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 
 const NOTIFICATIONS_API = `${API_BACKEND_URL}/stock/notifications`;
 const VENDORS_API = `${API_BACKEND_URL}/stock/vendors`;
+const ASSIGNABLE_VENDORS_API = `${API_BACKEND_URL}/stock/notifications/assignable-vendors`;
 
 const CHANNEL_OPTIONS = [
   { value: 'EMAIL', label: 'Email' },
@@ -102,13 +103,18 @@ const restoreNotification = async (id) => {
   return data;
 };
 
-const searchVendors = async (search) => {
+// Only vendors still free on this channel. A vendor may hold at most one
+// non-default notification per channel — resolveForVendor() picks by
+// updatedAt when there are two, so the admin cannot tell which template a PO
+// will actually use. Offering a taken vendor here would just fail on save.
+// editingId keeps an edit form showing the vendors it already owns.
+const searchVendors = async (search, channel, editingId) => {
   const params = new URLSearchParams();
-  params.set('page', '1');
-  params.set('limit', '20');
+  params.set('channel', channel);
+  if (editingId) params.set('excludeNotificationId', editingId);
   if (search) params.set('search', search);
 
-  const response = await fetch(`${VENDORS_API}?${params.toString()}`, {
+  const response = await fetch(`${ASSIGNABLE_VENDORS_API}?${params.toString()}`, {
     method: 'GET',
     credentials: 'include',
   });
@@ -607,7 +613,7 @@ const EmailChips = ({ value, onChange, disabled, placeholder, error }) => {
 
 /* ---------- Searchable vendor multi-select with chips ---------- */
 
-const VendorMultiSelect = ({ selected, onChange, disabled, error }) => {
+const VendorMultiSelect = ({ selected, onChange, disabled, error, channel, editingId }) => {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [options, setOptions] = useState([]);
@@ -622,13 +628,18 @@ const VendorMultiSelect = ({ selected, onChange, disabled, error }) => {
     return () => document.removeEventListener('mousedown', onClickOutside);
   }, []);
 
+  // Channel decides the whole list, so a stale one must not survive a switch.
+  useEffect(() => {
+    setOptions([]);
+  }, [channel]);
+
   useEffect(() => {
     if (!open) return undefined;
     let cancelled = false;
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const list = await searchVendors(query);
+        const list = await searchVendors(query, channel, editingId);
         if (!cancelled) setOptions(list);
       } catch {
         if (!cancelled) setOptions([]);
@@ -640,7 +651,7 @@ const VendorMultiSelect = ({ selected, onChange, disabled, error }) => {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [query, open]);
+  }, [query, open, channel, editingId]);
 
   const selectedIds = new Set(selected.map((v) => v.id));
   const filteredOptions = options.filter((o) => !selectedIds.has(o.id));
@@ -751,14 +762,18 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
         </Field>
 
         {isEmail && (
-          <Field label="CC Emails" error={errors.ccEmails}>
+          <Field label="Internal CC Emails" error={errors.ccEmails}>
             <EmailChips
               value={formData.ccEmails}
               onChange={(v) => onChange('ccEmails', v)}
               disabled={isView}
-              placeholder="Add CC email…"
+              placeholder="Add internal CC email…"
               error={errors.ccEmails}
             />
+            <p className="mt-1.5 text-xs text-slate-400">
+              Colleagues copied on every mail sent under this notification. The vendor is the
+              recipient; these addresses are ours.
+            </p>
           </Field>
         )}
 
@@ -778,6 +793,9 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
               onChange={(v) => onChange('applicableVendors', v)}
               disabled={isView}
               error={errors.applicableVendors}
+              channel={formData.channel}
+              // On create this is undefined, so nothing is excluded.
+              editingId={formData.id}
             />
           </Field>
         )}
@@ -925,7 +943,7 @@ const Notification = () => {
     }
     if (formData.channel === 'EMAIL') {
       const badCc = formData.ccEmails.find((e) => !EMAIL_RE.test(e));
-      if (badCc) errors.ccEmails = `Invalid CC email: ${badCc}`;
+      if (badCc) errors.ccEmails = `Invalid internal CC email: ${badCc}`;
     }
     return errors;
   };
