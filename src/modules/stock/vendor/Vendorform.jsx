@@ -10,6 +10,7 @@ import {
   LucideDelete,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { usePermissions } from "@/context/PermissionContext";
 import { PAYMENT_TERMS, STATE_OPTIONS } from "./vendorConstants";
 import { verifyGST } from "./gstVerification";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
@@ -262,6 +263,7 @@ const defaultVendor = () => ({
     legalName: "", tradeName: "", gstAddress: "", state: { key: "", name: "", code: "" },
   },
   panNumber: "",
+  branchId: "",
   paymentTerms: "",
   notes: "",
   contacts: [emptyContact("PRIMARY")],
@@ -274,7 +276,7 @@ const defaultVendor = () => ({
 /* Card 1 — Basic Details (GST verified ⇒ name / PAN / state locked)   */
 /* ------------------------------------------------------------------ */
 
-const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified }) => {
+const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, branches = [], isEdit = false, canChangeBranch = false, branchLabel = "" }) => {
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState(null);
 
@@ -431,6 +433,43 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified }) 
             onChange={(e) => setVendor((v) => ({ ...v, vendorAlias: e.target.value }))}
             placeholder="Enter alias (optional)"
           />
+        </Field>
+
+        {/* Shown but locked. The branch is whoever is logged in — displaying it
+            lets someone notice a wrong HRMS branch BEFORE adding twenty
+            vendors under it, while the lock removes any chance of picking the
+            wrong one. Only an admin can reassign, on edit; the backend
+            enforces that too, so this is a real rule and not just a disabled
+            input. */}
+        <Field
+          label="Branch"
+          required
+          error={errors.branchId}
+          hint={
+            canChangeBranch
+              ? "Which branch this vendor belongs to. Staff on Own-branch scope see only their own branch's vendors."
+              : "Taken from your account. Only an administrator can move a vendor to another branch."
+          }
+        >
+          {canChangeBranch ? (
+            <select
+              className={errors.branchId ? inputErrCls : inputCls}
+              value={vendor.branchId || ""}
+              onChange={(e) => setVendor((v) => ({ ...v, branchId: e.target.value }))}
+            >
+              <option value="">Select branch</option>
+              {branches.map((b) => (
+                <option key={b._id} value={b._id}>{b.name}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={`${inputCls} cursor-not-allowed bg-slate-50 text-slate-500`}
+              value={branchLabel}
+              disabled
+              readOnly
+            />
+          )}
         </Field>
 
         <Field label="Payment Terms" required error={errors.paymentTerms}>
@@ -1058,7 +1097,7 @@ const BankDetailsCard = ({ vendor, setVendor, errors }) => {
 /* Validation — returns { fieldErrors, messages, valid }               */
 /* ------------------------------------------------------------------ */
 
-const validateVendor = (vendor) => {
+const validateVendor = (vendor, isEdit = false) => {
   const f = { contacts: [], bankAccounts: [] };
   const messages = [];
   const push = (msg) => messages.push(msg);
@@ -1078,6 +1117,9 @@ const validateVendor = (vendor) => {
   }
 
   if (!vendor.paymentTerms) { f.paymentTerms = "Payment terms is required"; push(f.paymentTerms); }
+  // Only on edit — that is the only mode where the field is shown. On create
+  // the backend fills it from the logged-in user and refuses if they have none.
+  if (isEdit && !vendor.branchId) { f.branchId = "Branch is required"; push(f.branchId); }
 
   // contacts — PRIMARY must exist, and every tab that exists must be complete
   if (!vendor.contacts.some((c) => c.label === "PRIMARY")) push("A PRIMARY contact is required");
@@ -1145,12 +1187,48 @@ const VendorForm = ({ vendorId = null }) => {
   const router = useRouter();
   const isEdit = Boolean(vendorId);
 
+  // branchName rides along with branchId in /my-permissions so this screen can
+  // name the user's branch without /branches/active, which needs branches:READ.
+  const { isAdmin, branchId: myBranchId, branchName: myBranchName } = usePermissions();
+  // Create never offers a choice — the branch is the creator's. Reassignment
+  // is an admin action, and only on an existing vendor. Declared after the
+  // hook it depends on.
+  const canChangeBranch = isEdit && isAdmin;
+
   const [vendor, setVendor] = useState(defaultVendor());
+  // /branches/active is the UNSCOPED list on purpose — an admin reassigning a
+  // vendor to Chandigarh has to be able to pick Chandigarh from head office.
+  const [branches, setBranches] = useState([]);
   const [useGstAddress, setUseGstAddress] = useState(false);
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [formErrors, setFormErrors] = useState([]);
   const [fieldErrors, setFieldErrors] = useState({ contacts: [], bankAccounts: [] });
+
+  // Shown, not submitted: the backend stamps the creator's branch and ignores
+  // whatever the body carries. Kept in state only so the locked field has
+  // something to display and validation has something to check.
+  useEffect(() => {
+    if (isEdit || !myBranchId) return;
+    setVendor((v) => (v.branchId ? v : { ...v, branchId: String(myBranchId) }));
+  }, [isEdit, myBranchId]);
+
+  // Only the admin edit case renders a picker; everyone else sees a locked
+  // input, so there is no list to fetch.
+  useEffect(() => {
+    if (!canChangeBranch) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
+        const json = await res.json();
+        if (!cancelled && res.ok) setBranches(json?.data || []);
+      } catch {
+        // Non-fatal — the select stays empty and the existing branch is kept.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [canChangeBranch]);
 
   // GST verified ⇒ name / PAN / vendor state are owned by GST and locked
   const gstLocked = vendor.gst.isAvailable && vendor.gst.isVerified;
@@ -1209,7 +1287,7 @@ const VendorForm = ({ vendorId = null }) => {
   };
 
   const handleSubmit = async () => {
-    const { fieldErrors: fe, messages, valid } = validateVendor(vendor);
+    const { fieldErrors: fe, messages, valid } = validateVendor(vendor, isEdit);
     setFieldErrors(fe);
     if (!valid) {
       setFormErrors(messages.length ? messages : ["Please fix the highlighted fields"]);
@@ -1326,6 +1404,15 @@ const VendorForm = ({ vendorId = null }) => {
           <BasicDetailsCard
             vendor={vendor} setVendor={setVendor} errors={fieldErrors}
             gstLocked={gstLocked} onVerified={handleGstVerified}
+            branches={branches} isEdit={isEdit}
+            canChangeBranch={canChangeBranch}
+            branchLabel={
+              isEdit
+                ? branches.find((b) => String(b._id) === String(vendor.branchId))?.name ||
+                  vendor.branchName ||
+                  "—"
+                : myBranchName || "—"
+            }
           />
           <ContactDetailsCard vendor={vendor} setVendor={setVendor} errors={fieldErrors} />
           <AddressCard
