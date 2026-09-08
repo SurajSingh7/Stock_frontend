@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { usePermissions } from "@/context/PermissionContext";
-import { PAYMENT_TERMS, STATE_OPTIONS } from "./vendorConstants";
+import { PAYMENT_TERMS } from "./vendorConstants";
+import { STATE_OPTIONS } from "@/shared/constants/indianStates";
 import { verifyGST } from "./gstVerification";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
 

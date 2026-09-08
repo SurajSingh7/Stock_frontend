@@ -1,6 +1,7 @@
 'use client'
 import { API_BACKEND_URL } from '@/config/getEnvVariables';
 import Pagination from '@/shared/ui/pagination/Pagination';
+import { STATE_OPTIONS, findStateOption } from '@/shared/constants/indianStates';
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
@@ -22,7 +23,23 @@ const BRANCH_ROLES = [
   { value: 'NORMAL', label: 'Normal' },
 ];
 
-const EMPTY_FORM = { name: '', code: '', address: '', description: '', city: '', state: '', branchRole: 'NORMAL' };
+const EMPTY_FORM = {
+  name: '', code: '', address: '', description: '',
+  city: '', state: '', stateCode: '', branchRole: 'NORMAL',
+};
+
+// The form edits the state through its 2-letter key (that's what the <select>
+// holds); name + code are what get persisted. Rebuilt from whatever the record
+// carries so an older row saved with a free-typed state still opens selected.
+const formFromBranch = (item) => {
+  const option = findStateOption({ name: item.state, code: item.stateCode });
+  return {
+    name: item.name, code: item.code, address: item.address, description: item.description,
+    city: item.city, branchRole: item.branchRole,
+    state: option ? option.name : item.state || '',
+    stateCode: option ? option.code : item.stateCode || '',
+  };
+};
 
 /* ---------- Design tokens — SAME as FieldDefinition/VendorsComp ---------- */
 
@@ -103,6 +120,7 @@ const mapBranchResponse = (item) => ({
   description: item.description || '',
   city: item.city || '',
   state: item.state || '',
+  stateCode: item.stateCode || '',
   branchRole: item.branchRole || 'NORMAL',
   isActive: item.isActive !== false,
 });
@@ -160,6 +178,11 @@ const Icon = {
   chevronDown: (
     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
       <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  arrowLeft: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5">
+      <path d="M12.5 5 7.5 10l5 5M7.5 10H17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
 };
@@ -326,7 +349,9 @@ const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
       <RoleBadge role={item.branchRole} />
     </td>
     <td className="px-4 py-3.5 text-sm text-slate-500">
-      {[item.city, item.state].filter(Boolean).join(', ') || <span className="text-slate-300">—</span>}
+      {[item.city, item.state && `${item.state}${item.stateCode ? ` (${item.stateCode})` : ''}`]
+        .filter(Boolean)
+        .join(', ') || <span className="text-slate-300">—</span>}
     </td>
     <td className="px-4 py-3.5 text-sm text-slate-500">{item.address || <span className="text-slate-300">—</span>}</td>
     <td className="px-4 py-3.5">
@@ -464,119 +489,183 @@ const Field = ({ label, hint, error, children }) => (
 
 const fieldInputClass = inputCls + ' disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400';
 
-const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors }) => {
+/* Same picker the vendor screens use: the option carries the GST state code,
+   so choosing a state is the ONLY way the code field is ever written. */
+const StateSelect = ({ value, code, disabled, onChange }) => {
+  const selected = findStateOption({ name: value, code });
+  return (
+    <div className="relative">
+      <select
+        value={selected?.key || ''}
+        disabled={disabled}
+        onChange={(e) => onChange(STATE_OPTIONS.find((s) => s.key === e.target.value) || null)}
+        className={`${fieldInputClass} appearance-none pr-8`}
+      >
+        <option value="">Select state</option>
+        {STATE_OPTIONS.map((s) => (
+          <option key={s.key} value={s.key}>{s.label}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
+        {Icon.chevronDown}
+      </span>
+    </div>
+  );
+};
+
+const FORM_TITLES = {
+  create: { title: 'Add branch', description: 'Create a physical stock branch used across receiving and inventory.' },
+  edit: { title: 'Edit branch', description: 'Update this branch’s details.' },
+  view: { title: 'Branch details', description: 'Read-only view of this branch.' },
+};
+
+/* Full page, not a dialog — the form owns the screen and returns to the list
+   through Back, so a half-filled branch is never one stray backdrop click
+   away from being lost. */
+const FormPage = ({ mode, formData, onChange, onStateChange, onSubmit, onCancel, submitting, errors }) => {
   const isView = mode === 'view';
+  const { title, description } = FORM_TITLES[mode] || FORM_TITLES.create;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-5">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Name" error={errors.name}>
-            <input
-              type="text"
-              value={formData.name}
-              disabled={isView}
-              onChange={(e) => onChange('name', e.target.value)}
-              placeholder="e.g. Main Branch"
-              className={fieldInputClass}
-            />
-          </Field>
-
-          <Field label="Code" hint="Short unique identifier." error={errors.code}>
-            <input
-              type="text"
-              value={formData.code}
-              disabled={isView}
-              onChange={(e) => onChange('code', e.target.value.toUpperCase())}
-              placeholder="e.g. MAIN"
-              className={`${fieldInputClass} font-mono uppercase`}
-            />
-          </Field>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Field label="Role" hint="Descriptive only — doesn't restrict transfers.">
-            <select
-              value={formData.branchRole}
-              disabled={isView}
-              onChange={(e) => onChange('branchRole', e.target.value)}
-              className={`${fieldInputClass} appearance-none`}
-            >
-              {BRANCH_ROLES.map((r) => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </select>
-          </Field>
-
-          <Field label="City">
-            <input
-              type="text"
-              value={formData.city}
-              disabled={isView}
-              onChange={(e) => onChange('city', e.target.value)}
-              placeholder="e.g. Delhi"
-              className={fieldInputClass}
-            />
-          </Field>
-
-          <Field label="State">
-            <input
-              type="text"
-              value={formData.state}
-              disabled={isView}
-              onChange={(e) => onChange('state', e.target.value)}
-              placeholder="e.g. Delhi"
-              className={fieldInputClass}
-            />
-          </Field>
-        </div>
-
-        <Field label="Address">
-          <textarea
-            value={formData.address}
-            disabled={isView}
-            onChange={(e) => onChange('address', e.target.value)}
-            rows={2}
-            placeholder="Physical address of this branch"
-            className={fieldInputClass}
-          />
-        </Field>
-
-        <Field label="Description">
-          <textarea
-            value={formData.description}
-            disabled={isView}
-            onChange={(e) => onChange('description', e.target.value)}
-            rows={2}
-            placeholder="Optional notes about this branch"
-            className={fieldInputClass}
-          />
-        </Field>
-
-        {errors.general && (
-          <div className="flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
-            {Icon.alert}
-            <span>{errors.general}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="-mx-5 mt-5 flex justify-end gap-2.5 border-t border-slate-100 px-5 pt-4">
-        <button
-          onClick={onCancel}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
-        >
-          {isView ? 'Close' : 'Cancel'}
-        </button>
-        {!isView && (
+    <div className="min-h-screen bg-slate-50/60 p-6">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6 flex items-center gap-3">
           <button
-            onClick={onSubmit}
-            disabled={submitting}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            type="button" onClick={onCancel} disabled={submitting}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create branch'}
+            {Icon.arrowLeft} Back
           </button>
-        )}
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight text-slate-900">{title}</h1>
+            <p className="mt-0.5 text-sm text-slate-500">{description}</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Name" error={errors.name}>
+                <input
+                  type="text"
+                  value={formData.name}
+                  disabled={isView}
+                  onChange={(e) => onChange('name', e.target.value)}
+                  placeholder="e.g. Main Branch"
+                  className={fieldInputClass}
+                />
+              </Field>
+
+              <Field label="Code" hint="Short unique identifier." error={errors.code}>
+                <input
+                  type="text"
+                  value={formData.code}
+                  disabled={isView}
+                  onChange={(e) => onChange('code', e.target.value.toUpperCase())}
+                  placeholder="e.g. MAIN"
+                  className={`${fieldInputClass} font-mono uppercase`}
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Role" hint="Descriptive only — doesn't restrict transfers.">
+                <select
+                  value={formData.branchRole}
+                  disabled={isView}
+                  onChange={(e) => onChange('branchRole', e.target.value)}
+                  className={`${fieldInputClass} appearance-none`}
+                >
+                  {BRANCH_ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+              </Field>
+
+              <Field label="City">
+                <input
+                  type="text"
+                  value={formData.city}
+                  disabled={isView}
+                  onChange={(e) => onChange('city', e.target.value)}
+                  placeholder="e.g. New Delhi"
+                  className={fieldInputClass}
+                />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="State">
+                <StateSelect
+                  value={formData.state}
+                  code={formData.stateCode}
+                  disabled={isView}
+                  onChange={onStateChange}
+                />
+              </Field>
+
+              {/* Never typed — it is whatever the picked state's GST code is. */}
+              <Field label="State Code" hint="Filled from the selected state.">
+                <input
+                  type="text"
+                  value={formData.stateCode}
+                  disabled
+                  readOnly
+                  placeholder="—"
+                  className={`${fieldInputClass} font-mono`}
+                />
+              </Field>
+            </div>
+
+            <Field label="Address">
+              <textarea
+                value={formData.address}
+                disabled={isView}
+                onChange={(e) => onChange('address', e.target.value)}
+                rows={2}
+                placeholder="Physical address of this branch"
+                className={fieldInputClass}
+              />
+            </Field>
+
+            <Field label="Description">
+              <textarea
+                value={formData.description}
+                disabled={isView}
+                onChange={(e) => onChange('description', e.target.value)}
+                rows={2}
+                placeholder="Optional notes about this branch"
+                className={fieldInputClass}
+              />
+            </Field>
+
+            {errors.general && (
+              <div className="flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2.5 text-sm text-rose-700">
+                {Icon.alert}
+                <span>{errors.general}</span>
+              </div>
+            )}
+          </div>
+          <div className="-mx-6 mt-6 flex justify-end gap-2.5 border-t border-slate-100 px-6 pt-4">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+            >
+              {isView ? 'Back to list' : 'Cancel'}
+            </button>
+            {!isView && (
+              <button
+                type="button"
+                onClick={onSubmit}
+                disabled={submitting}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {submitting ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create branch'}
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -596,7 +685,8 @@ const Branch = () => {
   const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_ITEMS_PER_PAGE);
   const [totalItems, setTotalItems] = useState(0);
 
-  const [modalMode, setModalMode] = useState(null);
+  // null = the list; 'create' | 'edit' | 'view' = the full-page form in place of it.
+  const [formMode, setFormMode] = useState(null);
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [activeItemId, setActiveItemId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -640,40 +730,36 @@ const Branch = () => {
     setCurrentPage(1);
   }, [search, statusFilter]);
 
-  const openCreateModal = () => {
+  const openCreateForm = () => {
     setFormData(EMPTY_FORM);
     setFormErrors({});
     setActiveItemId(null);
-    setModalMode('create');
+    setFormMode('create');
   };
 
-  const openEditModal = (item) => {
-    setFormData({
-      name: item.name, code: item.code, address: item.address, description: item.description,
-      city: item.city, state: item.state, branchRole: item.branchRole,
-    });
+  const openForm = (mode) => (item) => {
+    setFormData(formFromBranch(item));
     setFormErrors({});
     setActiveItemId(item.id);
-    setModalMode('edit');
+    setFormMode(mode);
   };
 
-  const openViewModal = (item) => {
-    setFormData({
-      name: item.name, code: item.code, address: item.address, description: item.description,
-      city: item.city, state: item.state, branchRole: item.branchRole,
-    });
-    setFormErrors({});
-    setActiveItemId(item.id);
-    setModalMode('view');
-  };
-
-  const closeModal = () => {
-    setModalMode(null);
+  const closeForm = () => {
+    setFormMode(null);
     setActiveItemId(null);
     setFormErrors({});
   };
 
   const handleFormChange = (field, value) => setFormData((prev) => ({ ...prev, [field]: value }));
+
+  // The state name and its GST code move as one — the code is never editable
+  // on its own, and the backend rejects the two arriving apart.
+  const handleStateChange = (option) =>
+    setFormData((prev) => ({
+      ...prev,
+      state: option?.name || '',
+      stateCode: option?.code || '',
+    }));
 
   const validateForm = () => {
     const errors = {};
@@ -699,18 +785,19 @@ const Branch = () => {
         description: formData.description.trim(),
         city: formData.city.trim(),
         state: formData.state.trim(),
+        stateCode: formData.stateCode.trim(),
         branchRole: formData.branchRole,
       };
 
-      if (modalMode === 'create') {
+      if (formMode === 'create') {
         await createBranch(payload);
         toast.success('Branch created successfully.');
-      } else if (modalMode === 'edit') {
+      } else if (formMode === 'edit') {
         await updateBranch(activeItemId, payload);
         toast.success('Branch updated successfully.');
       }
 
-      closeModal();
+      closeForm();
       await loadBranches();
     } catch (err) {
       const message = err.message || 'Failed to save branch.';
@@ -748,12 +835,26 @@ const Branch = () => {
     }
   };
 
-  const modalTitle =
-    modalMode === 'create' ? 'Add branch' : modalMode === 'edit' ? 'Edit branch' : 'Branch details';
+  // The form replaces the list entirely — same in-place "page" swap the product
+  // definition master uses, so Back always lands back on the list it came from.
+  if (formMode) {
+    return (
+      <FormPage
+        mode={formMode}
+        formData={formData}
+        onChange={handleFormChange}
+        onStateChange={handleStateChange}
+        onSubmit={handleSubmit}
+        onCancel={closeForm}
+        submitting={submitting}
+        errors={formErrors}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
-      <Header totalItems={totalItems} onCreateClick={openCreateModal} />
+      <Header totalItems={totalItems} onCreateClick={openCreateForm} />
 
       <FilterBar search={search} onSearchChange={setSearch} statusFilter={statusFilter} onStatusFilterChange={setStatusFilter} />
 
@@ -762,9 +863,9 @@ const Branch = () => {
         loading={loading}
         error={error}
         onRetry={loadBranches}
-        onCreateClick={openCreateModal}
-        onView={openViewModal}
-        onEdit={openEditModal}
+        onCreateClick={openCreateForm}
+        onView={openForm('view')}
+        onEdit={openForm('edit')}
         onDelete={handleDeleteClick}
         onRestore={handleRestore}
       />
@@ -782,20 +883,6 @@ const Branch = () => {
             }}
           />
         </div>
-      )}
-
-      {modalMode && (
-        <Modal title={modalTitle} onClose={closeModal}>
-          <Form
-            mode={modalMode}
-            formData={formData}
-            onChange={handleFormChange}
-            onSubmit={handleSubmit}
-            onCancel={closeModal}
-            submitting={submitting}
-            errors={formErrors}
-          />
-        </Modal>
       )}
 
       <ConfirmModal

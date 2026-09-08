@@ -8,7 +8,7 @@
 // already sets — the proxy forwards it upstream — so no extra token handling
 // is needed here.
 
-import { STATE_OPTIONS } from "./vendorConstants";
+import { STATE_OPTIONS } from "@/shared/constants/indianStates";
 
 const GST_VERIFY_URL = "/erp-api/third-party/gst/verify";
 
