@@ -10,6 +10,10 @@ export const PermissionProvider = ({ children }) => {
   const [permissions, setPermissions] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [branchId, setBranchId] = useState(null);
+  // Travels with branchId so a screen can name the user's own branch without
+  // calling /branches/active, which needs branches:READ — a permission most
+  // staff have no reason to hold.
+  const [branchName, setBranchName] = useState("");
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -83,6 +87,7 @@ export const PermissionProvider = ({ children }) => {
       setPermissions(permissionData?.data?.modules || []);
       setIsAdmin(Boolean(permissionData?.data?.isAdmin));
       setBranchId(permissionData?.data?.branchId || null);
+      setBranchName(permissionData?.data?.branchName || "");
     } catch (err) {
       console.error('Auth Fetch Error:', err);
 
@@ -118,6 +123,7 @@ export const PermissionProvider = ({ children }) => {
         permissions,
         isAdmin,
         branchId,
+        branchName,
         userData,
         loading,
         error,

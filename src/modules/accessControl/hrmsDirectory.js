@@ -7,6 +7,21 @@ import { API_PORTAL_BACKEND_URL } from '@/config/getEnvVariables';
 // read this from HRMS itself. portal-backend's allowedOrigins already covers
 // http://localhost:3000, so the browser's userSession cookie carries over.
 
+// Same endpoint family the staff-registration form uses for its department
+// dropdown, so the two can never show different departments.
+export const searchHrmsDepartments = async (search = '') => {
+  const params = new URLSearchParams({ page: '1', limit: '100' });
+  if (search) params.set('search', search);
+  const res = await fetch(`${API_PORTAL_BACKEND_URL}/api/role-management/department/get-all?${params}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  if (res.status === 404) return [];
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.message || 'Failed to load departments');
+  return (data.data || []).map((d) => ({ id: d._id, label: d.name, description: d.description || '' }));
+};
+
 export const searchHrmsRoles = async (search = '') => {
   const params = new URLSearchParams({ page: '1', limit: '50' });
   if (search) params.set('search', search);

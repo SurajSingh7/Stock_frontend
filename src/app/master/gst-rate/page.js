@@ -1,10 +1,10 @@
-import Warehouse from '@/modules/master/warehouse/Warehouse';
+import GstRate from '@/modules/master/gstRate/GstRate';
 import React from 'react'
 
 const page = () => {
   return (
     <div>
-        <Warehouse/>
+        <GstRate/>
     </div>
   )
 }

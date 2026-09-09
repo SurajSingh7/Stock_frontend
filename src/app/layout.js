@@ -7,6 +7,7 @@ import { PermissionProvider } from "../context/PermissionContext";
 import { ZoomProvider } from "@/layouts/header/components/zoom/ZoomProvider";
 import Header from "@/layouts/header/Header";
 import Footer from "@/shared/ui/footer/Footer";
+import PermissionGuard from "@/shared/guards/PermissionGuard";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -20,9 +21,7 @@ export default function RootLayout({ children }) {
                 <Toaster />
                 <Header />
                 <div className="min-h-screen bg-white text-gray-700">
-                  {/* <PermissionGuard> */}
-                    {children}
-                  {/* </PermissionGuard> */}
+                  <PermissionGuard>{children}</PermissionGuard>
                 </div>
                 <Footer />
               </div>

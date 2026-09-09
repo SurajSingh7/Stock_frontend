@@ -568,9 +568,15 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
 
 /* ======================== FORM FIELD COMPONENTS ======================== */
 
-const Field = ({ label, hint, error, children }) => (
+// `required` renders the same rose asterisk the product-definition form uses,
+// so a starred label means exactly one thing across every master screen: the
+// submit is blocked until it is filled in.
+const Field = ({ label, hint, error, required, children }) => (
   <div>
-    <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
+    <label className="mb-1.5 block text-sm font-medium text-slate-700">
+      {label}
+      {required && <span className="ml-0.5 text-rose-500">*</span>}
+    </label>
     {children}
     {hint && !error && <p className="mt-1.5 text-xs text-slate-400">{hint}</p>}
     {error && <p className="mt-1.5 text-xs font-medium text-rose-600">{error}</p>}
@@ -810,7 +816,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
     <div className="flex h-full flex-col">
       <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="space-y-5 lg:col-span-3">
-          <Field label="Term Name" error={errors.termName}>
+          <Field label="Term Name" required error={errors.termName}>
             <input
               type="text"
               value={formData.termName}
@@ -831,7 +837,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           </Field>
 
           {!formData.isDefault && (
-            <Field label="Applicable Vendors" error={errors.applicableVendors}>
+            <Field label="Applicable Vendors" required={!formData.isDefault} error={errors.applicableVendors}>
               <VendorMultiSelect
                 selected={formData.applicableVendors}
                 onChange={(v) => onChange('applicableVendors', v)}
@@ -841,7 +847,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             </Field>
           )}
 
-          <Field label="Terms & Conditions" error={errors.termsContent}>
+          <Field label="Terms & Conditions" required error={errors.termsContent}>
             <RichTextEditor
               value={formData.termsContent}
               onChange={(html) => onChange('termsContent', html)}

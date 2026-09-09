@@ -29,13 +29,18 @@ export const setRolePermission = (payload) => post(`${BASE}/role-permissions`, p
 export const getUserOverrides = (userId) => get(`${BASE}/user-overrides?userId=${encodeURIComponent(userId)}`);
 export const setUserOverride = (payload) => post(`${BASE}/user-overrides`, payload);
 
-// ─── Layer 3 — branch scope ─────────────────────────────────────────────────
-export const getScopePolicies = (userId) => get(`${BASE}/scope-policies?userId=${encodeURIComponent(userId)}`);
-export const setScopePolicy = (payload) => post(`${BASE}/scope-policies`, payload);
+// ─── Data access — three dimensions, global + optional module override ─────
+// Omit moduleId to write the user's global row; pass one to override only
+// the dimensions that entry marks as configured.
+export const getDataScopes = (userId) => get(`${BASE}/data-scopes?userId=${encodeURIComponent(userId)}`);
+export const setDataScope = (payload) => post(`${BASE}/data-scopes`, payload);
+export const clearModuleDataScope = (payload) => post(`${BASE}/data-scopes/clear-module`, payload);
 
-// ─── Entity access — per USER, so no moduleId ───────────────────────────────
-export const getEntityAccess = (userId) => get(`${BASE}/entity-access?userId=${encodeURIComponent(userId)}`);
-export const setEntityAccess = (payload) => post(`${BASE}/entity-access`, payload);
+// ─── Department restriction — narrows a role, never widens it ──────────────
+export const getDepartmentRestrictions = (departmentId) =>
+  get(`${BASE}/department-restrictions?departmentId=${encodeURIComponent(departmentId)}`);
+export const setDepartmentRestriction = (payload) => post(`${BASE}/department-restrictions`, payload);
+export const clearDepartmentRestriction = (payload) => post(`${BASE}/department-restrictions/clear`, payload);
 
 // ─── Effective permissions preview ──────────────────────────────────────────
 export const getEffectivePermissions = (userId, roleId) =>

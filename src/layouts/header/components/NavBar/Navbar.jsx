@@ -9,7 +9,7 @@ import { useFilteredNav } from "./PermissionNavBuilder";
 import { navCategories, adminNavCategories } from "./NavCategories";
 
 export const Navbar = () => {
-  const { permissions, isAdmin } = usePermissions();
+  const { permissions, isAdmin, loading, error, branchId } = usePermissions();
 
   const filteredNav = useFilteredNav(navCategories, permissions);
   // Admin bypasses per-module filtering (mirrors the backend's own admin
@@ -56,6 +56,14 @@ export const Navbar = () => {
     setMobileMenuOpen(false);
     setMobileDropdown(null);
   };
+
+  // No branch, no navigation. Every destination behind these links renders the
+  // "no branch assigned" screen instead (see PermissionGuard), so offering them
+  // would only be an invitation to click around and keep hitting the same wall.
+  // The profile menu stays, which is where Logout already lives.
+  // `loading` is excluded so the nav does not blink out on every page load, and
+  // `error` so a failed permissions fetch is not mistaken for a missing branch.
+  if (!loading && !error && !branchId) return null;
 
   return (
     <div>

@@ -11,10 +11,11 @@ export function middleware(req) {
 
   // If already logged in, don't allow login page
   if (isPublicRoute && token) {
-    return NextResponse.redirect(
-      new URL("/master/category", req.url)
-      // OR "/billing/account/pcd-closure" if that's still your dashboard
-    );
+    // /home decides where to actually go: it reads the same filtered nav the
+    // navbar does and forwards to the first page this user can open. A fixed
+    // destination here would drop anyone without that module onto a screen
+    // they are not allowed to see.
+    return NextResponse.redirect(new URL("/home", req.url));
   }
 
   // Protect all private routes

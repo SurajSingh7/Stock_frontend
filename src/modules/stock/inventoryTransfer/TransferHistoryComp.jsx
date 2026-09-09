@@ -7,7 +7,7 @@ import { SearchableSelect, inputCls } from "@/modules/stock/shared/StockSharedUI
 import ViewTransferRequestModal from "./ViewTransferRequestModal";
 import {
   STATUS_TAB_STYLES, th, thRight,
-  StatusBadge, LocationPair, ItemsCell, fmtDateTime, fetchActiveLocations, fetchTransferBoard,
+  StatusBadge, BranchPair, ItemsCell, fmtDateTime, fetchActiveBranches, fetchTransferBoard,
 } from "./shared";
 
 /*
@@ -16,8 +16,8 @@ import {
   traceability of what happened.
 */
 const TransferHistoryComp = () => {
-  const [locations, setLocations] = useState([]);
-  const [locationId, setLocationId] = useState("");
+  const [branches, setBranches] = useState([]);
+  const [branchId, setBranchId] = useState("");
 
   const [status, setStatus] = useState("COMPLETED");
   const [search, setSearch] = useState("");
@@ -34,7 +34,7 @@ const TransferHistoryComp = () => {
   const [viewingId, setViewingId] = useState(null);
 
   useEffect(() => {
-    fetchActiveLocations().then(setLocations).catch(() => setLocations([]));
+    fetchActiveBranches().then(setBranches).catch(() => setBranches([]));
   }, []);
 
   useEffect(() => {
@@ -46,7 +46,7 @@ const TransferHistoryComp = () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchTransferBoard({ locationId, status, search: debouncedSearch, page, limit });
+      const result = await fetchTransferBoard({ branchId, status, search: debouncedSearch, page, limit });
       setRows(result.rows);
       setCounts(result.counts);
       setTotal(result.total);
@@ -57,12 +57,12 @@ const TransferHistoryComp = () => {
     } finally {
       setLoading(false);
     }
-  }, [locationId, status, debouncedSearch, page, limit]);
+  }, [branchId, status, debouncedSearch, page, limit]);
 
   useEffect(() => { loadList(); }, [loadList]);
-  useEffect(() => { setPage(1); }, [locationId, status, debouncedSearch]);
+  useEffect(() => { setPage(1); }, [branchId, status, debouncedSearch]);
 
-  const locationOptions = useMemo(() => locations.map((l) => ({ value: l._id, label: `${l.name} (${l.code})` })), [locations]);
+  const branchOptions = useMemo(() => branches.map((l) => ({ value: l._id, label: `${l.name} (${l.code})` })), [branches]);
 
   // Closed statuses only — PENDING has its own home on the other two pages.
   // No combined "all" tab: with just these two closed statuses left, an
@@ -90,8 +90,8 @@ const TransferHistoryComp = () => {
       <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-slate-600">Location</label>
-            <SearchableSelect value={locationId} onChange={setLocationId} options={locationOptions} placeholder="All locations" />
+            <label className="mb-1.5 block text-xs font-semibold text-slate-600">Branch</label>
+            <SearchableSelect value={branchId} onChange={setBranchId} options={branchOptions} placeholder="All branches" />
           </div>
           <div className="lg:col-span-2">
             <label className="mb-1.5 block text-xs font-semibold text-slate-600">Search</label>
@@ -148,7 +148,7 @@ const TransferHistoryComp = () => {
               rows.map((row) => (
                 <tr key={row._id} className="transition hover:bg-slate-50/60">
                   <td className="px-4 py-3 text-sm font-semibold text-indigo-600">{row.requestNumber}</td>
-                  <td className="px-4 py-3"><LocationPair from={row.sourceLocationId} to={row.requestingLocationId} /></td>
+                  <td className="px-4 py-3"><BranchPair from={row.sourceBranchId} to={row.requestingBranchId} /></td>
                   <td className="px-4 py-3"><ItemsCell row={row} /></td>
                   <td className="px-4 py-3 text-right text-sm tabular-nums text-slate-700">
                     {row.totalTransferredQty} <span className="text-slate-400">/ {row.totalRequestedQty}</span>

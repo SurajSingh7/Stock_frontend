@@ -70,7 +70,7 @@ const LoginComponent = () => {
                     }
 
                     toast.success(result.message);
-                    window.location.href = "/master/category";
+                    window.location.href = "/home";
                 } else {
                     toast.error(result.message || "Login failed");
                 }

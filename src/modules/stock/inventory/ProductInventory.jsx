@@ -128,12 +128,12 @@ const ProductInventory = () => {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [productId, setProductId] = useState("");
-  const [warehouseId, setWarehouseId] = useState("");
+  const [branchId, setBranchId] = useState("");
   const [stockStatus, setStockStatus] = useState("");
 
   const [categories, setCategories] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
-  const [warehouses, setWarehouses] = useState([]);
+  const [branches, setBranches] = useState([]);
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -150,8 +150,8 @@ const ProductInventory = () => {
         const j = await r.json(); if (j.success) setCategories(j.data || []);
       } catch {}
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setWarehouses(j.data || []);
+        const r = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
+        const j = await r.json(); if (j.success) setBranches(j.data || []);
       } catch {}
     })();
   }, []);
@@ -173,7 +173,7 @@ const ProductInventory = () => {
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (categoryId) params.set("categoryId", categoryId);
       if (productId) params.set("productDefinitionId", productId);
-      if (warehouseId) params.set("warehouseId", warehouseId);
+      if (branchId) params.set("branchId", branchId);
       if (stockStatus) params.set("stockStatus", stockStatus);
       const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/product-summary?${params.toString()}`, { credentials: "include" });
       const json = await res.json();
@@ -181,14 +181,14 @@ const ProductInventory = () => {
       setRows(json.data || []);
       setTotal(json.pagination?.total ?? 0);
     } catch (err) { setError(err.message); setRows([]); setTotal(0); } finally { setLoading(false); }
-  }, [page, limit, debouncedSearch, categoryId, productId, warehouseId, stockStatus]);
+  }, [page, limit, debouncedSearch, categoryId, productId, branchId, stockStatus]);
 
   useEffect(() => { loadList(); }, [loadList]);
 
   const categoryOptions = useMemo(() => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })), [categories]);
 
-  const hasActiveFilters = !!search || !!categoryId || !!productId || !!warehouseId || !!stockStatus;
-  const clearFilters = () => { setSearch(""); setCategoryId(""); setProductId(""); setWarehouseId(""); setStockStatus(""); setPage(1); };
+  const hasActiveFilters = !!search || !!categoryId || !!productId || !!branchId || !!stockStatus;
+  const clearFilters = () => { setSearch(""); setCategoryId(""); setProductId(""); setBranchId(""); setStockStatus(""); setPage(1); };
 
   if (view.mode === "history") {
     return <ProductInventoryHistory product={view.product} onBack={() => setView({ mode: "list" })} />;
@@ -198,7 +198,7 @@ const ProductInventory = () => {
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Product Inventory</h1>
-        <p className="mt-0.5 text-sm text-slate-500">Available stock aggregated per product, across warehouses.</p>
+        <p className="mt-0.5 text-sm text-slate-500">Available stock aggregated per product, across branches.</p>
       </div>
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
@@ -215,7 +215,7 @@ const ProductInventory = () => {
           </div>
           <SearchableSelect value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }} options={categoryOptions} placeholder="All categories" />
           <SearchableSelect value={productId} onChange={(v) => { setProductId(v); setPage(1); }} options={productOptions} placeholder={categoryId ? "All products" : "Select a category first"} disabled={!categoryId} />
-          <SearchableSelect value={warehouseId} onChange={(v) => { setWarehouseId(v); setPage(1); }} options={warehouses.map((w) => ({ value: w._id, label: w.name }))} placeholder="All warehouses" />
+          <SearchableSelect value={branchId} onChange={(v) => { setBranchId(v); setPage(1); }} options={branches.map((w) => ({ value: w._id, label: w.name }))} placeholder="All branches" />
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2.5">
           <select value={stockStatus} onChange={(e) => { setStockStatus(e.target.value); setPage(1); }} className={`${inputCls} w-auto`}>

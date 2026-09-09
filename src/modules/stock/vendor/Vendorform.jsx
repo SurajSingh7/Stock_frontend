@@ -10,7 +10,9 @@ import {
   LucideDelete,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { PAYMENT_TERMS, STATE_OPTIONS } from "./vendorConstants";
+import { usePermissions } from "@/context/PermissionContext";
+import { PAYMENT_TERMS } from "./vendorConstants";
+import { STATE_OPTIONS } from "@/shared/constants/indianStates";
 import { verifyGST } from "./gstVerification";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
 
@@ -241,7 +243,12 @@ const LabelTabs = ({ items, activeIdx, onSelect, onAdd, errorsByIdx = [], sugges
 /* Defaults                                                            */
 /* ------------------------------------------------------------------ */
 
-const emptyContact = (label) => ({ label, name: "", email: "", phone: "", designation: "", department: "" });
+const emptyContact = (label) => ({
+  label, name: "", email: "", phone: "", designation: "", department: "",
+  // Mirrors the backend default (models/stock.vendor.model.js): the primary
+  // contact is the one you write to; every other contact is opt-in.
+  recipientType: label === "PRIMARY" ? "TO" : "NONE",
+});
 
 const emptyBankAccount = (label) => ({
   label, ifsc: "", bankName: "", branch: "", branchAddress: "",
@@ -257,6 +264,7 @@ const defaultVendor = () => ({
     legalName: "", tradeName: "", gstAddress: "", state: { key: "", name: "", code: "" },
   },
   panNumber: "",
+  branchId: "",
   paymentTerms: "",
   notes: "",
   contacts: [emptyContact("PRIMARY")],
@@ -269,7 +277,7 @@ const defaultVendor = () => ({
 /* Card 1 — Basic Details (GST verified ⇒ name / PAN / state locked)   */
 /* ------------------------------------------------------------------ */
 
-const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified }) => {
+const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, branches = [], isEdit = false, canChangeBranch = false, branchLabel = "" }) => {
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState(null);
 
@@ -400,7 +408,7 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified }) 
           </>
         )}
 
-        <Field label="PAN Number" locked={gstLocked} error={errors.panNumber} hint={gstLocked ? "Auto-filled from GST" : undefined}>
+        <Field label="PAN Number" required locked={gstLocked} error={errors.panNumber} hint={gstLocked ? "Auto-filled from GST" : undefined}>
           <input
             className={gstLocked ? lockedCls : errors.panNumber ? inputErrCls : inputCls}
             readOnly={gstLocked}
@@ -426,6 +434,43 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified }) 
             onChange={(e) => setVendor((v) => ({ ...v, vendorAlias: e.target.value }))}
             placeholder="Enter alias (optional)"
           />
+        </Field>
+
+        {/* Shown but locked. The branch is whoever is logged in — displaying it
+            lets someone notice a wrong HRMS branch BEFORE adding twenty
+            vendors under it, while the lock removes any chance of picking the
+            wrong one. Only an admin can reassign, on edit; the backend
+            enforces that too, so this is a real rule and not just a disabled
+            input. */}
+        <Field
+          label="Branch"
+          required
+          error={errors.branchId}
+          hint={
+            canChangeBranch
+              ? "Which branch this vendor belongs to. Staff on Own-branch scope see only their own branch's vendors."
+              : "Taken from your account. Only an administrator can move a vendor to another branch."
+          }
+        >
+          {canChangeBranch ? (
+            <select
+              className={errors.branchId ? inputErrCls : inputCls}
+              value={vendor.branchId || ""}
+              onChange={(e) => setVendor((v) => ({ ...v, branchId: e.target.value }))}
+            >
+              <option value="">Select branch</option>
+              {branches.map((b) => (
+                <option key={b._id} value={b._id}>{b.name}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              className={`${inputCls} cursor-not-allowed bg-slate-50 text-slate-500`}
+              value={branchLabel}
+              disabled
+              readOnly
+            />
+          )}
         </Field>
 
         <Field label="Payment Terms" required error={errors.paymentTerms}>
@@ -561,6 +606,34 @@ const ContactDetailsCard = ({ vendor, setVendor, errors }) => {
             <Field label="Department">
               <input className={inputCls} value={contact.department} title={contact.department} onChange={(ev) => updateContact({ department: ev.target.value })} />
             </Field>
+            <Field label="Recipient Type" required>
+              {/* Three-way, and emailing is opt-IN: most contacts on a vendor
+                  are reference people who should not be mailed. PRIMARY is the
+                  exception and defaults to To, so a new vendor can send its
+                  first PO without an extra click.
+
+                  To / CC / None are short and self-explanatory, so they sit on
+                  one row: the field keeps the same height as its neighbours
+                  instead of stretching the card by two extra lines. */}
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2">
+                {[
+                  { v: "TO", label: "To" },
+                  { v: "CC", label: "CC" },
+                  { v: "NONE", label: "None" },
+                ].map((o) => (
+                  <label key={o.v} className="flex cursor-pointer items-center gap-2 text-sm font-medium text-slate-700">
+                    <input
+                      type="radio"
+                      name={`recipientType-${contact.label || "contact"}`}
+                      checked={(contact.recipientType || "NONE") === o.v}
+                      onChange={() => updateContact({ recipientType: o.v })}
+                      className="h-4 w-4 accent-indigo-600"
+                    />
+                    {o.label}
+                  </label>
+                ))}
+              </div>
+            </Field>
           </div>
         </div>
       )}
@@ -621,7 +694,7 @@ const AddressCard = ({ vendor, setVendor, errors, useGstAddress, setUseGstAddres
           </Field>
         </div>
 
-        <Field label="Area / Locality" error={errors.area}>
+        <Field label="Area / Locality" required error={errors.area}>
           <input className={errors.area ? inputErrCls : inputCls} value={vendor.address.area} onChange={(e) => setAddress({ area: e.target.value })} />
         </Field>
         <Field label="City" required error={errors.city}>
@@ -654,34 +727,65 @@ const AddressCard = ({ vendor, setVendor, errors, useGstAddress, setUseGstAddres
 
 
 
+// How many matches the category dropdown renders at once. The rest are counted
+// and reported rather than dropped on the floor.
+const CATEGORY_RESULT_LIMIT = 30;
+
 const AssignProductsCard = ({ vendor, setVendor }) => {
   const [search, setSearch] = useState("");
   const [allCategories, setAllCategories] = useState([]);
   const [searching, setSearching] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [productsByCategory, setProductsByCategory] = useState({});
   const [selectedCategory, setSelectedCategory] = useState(null);
 
+  // WHY TYPING HERE MAKES NO NETWORK CALL — this is deliberate, not a bug.
+  //
+  // The whole leaf-category list is fetched ONCE on mount (fetchAllLeafCategories
+  // pages through skip/limit until the server's `total` is covered, so it really
+  // is all of them) and every keystroke filters that list in memory.
+  //
+  // It has to work this way: the server's /categories/flat `search` param only
+  // matches the LEAF name, while this picker matches the full breadcrumb path,
+  // so "networking" can find "Electronics / Networking / Routers". A per-keystroke
+  // server search would quietly stop finding those.
+  //
   // hasProducts=true ⇒ a category with zero products can never show up here.
-  // Fetched once, then searched client-side against the full breadcrumb path
-  // (the server's `search` param only matches the leaf name).
-  useEffect(() => {
-    (async () => {
-      setSearching(true);
-      try {
-        setAllCategories(await fetchAllLeafCategories({ hasProducts: true }));
-      } catch {
-        setAllCategories([]);
-      } finally {
-        setSearching(false);
-      }
-    })();
+  const loadCategories = useCallback(async () => {
+    setSearching(true);
+    setLoadError("");
+    try {
+      setAllCategories(await fetchAllLeafCategories({ hasProducts: true }));
+    } catch (err) {
+      // Recorded, not swallowed. An empty list plus no message is
+      // indistinguishable from "no such category" — the user retypes the search
+      // and concludes the category does not exist, when really the fetch 401'd
+      // or they lack `categories:READ`.
+      setAllCategories([]);
+      setLoadError(err?.message || "Could not load categories.");
+    } finally {
+      setSearching(false);
+    }
   }, []);
 
-  const leafOptions = search
-    ? allCategories
-        .filter((c) => (c.displayPath || c.name || "").toLowerCase().includes(search.toLowerCase()))
-        .slice(0, 30)
+  // Kept as an async IIFE rather than calling loadCategories() straight from the
+  // effect body: the direct call makes loadCategories' opening setSearching(true)
+  // a synchronous setState inside an effect, which is the cascading-render
+  // pattern the lint rule flags.
+  useEffect(() => {
+    (async () => {
+      await loadCategories();
+    })();
+  }, [loadCategories]);
+
+  // Matches are capped for the dropdown's sake, but the full count is kept so
+  // the UI can say how many were hidden instead of silently showing 30.
+  const matches = search
+    ? allCategories.filter((c) =>
+        (c.displayPath || c.name || "").toLowerCase().includes(search.toLowerCase())
+      )
     : [];
+  const leafOptions = matches.slice(0, CATEGORY_RESULT_LIMIT);
 
   const loadProductsForCategory = useCallback(
     async (categoryId) => {
@@ -803,20 +907,47 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
             value={selectedCategory ? (selectedCategory.displayPath || selectedCategory.name) : search}
             onChange={(e) => { setSelectedCategory(null); setSearch(e.target.value); }}
           />
-          {search && !selectedCategory && (leafOptions.length > 0 || searching) && (
+          {/* Opens whenever there is a search term — the empty and failed cases
+              need somewhere to say so. Previously it only rendered when there
+              were results, so "load failed" and "no such category" both looked
+              like nothing happening at all. */}
+          {search && !selectedCategory && (
             <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg ring-1 ring-slate-900/5">
               {searching ? (
-                <div className="px-3 py-2 text-sm text-slate-400">Searching...</div>
-              ) : (
-                leafOptions.map((cat) => (
+                <div className="px-3 py-2 text-sm text-slate-400">Loading categories…</div>
+              ) : loadError ? (
+                <div className="px-3 py-2.5">
+                  <p className="flex items-start gap-1.5 text-xs font-medium text-rose-600">
+                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" /> {loadError}
+                  </p>
                   <button
-                    key={cat._id}
-                    type="button" onClick={() => setSelectedCategory(cat)}
-                    className="block w-full truncate px-3 py-2 text-left text-sm text-slate-800 transition hover:bg-indigo-50/60"
+                    type="button" onClick={loadCategories}
+                    className="mt-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
                   >
-                    {cat.displayPath || cat.name}
+                    Try again
                   </button>
-                ))
+                </div>
+              ) : leafOptions.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-slate-400">
+                  No category matches “{search}”.
+                </div>
+              ) : (
+                <>
+                  {leafOptions.map((cat) => (
+                    <button
+                      key={cat._id}
+                      type="button" onClick={() => setSelectedCategory(cat)}
+                      className="block w-full truncate px-3 py-2 text-left text-sm text-slate-800 transition hover:bg-indigo-50/60"
+                    >
+                      {cat.displayPath || cat.name}
+                    </button>
+                  ))}
+                  {matches.length > CATEGORY_RESULT_LIMIT && (
+                    <p className="border-t border-slate-100 bg-slate-50/60 px-3 py-2 text-xs text-slate-500">
+                      Showing {CATEGORY_RESULT_LIMIT} of {matches.length} matches — keep typing to narrow it down.
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1025,7 +1156,7 @@ const BankDetailsCard = ({ vendor, setVendor, errors }) => {
 /* Validation — returns { fieldErrors, messages, valid }               */
 /* ------------------------------------------------------------------ */
 
-const validateVendor = (vendor) => {
+const validateVendor = (vendor, isEdit = false) => {
   const f = { contacts: [], bankAccounts: [] };
   const messages = [];
   const push = (msg) => messages.push(msg);
@@ -1039,12 +1170,21 @@ const validateVendor = (vendor) => {
     if (!vendor.gst.state?.key) { f.gstState = "State is required"; push("Vendor state is required"); }
   }
 
-  if (vendor.panNumber && !RX.pan.test(vendor.panNumber.toUpperCase())) {
+  // Required: a vendor is a legal payee and PAN is what identifies one. When
+  // GST is verified this arrives auto-filled and locked, so the empty case is
+  // really the no-GST vendor, where it has to be typed.
+  if (!vendor.panNumber?.trim()) {
+    f.panNumber = "PAN number is required";
+    push(f.panNumber);
+  } else if (!RX.pan.test(vendor.panNumber.trim().toUpperCase())) {
     f.panNumber = "Enter a valid PAN (ABCDE1234F)";
     push(f.panNumber);
   }
 
   if (!vendor.paymentTerms) { f.paymentTerms = "Payment terms is required"; push(f.paymentTerms); }
+  // Only on edit — that is the only mode where the field is shown. On create
+  // the backend fills it from the logged-in user and refuses if they have none.
+  if (isEdit && !vendor.branchId) { f.branchId = "Branch is required"; push(f.branchId); }
 
   // contacts — PRIMARY must exist, and every tab that exists must be complete
   if (!vendor.contacts.some((c) => c.label === "PRIMARY")) push("A PRIMARY contact is required");
@@ -1062,6 +1202,10 @@ const validateVendor = (vendor) => {
 
   // address
   if (!vendor.address.fullAddress?.trim()) { f.fullAddress = "Complete address is required"; push(f.fullAddress); }
+  // The backend has always required this (validateCreateVendor: "address.area
+  // is required"); the form neither starred nor checked it, so leaving it blank
+  // failed on save with an error no field was pointing at.
+  if (!vendor.address.area?.trim()) { f.area = "Area / locality is required"; push(f.area); }
   if (!vendor.address.city?.trim()) { f.city = "City is required"; push(f.city); }
   if (!vendor.address.pinCode?.trim()) { f.pinCode = "PIN code is required"; push(f.pinCode); }
   else if (!RX.pin.test(vendor.address.pinCode.trim())) { f.pinCode = "Enter a valid 6-digit PIN code"; push(f.pinCode); }
@@ -1112,12 +1256,48 @@ const VendorForm = ({ vendorId = null }) => {
   const router = useRouter();
   const isEdit = Boolean(vendorId);
 
+  // branchName rides along with branchId in /my-permissions so this screen can
+  // name the user's branch without /branches/active, which needs branches:READ.
+  const { isAdmin, branchId: myBranchId, branchName: myBranchName } = usePermissions();
+  // Create never offers a choice — the branch is the creator's. Reassignment
+  // is an admin action, and only on an existing vendor. Declared after the
+  // hook it depends on.
+  const canChangeBranch = isEdit && isAdmin;
+
   const [vendor, setVendor] = useState(defaultVendor());
+  // /branches/active is the UNSCOPED list on purpose — an admin reassigning a
+  // vendor to Chandigarh has to be able to pick Chandigarh from head office.
+  const [branches, setBranches] = useState([]);
   const [useGstAddress, setUseGstAddress] = useState(false);
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [formErrors, setFormErrors] = useState([]);
   const [fieldErrors, setFieldErrors] = useState({ contacts: [], bankAccounts: [] });
+
+  // Shown, not submitted: the backend stamps the creator's branch and ignores
+  // whatever the body carries. Kept in state only so the locked field has
+  // something to display and validation has something to check.
+  useEffect(() => {
+    if (isEdit || !myBranchId) return;
+    setVendor((v) => (v.branchId ? v : { ...v, branchId: String(myBranchId) }));
+  }, [isEdit, myBranchId]);
+
+  // Only the admin edit case renders a picker; everyone else sees a locked
+  // input, so there is no list to fetch.
+  useEffect(() => {
+    if (!canChangeBranch) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
+        const json = await res.json();
+        if (!cancelled && res.ok) setBranches(json?.data || []);
+      } catch {
+        // Non-fatal — the select stays empty and the existing branch is kept.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [canChangeBranch]);
 
   // GST verified ⇒ name / PAN / vendor state are owned by GST and locked
   const gstLocked = vendor.gst.isAvailable && vendor.gst.isVerified;
@@ -1176,7 +1356,7 @@ const VendorForm = ({ vendorId = null }) => {
   };
 
   const handleSubmit = async () => {
-    const { fieldErrors: fe, messages, valid } = validateVendor(vendor);
+    const { fieldErrors: fe, messages, valid } = validateVendor(vendor, isEdit);
     setFieldErrors(fe);
     if (!valid) {
       setFormErrors(messages.length ? messages : ["Please fix the highlighted fields"]);
@@ -1293,6 +1473,15 @@ const VendorForm = ({ vendorId = null }) => {
           <BasicDetailsCard
             vendor={vendor} setVendor={setVendor} errors={fieldErrors}
             gstLocked={gstLocked} onVerified={handleGstVerified}
+            branches={branches} isEdit={isEdit}
+            canChangeBranch={canChangeBranch}
+            branchLabel={
+              isEdit
+                ? branches.find((b) => String(b._id) === String(vendor.branchId))?.name ||
+                  vendor.branchName ||
+                  "—"
+                : myBranchName || "—"
+            }
           />
           <ContactDetailsCard vendor={vendor} setVendor={setVendor} errors={fieldErrors} />
           <AddressCard

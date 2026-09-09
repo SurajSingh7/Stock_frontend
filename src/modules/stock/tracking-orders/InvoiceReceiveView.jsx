@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { usePermissions } from "@/context/PermissionContext";
 import { pathLabel } from "@/shared/category/categoryPath";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
@@ -39,6 +40,9 @@ const DetailRow = ({ label, children }) => (
   </div>
 );
 
+const NO_BRANCH_MESSAGE =
+  "You do not have access to any branch. Ask an administrator to assign you a branch before receiving stock.";
+
 const ADD_ROW_COUNTS = [1, 3, 5, 10];
 const ACCEPTED_UPLOAD_TYPES = ["image/jpeg", "image/png", "image/webp", "image/jpg", "application/pdf"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -55,11 +59,19 @@ async function fetchTrackingDetail(trackingOrderId) {
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load tracking order");
   return json.data;
 }
-async function fetchWarehouses() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { credentials: "include" });
+// Branches this user may receive goods into — their own HRMS branch, or a
+// wider set if an admin gave them one. Scoped on the invoices module, so
+// receiving staff don't need the Master > Branch permission to fill this
+// field. An empty list means "no branch assigned", not a failure.
+async function fetchReceivingBranches() {
+  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/receiving-branches`, { credentials: "include" });
   const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load warehouses");
-  return json.data || [];
+  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
+  return {
+    branches: json.data?.branches || [],
+    defaultBranchId: json.data?.defaultBranchId ? String(json.data.defaultBranchId) : "",
+    ownBranchId: json.data?.ownBranchId ? String(json.data.ownBranchId) : "",
+  };
 }
 async function fetchProductDefinition(id) {
   const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { credentials: "include" });
@@ -425,6 +437,13 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
 const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack, onDone }) => {
   const isEdit = mode === "edit";
 
+  // "Received By" is the signed-in user, not a free-text claim — whoever books
+  // the stock in is who the audit trail should name. Sent as undefined while
+  // the identity context is still loading: the backend resolves the session
+  // user's name itself, so an empty value here can never blank the field.
+  const { userData } = usePermissions();
+  const receivedByName = [userData?.firstName, userData?.lastName].filter(Boolean).join(" ");
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -432,7 +451,9 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
   const [tracking, setTracking] = useState(null);
   const [po, setPo] = useState(null);
   const [vendor, setVendor] = useState(null);
-  const [warehouses, setWarehouses] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [ownBranchId, setOwnBranchId] = useState("");
+  const [branchNotice, setBranchNotice] = useState("");
   const [productDefs, setProductDefs] = useState({}); // productDefinitionId -> def
   const [alreadyReceivedByLine, setAlreadyReceivedByLine] = useState({}); // quotationItemId -> qty
 
@@ -440,8 +461,7 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
   const [invoiceDate, setInvoiceDate] = useState(todayStr());
   const [invoiceFile, setInvoiceFile] = useState(null);
   const [existingFile, setExistingFile] = useState("");
-  const [warehouseId, setWarehouseId] = useState("");
-  const [receivedByName, setReceivedByName] = useState("");
+  const [branchId, setBranchId] = useState("");
   const [extraCharges, setExtraCharges] = useState([]);
   const [lines, setLines] = useState({}); // quotationItemId -> lineState
   const [activeTabId, setActiveTabId] = useState(null);
@@ -457,11 +477,21 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
         setPo(detail.po);
         setVendor(detail.vendor);
 
-        const [wh, invoicesForTracking] = await Promise.all([
-          fetchWarehouses(),
+        // Fail-soft on purpose: a branch-access problem belongs in the
+        // branch field, not in a page-wide banner that hides the rest of a
+        // form the user can otherwise fill in.
+        const [branchAccess, invoicesForTracking] = await Promise.all([
+          fetchReceivingBranches().catch((err) => ({
+            branches: [],
+            defaultBranchId: "",
+            ownBranchId: "",
+            error: err.message,
+          })),
           fetchInvoicesForTracking(trackingOrderId),
         ]);
-        setWarehouses(wh);
+        setBranches(branchAccess.branches);
+        setOwnBranchId(branchAccess.ownBranchId || "");
+        setBranchNotice(branchAccess.error || "");
 
         const received = {};
         invoicesForTracking.forEach((inv) => {
@@ -510,18 +540,23 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
         setLines(initialLines);
         setActiveTabId(detail.po?.items?.[0] ? String(detail.po.items[0].quotationItemId) : null);
 
-        // Just the first active warehouse as a form prefill — there is no
-        // designated "main" warehouse; the receiver picks the real one.
-        const defaultWarehouse = wh[0];
+        // The branch is the receiver's own branch, not a free pick — the
+        // backend resolves the default, so the field is prefilled rather than
+        // guessed from whichever branch happened to sort first. An invoice
+        // being re-submitted keeps its original branch, but only while that
+        // one is still inside the editor's scope.
+        const inScope = (id) =>
+          !!id && branchAccess.branches.some((w) => String(w._id) === String(id));
         if (isEdit) {
           setInvoiceNumber(invoice.invoiceNumber || "");
           setInvoiceDate(invoice.invoiceDate ? invoice.invoiceDate.slice(0, 10) : todayStr());
           setExistingFile(invoice.invoiceFile || "");
-          setWarehouseId(invoice.warehouseId || defaultWarehouse?._id || "");
-          setReceivedByName(invoice.receivedByName || "");
+          setBranchId(
+            inScope(invoice.branchId) ? String(invoice.branchId) : branchAccess.defaultBranchId
+          );
           setExtraCharges(invoice.extraCharges || []);
         } else {
-          setWarehouseId(defaultWarehouse?._id || "");
+          setBranchId(branchAccess.defaultBranchId);
         }
       } catch (err) {
         setError(err.message);
@@ -531,6 +566,11 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trackingOrderId]);
+
+  // A single option is the norm: the user's own branch. Nothing to choose, so
+  // the field reads as a statement of fact rather than an open dropdown.
+  const hasBranchAccess = branches.length > 0;
+  const isSingleBranch = branches.length === 1;
 
   const poItems = useMemo(() => po?.items || [], [po]);
   const activeItem = poItems.find((it) => String(it.quotationItemId) === activeTabId);
@@ -580,6 +620,13 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
     setError(null);
     if (!invoiceNumber.trim()) return setError("Invoice number is required");
     if (!invoiceDate) return setError("Invoice date is required");
+    if (!branchId) {
+      return setError(
+        hasBranchAccess
+          ? "Select the branch where these items were received"
+          : branchNotice || NO_BRANCH_MESSAGE
+      );
+    }
     if (builtLines.length === 0) return setError("Receive at least one item before submitting");
 
     for (const it of poItems) {
@@ -607,8 +654,8 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
       const payload = {
         invoiceNumber: invoiceNumber.trim(),
         invoiceDate,
-        warehouseId: warehouseId || null,
-        receivedByName: receivedByName.trim(),
+        branchId: branchId || null,
+        receivedByName: receivedByName || undefined,
         extraCharges: extraCharges
           .filter((c) => c.amount !== "" && c.amount != null)
           .map((c) => ({ amount: Number(c.amount) || 0, note: c.note || "" })),
@@ -703,7 +750,7 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
               </div>
             </DetailRow>
             <DetailRow label="Received By">
-              <input value={receivedByName} onChange={(e) => setReceivedByName(e.target.value)} className={inputCls} placeholder="Your name" />
+              <p className="text-sm font-medium text-slate-900">{receivedByName || "—"}</p>
             </DetailRow>
           </div>
         </section>
@@ -764,12 +811,33 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <label className={labelCls}>Warehouse</label>
-            <select value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)} className={inputCls}>
-              {warehouses.map((w) => (
-                <option key={w._id} value={w._id}>{w.name} ({w.code})</option>
-              ))}
-            </select>
+            <label className={labelCls}>Branch</label>
+            {!hasBranchAccess ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+                {branchNotice || NO_BRANCH_MESSAGE}
+              </p>
+            ) : (
+              <>
+                <select
+                  value={branchId}
+                  onChange={(e) => setBranchId(e.target.value)}
+                  disabled={isSingleBranch}
+                  className={inputCls}
+                >
+                  {!branchId && <option value="">Select a branch</option>}
+                  {branches.map((w) => (
+                    <option key={w._id} value={w._id}>
+                      {w.name} ({w.code}){String(w._id) === ownBranchId ? " — your branch" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1.5 text-xs text-slate-500">
+                  {isSingleBranch
+                    ? "Your assigned branch — received stock is booked in here."
+                    : "Defaults to your branch. Change it only when receiving for another branch you have access to."}
+                </p>
+              </>
+            )}
           </section>
         </div>
       </div>
@@ -821,7 +889,7 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           Cancel
         </button>
         <button
-          type="button" onClick={submit} disabled={saving}
+          type="button" onClick={submit} disabled={saving || !hasBranchAccess}
           className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {saving ? "Saving…" : "Submit Invoice"}

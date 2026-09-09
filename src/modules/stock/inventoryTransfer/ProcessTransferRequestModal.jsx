@@ -13,9 +13,9 @@ async function fetchDetail(id) {
   return json.data;
 }
 
-async function fetchAvailableUnits(warehouseId, productDefinitionId) {
+async function fetchAvailableUnits(branchId, productDefinitionId) {
   const params = new URLSearchParams({
-    warehouseId, productDefinitionId, status: "AVAILABLE", approvalStatus: "APPROVED", limit: "200",
+    branchId, productDefinitionId, status: "AVAILABLE", approvalStatus: "APPROVED", limit: "200",
   });
   const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items?${params.toString()}`, { credentials: "include" });
   const json = await res.json();
@@ -31,7 +31,7 @@ const serialLabel = (item) => {
 /* Per-line serial/IMEI picker — individual-tracked products only.
    Auto Select fills the first `need` available units for the user;
    Manual opens the checklist so they can pick/override by hand. */
-const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected }) => {
+const SerialPicker = ({ line, sourceBranchId, need, selected, onChangeSelected }) => {
   const [open, setOpen] = useState(false);
   const [units, setUnits] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -41,7 +41,7 @@ const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected
     setLoading(true);
     setErr(null);
     try {
-      const data = await fetchAvailableUnits(sourceLocationId, line.productDefinitionId);
+      const data = await fetchAvailableUnits(sourceBranchId, line.productDefinitionId);
       setUnits(data);
       return data;
     } catch (e) {
@@ -50,7 +50,7 @@ const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected
     } finally {
       setLoading(false);
     }
-  }, [sourceLocationId, line.productDefinitionId]);
+  }, [sourceBranchId, line.productDefinitionId]);
 
   useEffect(() => { if (open && units === null) load(); }, [open, units, load]);
 
@@ -104,7 +104,7 @@ const SerialPicker = ({ line, sourceLocationId, need, selected, onChangeSelected
           ) : err ? (
             <p className="p-3 text-xs text-rose-600">{err}</p>
           ) : units.length === 0 ? (
-            <p className="p-3 text-xs text-slate-400">No available units at the source location.</p>
+            <p className="p-3 text-xs text-slate-400">No available units at the source branch.</p>
           ) : (
             <table className="w-full min-w-full border-collapse text-xs">
               <thead>
@@ -237,9 +237,9 @@ const ProcessTransferRequestModal = ({ requestId, onClose, onDone }) => {
       ) : (
         <div className="space-y-4">
           <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-            <span className="font-semibold text-slate-900">{detail.sourceLocationId?.name}</span>
+            <span className="font-semibold text-slate-900">{detail.sourceBranchId?.name}</span>
             <ArrowRight className="h-3.5 w-3.5 text-slate-400" />
-            <span className="font-semibold text-slate-900">{detail.requestingLocationId?.name}</span>
+            <span className="font-semibold text-slate-900">{detail.requestingBranchId?.name}</span>
             {detail.remarks && <span className="ml-auto text-xs text-slate-400">"{detail.remarks}"</span>}
           </div>
 
@@ -270,7 +270,7 @@ const ProcessTransferRequestModal = ({ requestId, onClose, onDone }) => {
                   {isIndividual && st.transferQty > 0 && (
                     <SerialPicker
                       line={l}
-                      sourceLocationId={detail.sourceLocationId?._id}
+                      sourceBranchId={detail.sourceBranchId?._id}
                       need={st.transferQty}
                       selected={st.selectedItemIds}
                       onChangeSelected={(ids) => setLine(l._id, { selectedItemIds: ids })}

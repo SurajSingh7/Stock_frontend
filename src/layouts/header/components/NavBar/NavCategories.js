@@ -6,6 +6,19 @@
 
 import { SHOW_DEV } from "@/config/getEnvVariables";
 
+/* Every item asks for VIEW_MENU, never READ.
+ *
+ * VIEW_MENU is what decides whether a module appears here, and it is granted
+ * separately from the actions that let a user DO anything. That separation is
+ * the point: someone can hold categories:READ — so category filters and
+ * dropdowns work for them on every other screen — while the Category
+ * management page stays out of their menu. Swapping READ for CREATE/UPDATE
+ * would not achieve this; it would just move the problem to a different
+ * permission.
+ *
+ * The nav builder additionally requires at least one non-menu action, so a
+ * VIEW_MENU granted on its own can never produce a menu entry that 403s.
+ */
 export const navCategories = [
    {
     category: "Tracking Orders",
@@ -14,7 +27,7 @@ export const navCategories = [
         name: "track",
         path: "/stock/tracking-orders",
         moduleKey: "tracking-orders",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -26,7 +39,7 @@ export const navCategories = [
         name: "Quotations",
         path: "/stock/quotations/list",
         moduleKey: "quotations",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -38,7 +51,7 @@ export const navCategories = [
         name: "Vendors List",
         path: "/stock/vendors",
         moduleKey: "vendors",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -49,7 +62,7 @@ export const navCategories = [
         name: "Quotations",
         path: "/stock/quotations/approval",
         moduleKey: "quotations",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -60,13 +73,13 @@ export const navCategories = [
         name: "Po Approval",
         path: "/stock/purchase-orders",
         moduleKey: "purchase-orders",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Invoice Approval",
         path: "/stock/invoice-approval",
         moduleKey: "invoices",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -78,13 +91,13 @@ export const navCategories = [
         name: "Product Inventory",
         path: "/stock/product-inventory",
         moduleKey: "inventory-items",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Item Inventory",
         path: "/stock/item-inventory",
         moduleKey: "inventory-items",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -96,19 +109,19 @@ export const navCategories = [
         name: "Transfer Requests",
         path: "/stock/transfer-requests",
         moduleKey: "transfer-requests",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Incoming Requests",
         path: "/stock/incoming-requests",
         moduleKey: "transfer-requests",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Transfer History",
         path: "/stock/transfer-history",
         moduleKey: "transfer-requests",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -120,37 +133,43 @@ export const navCategories = [
         name: "Product Definition",
         path: "/master/product-definition",
         moduleKey: "product-definitions",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Category",
         path: "/master/category",
         moduleKey: "categories",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Field Definition",
         path: "/master/field-definition",
         moduleKey: "field-definitions",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Terms & Conditions",
         path: "/master/terms-condition",
         moduleKey: "terms-conditions",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
         name: "Notification",
         path: "/master/notification",
         moduleKey: "notifications",
-        action: ["READ"],
+        action: ["VIEW_MENU"],
       },
       {
-        name: "Warehouses",
-        path: "/master/warehouse",
-        moduleKey: "warehouses",
-        action: ["READ"],
+        name: "Branches",
+        path: "/master/branch",
+        moduleKey: "branches",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "GST Rates",
+        path: "/master/gst-rate",
+        moduleKey: "gst-rates",
+        action: ["VIEW_MENU"],
       },
     ],
   },
@@ -162,9 +181,14 @@ export const navCategories = [
 export const adminNavCategories = [
   {
     category: "Access Control",
+    // Ordered the way an admin actually sets someone up: see what exists,
+    // grant it to a role, narrow it per department, then handle the one person
+    // who is an exception.
     items: [
+      { name: "Modules & Actions", path: "/access-control/modules" },
       { name: "Roles & Permissions", path: "/access-control/roles" },
-      { name: "User Overrides", path: "/access-control/users" },
+      { name: "Department Restrictions", path: "/access-control/departments" },
+      { name: "User Access", path: "/access-control/users" },
       { name: "Delegate Access", path: "/access-control/delegate" },
       { name: "Audit Log", path: "/access-control/audit-log" },
     ],

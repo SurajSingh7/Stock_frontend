@@ -63,9 +63,9 @@ const ViewTransferRequestModal = ({ requestId, onClose }) => {
       ) : (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3">
-            <span className="text-sm font-semibold text-slate-900">{detail.sourceLocationId?.name}</span>
+            <span className="text-sm font-semibold text-slate-900">{detail.sourceBranchId?.name}</span>
             <ArrowRight className="h-4 w-4 text-slate-400" />
-            <span className="text-sm font-semibold text-slate-900">{detail.requestingLocationId?.name}</span>
+            <span className="text-sm font-semibold text-slate-900">{detail.requestingBranchId?.name}</span>
             <span className={`ml-auto inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${meta.badge}`}>
               {meta.label || detail.status}
             </span>

@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { getModules, getRolePermissions, setRolePermission } from '../api';
 import { searchHrmsRoles } from '../hrmsDirectory';
-import { PageHeader, Card, Field, PrimaryButton, ActionChecklist, Picker, inputCls, th, EmptyRow } from '../shared';
+import { PageShell, Card, Field, PrimaryButton, ActionChecklist, ActionPill, Picker, inputCls, TableShell, EmptyRow, Mono } from '../shared';
 
 const RolePermissions = () => {
   const [modules, setModules] = useState([]);
@@ -74,11 +74,11 @@ const RolePermissions = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/60 p-6">
-      <PageHeader
-        title="Roles & Permissions"
-        description="Set the default actions every user with a role gets, per module. Individual users can still be given more or less via User Overrides."
-      />
+    <PageShell
+      question="What can they do?"
+      title="Roles & Permissions"
+      description="The base grant. Everyone holding a role gets these actions on these modules — before any department ceiling narrows them, and before any per-user exception adjusts them."
+    >
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
         <Card title="Grant" description="Pick a role and a module, then choose the actions it should default to." className="lg:col-span-1">
@@ -112,36 +112,41 @@ const RolePermissions = () => {
           </div>
         </Card>
 
-        <Card title="This role's current grants" className="lg:col-span-2">
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50/60">
-                <tr>
-                  <th className={th}>Module</th>
-                  <th className={th}>Allowed actions</th>
+        <Card
+          title={role ? `Current grants for ${role.label}` : 'Current grants'}
+          description="Modules not listed here grant this role nothing — a missing role permission denies."
+          className="lg:col-span-2 h-fit"
+        >
+          <TableShell head={['Module', 'Allowed actions']}>
+            {!role ? (
+              <EmptyRow colSpan={2}>Pick a role to see its grants.</EmptyRow>
+            ) : loadingGrants ? (
+              <EmptyRow colSpan={2}>Loading…</EmptyRow>
+            ) : roleGrants.length === 0 ? (
+              <EmptyRow colSpan={2}>Nothing granted yet — this role currently has no access at all.</EmptyRow>
+            ) : (
+              roleGrants.map((g) => (
+                <tr key={g._id} className="align-top transition hover:bg-slate-50/60">
+                  <td className="px-4 py-3.5">
+                    <p className="text-sm font-semibold whitespace-nowrap text-slate-900">{g.moduleId?.name}</p>
+                    <Mono>{g.moduleId?.key}</Mono>
+                  </td>
+                  <td className="px-4 py-3.5">
+                    <div className="flex flex-wrap gap-1.5">
+                      {(g.allowedActions || []).length === 0 ? (
+                        <span className="text-xs text-slate-400">none</span>
+                      ) : (
+                        g.allowedActions.map((a) => <ActionPill key={a} state="granted">{a}</ActionPill>)
+                      )}
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {!role ? (
-                  <EmptyRow colSpan={2}>Pick a role to see its grants.</EmptyRow>
-                ) : loadingGrants ? (
-                  <EmptyRow colSpan={2}>Loading…</EmptyRow>
-                ) : roleGrants.length === 0 ? (
-                  <EmptyRow colSpan={2}>No permissions granted to this role yet.</EmptyRow>
-                ) : (
-                  roleGrants.map((g) => (
-                    <tr key={g._id}>
-                      <td className="px-4 py-3 text-sm font-medium text-slate-900">{g.moduleId?.name || g.moduleId?.key}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600">{(g.allowedActions || []).join(', ') || '—'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+              ))
+            )}
+          </TableShell>
         </Card>
       </div>
-    </div>
+    </PageShell>
   );
 };
 

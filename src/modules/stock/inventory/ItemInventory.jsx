@@ -27,7 +27,7 @@ const Col = ({ label, children, className = "" }) => (
 /* Batch breakdown — every receiving event that makes up a Group   */
 /* card's total, opened via the small "info" button next to Qty.   */
 /* ============================================================= */
-const BatchBreakdownModal = ({ productName, unitText, defId, warehouseId, onClose }) => {
+const BatchBreakdownModal = ({ productName, unitText, defId, branchId, onClose }) => {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
 
@@ -35,7 +35,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, warehouseId, onClos
     (async () => {
       try {
         const params = new URLSearchParams();
-        if (warehouseId) params.set("warehouseId", warehouseId);
+        if (branchId) params.set("branchId", branchId);
         const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/history/${defId}?${params.toString()}`, { credentials: "include" });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.message || "Failed to load batches");
@@ -45,7 +45,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, warehouseId, onClos
         setRows([]);
       }
     })();
-  }, [defId, warehouseId]);
+  }, [defId, branchId]);
 
   return (
     <Modal onClose={onClose} title={`Batch Breakdown — ${productName}`} maxWidth="max-w-lg">
@@ -83,7 +83,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, warehouseId, onClos
 /* ============================================================= */
 /* Full details popup — Action "View". Individual: every selected   */
 /* field + vendor/invoice/date/status. Group: product/unit/total/    */
-/* warehouse/batch summary.                                          */
+/* branch/batch summary.                                          */
 /* ============================================================= */
 const DetailField = ({ label, value, valueCls = "text-slate-900" }) => (
   <div>
@@ -102,7 +102,7 @@ const ViewDetailsModal = ({ card, onClose }) => {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <DetailField label="Category Path" value={def.categoryPath} />
         <DetailField label="Product Name" value={def.name} />
-        <DetailField label="Warehouse" value={card.warehouseId?.name} />
+        <DetailField label="Branch" value={card.branchId?.name} />
         <DetailField label="Unit" value={unitLabel(def.unit)} />
 
         {isGroup ? (
@@ -146,7 +146,7 @@ const ViewDetailsModal = ({ card, onClose }) => {
 /* ============================================================= */
 /* One row — bordered box, label-over-value columns. Individual =   */
 /* one row per physical unit (fields shown inline). Group = one row */
-/* per product+warehouse (Quantity + info button for the batches).  */
+/* per product+branch (Quantity + info button for the batches).  */
 /* ============================================================= */
 const InventoryRow = ({ card, onView, onShowBatches }) => {
   const def = card.productDefinitionId || {};
@@ -177,7 +177,7 @@ const InventoryRow = ({ card, onView, onShowBatches }) => {
         ))
       )}
 
-      <Col label="Warehouse" className="w-36">{card.warehouseId?.name || "—"}</Col>
+      <Col label="Branch" className="w-36">{card.branchId?.name || "—"}</Col>
 
       <div className="ml-auto shrink-0">
         <p className={colLabel}>Action</p>
@@ -204,11 +204,11 @@ const ItemInventory = () => {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [productId, setProductId] = useState(initialProductId);
-  const [warehouseId, setWarehouseId] = useState("");
+  const [branchId, setBranchId] = useState("");
 
   const [categories, setCategories] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
-  const [warehouses, setWarehouses] = useState([]);
+  const [branches, setBranches] = useState([]);
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(12);
@@ -226,8 +226,8 @@ const ItemInventory = () => {
         const j = await r.json(); if (j.success) setCategories(j.data || []);
       } catch {}
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setWarehouses(j.data || []);
+        const r = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
+        const j = await r.json(); if (j.success) setBranches(j.data || []);
       } catch {}
     })();
   }, []);
@@ -249,29 +249,29 @@ const ItemInventory = () => {
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (categoryId) params.set("categoryId", categoryId);
       if (productId) params.set("productDefinitionId", productId);
-      if (warehouseId) params.set("warehouseId", warehouseId);
+      if (branchId) params.set("branchId", branchId);
       const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/cards?${params.toString()}`, { credentials: "include" });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch items");
       setRows(json.data || []);
       setTotal(json.pagination?.total ?? 0);
     } catch (err) { setError(err.message); setRows([]); setTotal(0); } finally { setLoading(false); }
-  }, [page, limit, debouncedSearch, categoryId, productId, warehouseId]);
+  }, [page, limit, debouncedSearch, categoryId, productId, branchId]);
 
   useEffect(() => { loadList(); }, [loadList]);
-  useEffect(() => { setPage(1); }, [debouncedSearch, categoryId, productId, warehouseId]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, categoryId, productId, branchId]);
 
   const categoryOptions = useMemo(() => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })), [categories]);
 
-  const hasActiveFilters = !!search || !!categoryId || !!productId || !!warehouseId;
-  const clearFilters = () => { setSearch(""); setCategoryId(""); setProductId(""); setWarehouseId(""); setPage(1); };
+  const hasActiveFilters = !!search || !!categoryId || !!productId || !!branchId;
+  const clearFilters = () => { setSearch(""); setCategoryId(""); setProductId(""); setBranchId(""); setPage(1); };
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Item Inventory</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          Individually tracked units, one row each — group/batch stock rolled up into a single row per product and warehouse.
+          Individually tracked units, one row each — group/batch stock rolled up into a single row per product and branch.
         </p>
       </div>
 
@@ -289,7 +289,7 @@ const ItemInventory = () => {
           </div>
           <SearchableSelect value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); }} options={categoryOptions} placeholder="All categories" />
           <SearchableSelect value={productId} onChange={setProductId} options={productOptions} placeholder={categoryId ? "All products" : "Select a category first"} disabled={!categoryId} />
-          <SearchableSelect value={warehouseId} onChange={setWarehouseId} options={warehouses.map((w) => ({ value: w._id, label: w.name }))} placeholder="All warehouses" />
+          <SearchableSelect value={branchId} onChange={setBranchId} options={branches.map((w) => ({ value: w._id, label: w.name }))} placeholder="All branches" />
         </div>
         {hasActiveFilters && (
           <div className="mt-3">
@@ -330,7 +330,7 @@ const ItemInventory = () => {
           productName={batchesFor.productDefinitionId?.name}
           unitText={unitLabel(batchesFor.productDefinitionId?.unit)}
           defId={batchesFor.productDefinitionId?._id}
-          warehouseId={batchesFor.warehouseId?._id}
+          branchId={batchesFor.branchId?._id}
           onClose={() => setBatchesFor(null)}
         />
       )}

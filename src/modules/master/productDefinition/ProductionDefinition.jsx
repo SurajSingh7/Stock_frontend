@@ -98,12 +98,12 @@ const emptyForm = {
   gstRate: "",
   warrantyYears: "",
   unit: "",
-  // Fallback for any warehouse created AFTER this product was last saved
+  // Fallback for any branch created AFTER this product was last saved
   // (see the model comment), and the source value for "Apply default to all".
   defaultStockAlertThreshold: "",
-  // { [warehouseId]: "12" } — a keyed map of raw input strings while editing,
-  // flattened to the API's [{ warehouseId, threshold }] array on submit.
-  warehouseThresholds: {},
+  // { [branchId]: "12" } — a keyed map of raw input strings while editing,
+  // flattened to the API's [{ branchId, threshold }] array on submit.
+  branchThresholds: {},
   trackingMethod: "",
   status: "ACTIVE",
   selectedFields: [],
@@ -117,9 +117,9 @@ const inputCls =
 const inputErrCls =
   "w-full rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition focus:border-rose-400 focus:outline-none focus:ring-2 focus:ring-rose-100";
 const labelCls = "mb-1.5 block text-xs font-semibold text-slate-700";
-// Compact, fixed-width number input for the per-warehouse threshold rows.
+// Compact, fixed-width number input for the per-branch threshold rows.
 // Deliberately NOT inputCls: that token is `w-full`, which wins the Tailwind
-// width conflict and squeezes the warehouse name sharing the row with it.
+// width conflict and squeezes the branch name sharing the row with it.
 const thresholdInputBase =
   "w-24 shrink-0 rounded-lg bg-white px-2 py-1.5 text-center text-sm font-semibold text-slate-900 shadow-sm transition focus:outline-none focus:ring-2";
 const thresholdInputCls = `${thresholdInputBase} border border-slate-200 focus:border-indigo-400 focus:ring-indigo-100`;
@@ -143,11 +143,17 @@ async function apiGetLeafCategoryById(id) {
   return json.data;
 }
 
+// GST slabs are their own master now (Master > GST Rates), not a constant
+// hardcoded in the backend. /active is authenticate-only, so filling this
+// dropdown never requires the GST Rates management permission.
 async function apiFetchGstRates() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/gst-rates`, { credentials: "include" });
+  const res = await fetch(`${API_BACKEND_URL}/stock/gst-rates/active`, { credentials: "include" });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load GST rates");
-  return json.data || [];
+  // Flattened to the {value,label} shape the <select> below already speaks.
+  // `value` is the NUMBER — it is what gets persisted, and what quotations and
+  // purchase orders have always stored.
+  return (json.data || []).map((r) => ({ value: r.rate, label: r.label || `${r.rate}%` }));
 }
 
 async function apiFetchFieldDefinitions() {
@@ -157,14 +163,14 @@ async function apiFetchFieldDefinitions() {
   return json.data?.data || json.data || [];
 }
 
-// Every ACTIVE warehouse needs its own stock alert threshold on the product,
-// so the form renders one row per warehouse from this list. Deliberately the
+// Every ACTIVE branch needs its own stock alert threshold on the product,
+// so the form renders one row per branch from this list. Deliberately the
 // unfiltered /active list (not branch-scoped): thresholds are master data
 // covering the whole network, not just the editor's own branch.
-async function apiFetchActiveWarehouses() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/warehouses/active`, { credentials: "include" });
+async function apiFetchActiveBranches() {
+  const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
   const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load warehouses");
+  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
   return json.data || [];
 }
 
@@ -422,6 +428,12 @@ function SearchableSelect({
   error,
   buttonClassName,
   selectedLabel, // NEW: fallback label used when options[] doesn't yet contain `value`
+  // Why the options list is empty, when it is empty because the fetch failed.
+  // Without this an errored load renders as "No match", so the user retypes the
+  // search and concludes the thing does not exist — see the two category
+  // loaders below. `onRetry` puts the retry where the user actually is.
+  loadError,
+  onRetry,
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -510,11 +522,28 @@ function SearchableSelect({
               </div>
             )}
 
-            {!loading && visible.length === 0 && (
+            {!loading && loadError && (
+              <div className="px-3 py-2.5">
+                <p className="flex items-start gap-1.5 text-xs font-medium text-rose-600">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {loadError}
+                </p>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="mt-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!loading && !loadError && visible.length === 0 && (
               <p className="px-3 py-2.5 text-sm text-slate-400">No match</p>
             )}
 
-            {!loading &&
+            {!loading && !loadError &&
               visible.map((o) => (
                 <div
                   key={o.value}
@@ -788,12 +817,12 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
     ["Product ID", row._id],
   ];
 
-  // The API populates warehouseId to { _id, name, code } — fall back to the
+  // The API populates branchId to { _id, name, code } — fall back to the
   // raw id in case an unpopulated row is ever handed in.
-  const thresholdRows = (row.warehouseThresholds || []).map((t) => ({
-    id: String(t.warehouseId?._id || t.warehouseId),
-    name: t.warehouseId?.name || String(t.warehouseId),
-    code: t.warehouseId?.code || "",
+  const thresholdRows = (row.branchThresholds || []).map((t) => ({
+    id: String(t.branchId?._id || t.branchId),
+    name: t.branchId?.name || String(t.branchId),
+    code: t.branchId?.code || "",
     threshold: t.threshold,
   }));
 
@@ -839,7 +868,7 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
       {thresholdRows.length > 0 && (
         <div className="mt-4">
           <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-            Stock Alert Threshold — Per Warehouse
+            Stock Alert Threshold — Per Branch
           </p>
           <div className="rounded-lg border border-slate-200">
             {thresholdRows.map((t) => (
@@ -912,13 +941,28 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
   const [gstOptions, setGstOptions] = useState([]);
   const [gstLoading, setGstLoading] = useState(true);
+  const [gstError, setGstError] = useState("");
 
-  // Drives the per-warehouse threshold rows. The row set comes from THIS list,
+  // True when this product holds a rate that is no longer offered — i.e. an
+  // admin retired that slab after the product was defined. Compared loosely
+  // because the <select> hands back a string while the API sends a number.
+  // `!gstError` matters: when the fetch fails gstOptions is empty, and without
+  // that guard every saved rate would look "retired" — telling the user their
+  // slab was withdrawn when really the list never loaded.
+  const isRetiredGstRate =
+    !gstLoading &&
+    !gstError &&
+    form.gstRate !== "" &&
+    form.gstRate !== null &&
+    form.gstRate !== undefined &&
+    !gstOptions.some((g) => String(g.value) === String(form.gstRate));
+
+  // Drives the per-branch threshold rows. The row set comes from THIS list,
   // never from whatever the product saved earlier — that is what makes a newly
-  // created warehouse show up (and become mandatory) on the next edit.
-  const [warehouses, setWarehouses] = useState([]);
-  const [warehousesLoading, setWarehousesLoading] = useState(true);
-  const [warehousesError, setWarehousesError] = useState("");
+  // created branch show up (and become mandatory) on the next edit.
+  const [branches, setBranches] = useState([]);
+  const [branchesLoading, setBranchesLoading] = useState(true);
+  const [branchesError, setBranchesError] = useState("");
 
   const [fieldDefs, setFieldDefs] = useState([]);
   const [fieldDefsLoading, setFieldDefsLoading] = useState(false);
@@ -928,13 +972,19 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   // each option's full breadcrumb path (see SearchableSelect's local filter)
   const [catOptions, setCatOptions] = useState([]);
   const [catLoading, setCatLoading] = useState(false);
+  const [catError, setCatError] = useState("");
 
   const loadCategories = useCallback(async () => {
     setCatLoading(true);
+    setCatError("");
     try {
       setCatOptions(await fetchAllLeafCategories());
-    } catch {
+    } catch (err) {
+      // Recorded, not swallowed — same reason as branches below. An empty list
+      // with no message reads as "no such category" when the real cause is a
+      // failed request or a missing `categories:READ` grant.
       setCatOptions([]);
+      setCatError(err?.message || "Failed to load categories");
     } finally {
       setCatLoading(false);
     }
@@ -942,25 +992,30 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
   const loadGstRates = useCallback(async () => {
     setGstLoading(true);
+    setGstError("");
     try {
       setGstOptions(await apiFetchGstRates());
-    } catch {
+    } catch (err) {
+      // GST is a REQUIRED field, so a swallowed failure here leaves an empty
+      // dropdown the user cannot satisfy and a save they cannot complete, with
+      // nothing on screen explaining why. Surfaced with a retry instead.
       setGstOptions([]);
+      setGstError(err?.message || "Failed to load GST rates");
     } finally {
       setGstLoading(false);
     }
   }, []);
 
-  const loadWarehouses = useCallback(async () => {
-    setWarehousesLoading(true);
-    setWarehousesError("");
+  const loadBranches = useCallback(async () => {
+    setBranchesLoading(true);
+    setBranchesError("");
     try {
-      setWarehouses(await apiFetchActiveWarehouses());
+      setBranches(await apiFetchActiveBranches());
     } catch (err) {
-      setWarehouses([]);
-      setWarehousesError(err.message || "Failed to load warehouses");
+      setBranches([]);
+      setBranchesError(err.message || "Failed to load branches");
     } finally {
-      setWarehousesLoading(false);
+      setBranchesLoading(false);
     }
   }, []);
 
@@ -979,7 +1034,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   useEffect(() => {
     loadGstRates();
     loadCategories();
-    loadWarehouses();
+    loadBranches();
     if (initialData.trackingMethod) loadFieldDefinitions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1026,44 +1081,44 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     }));
   };
 
-  // form.warehouseThresholds only holds warehouses the user (or a previous
-  // save) set EXPLICITLY. Anything else — most importantly a warehouse created
+  // form.branchThresholds only holds branches the user (or a previous
+  // save) set EXPLICITLY. Anything else — most importantly a branch created
   // since this product was last saved — falls back to the product default here,
   // which is the same rule the backend applies between saves. Derived rather
   // than backfilled into state, so editing the default still flows through to
   // every row nobody has overridden yet.
-  const thresholdFor = (warehouseId) => {
-    const explicit = form.warehouseThresholds[warehouseId];
+  const thresholdFor = (branchId) => {
+    const explicit = form.branchThresholds[branchId];
     return explicit === undefined ? String(form.defaultStockAlertThreshold ?? "") : explicit;
   };
 
   // Header counter — the fastest way for the user to see the section is complete
   // without scanning every row (it jumps to N of N as soon as a default is typed).
-  const filledThresholdCount = warehouses.filter((w) => thresholdFor(w._id) !== "").length;
+  const filledThresholdCount = branches.filter((w) => thresholdFor(w._id) !== "").length;
 
-  const updateWarehouseThreshold = (warehouseId, value) => {
+  const updateBranchThreshold = (branchId, value) => {
     setForm((f) => ({
       ...f,
-      warehouseThresholds: { ...f.warehouseThresholds, [warehouseId]: value },
+      branchThresholds: { ...f.branchThresholds, [branchId]: value },
     }));
     setErrors((e) => {
-      if (!e.warehouseThresholds && !e.warehouseThresholdsSummary) return e;
-      const rest = { ...(e.warehouseThresholds || {}) };
-      delete rest[warehouseId];
-      return { ...e, warehouseThresholds: rest, warehouseThresholdsSummary: undefined };
+      if (!e.branchThresholds && !e.branchThresholdsSummary) return e;
+      const rest = { ...(e.branchThresholds || {}) };
+      delete rest[branchId];
+      return { ...e, branchThresholds: rest, branchThresholdsSummary: undefined };
     });
   };
 
   // Freezes the current default into every row as an explicit override — the
   // one-click way to undo per-row edits, and with a dozen-plus branches it saves
   // retyping the same number into each box.
-  const applyDefaultToAllWarehouses = () => {
+  const applyDefaultToAllBranches = () => {
     const value = String(form.defaultStockAlertThreshold);
     setForm((f) => ({
       ...f,
-      warehouseThresholds: Object.fromEntries(warehouses.map((w) => [w._id, value])),
+      branchThresholds: Object.fromEntries(branches.map((w) => [w._id, value])),
     }));
-    setErrors((e) => ({ ...e, warehouseThresholds: undefined, warehouseThresholdsSummary: undefined }));
+    setErrors((e) => ({ ...e, branchThresholds: undefined, branchThresholdsSummary: undefined }));
   };
 
   const updateField = (key, value) => {
@@ -1112,6 +1167,16 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     if (!form.trackingMethod) next.trackingMethod = "Please select a tracking method";
     if (!form.unit) next.unit = "Please select a unit";
     if (!form.selectedFields.length) next.selectedFields = "Select at least one field";
+    // Every product is billed, so it needs a slab. 0% is a real answer here
+    // (exempt goods) — "" is the only "not chosen" state, which is why this is
+    // an explicit empty-check rather than a falsy one.
+    if (form.gstRate === "" || form.gstRate === null || form.gstRate === undefined) {
+      next.gstRate = "Please select a GST rate";
+    } else if (isRetiredGstRate) {
+      // The saved slab has since been withdrawn — the select shows it disabled,
+      // and this is the rule that actually stops the save.
+      next.gstRate = "This GST rate has been retired. Please select a current one.";
+    }
     if (
       !form.warrantyYears ||
       isNaN(Number(form.warrantyYears)) ||
@@ -1120,7 +1185,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     ) {
       next.warrantyYears = "Warranty must be a whole number of at least 1 year";
     }
-    // 0 is a legitimate threshold (alert only once that warehouse is empty),
+    // 0 is a legitimate threshold (alert only once that branch is empty),
     // so "" is the only "not filled in" state here.
     const isThreshold = (v) =>
       v !== "" &&
@@ -1134,18 +1199,18 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
       next.defaultStockAlertThreshold = "Enter a whole number of 0 or more";
     }
 
-    if (!warehousesLoading && warehouses.length === 0) {
-      next.warehouseThresholdsSummary =
-        warehousesError || "No active warehouse found — add a warehouse before defining a product";
+    if (!branchesLoading && branches.length === 0) {
+      next.branchThresholdsSummary =
+        branchesError || "No active branch found — add a branch before defining a product";
     } else {
       const rowErrors = {};
-      warehouses.forEach((w) => {
+      branches.forEach((w) => {
         if (!isThreshold(thresholdFor(w._id))) rowErrors[w._id] = true;
       });
       if (Object.keys(rowErrors).length > 0) {
-        next.warehouseThresholds = rowErrors;
-        next.warehouseThresholdsSummary =
-          "Every warehouse needs a stock alert threshold (whole number, 0 or more)";
+        next.branchThresholds = rowErrors;
+        next.branchThresholdsSummary =
+          "Every branch needs a stock alert threshold (whole number, 0 or more)";
       }
     }
     if (errors.imageFile) next.imageFile = errors.imageFile; // keep an unresolved upload error
@@ -1179,14 +1244,16 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
           isRequired: sf.isRequired,
           order: index + 1,
         })),
-        gstRate: form.gstRate || null,
+        // A Number, not the raw <select> string — the field is numeric on every
+        // model that stores it (product, quotation line, purchase order line).
+        gstRate: form.gstRate === "" || form.gstRate === null ? null : Number(form.gstRate),
         warrantyYears: Number(form.warrantyYears),
         unit: form.unit || null,
         defaultStockAlertThreshold: Number(form.defaultStockAlertThreshold),
-        // Built from the live warehouse list rather than the form map's keys, so a
-        // warehouse deleted while this form was open is never posted back.
-        warehouseThresholds: warehouses.map((w) => ({
-          warehouseId: w._id,
+        // Built from the live branch list rather than the form map's keys, so a
+        // branch deleted while this form was open is never posted back.
+        branchThresholds: branches.map((w) => ({
+          branchId: w._id,
           threshold: Number(thresholdFor(w._id)),
         })),
         // Explicit null tells the backend "clear the file" when the user hit
@@ -1269,6 +1336,8 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                     raw: c,
                   }))}
                   loading={catLoading}
+                  loadError={catError}
+                  onRetry={loadCategories}
                   placeholder="Select a leaf category"
                   error={errors.category}
                 />
@@ -1325,16 +1394,51 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
               <div>
-                <label className={labelCls}>GST</label>
+                <label className={labelCls}>
+                  GST
+                  <RequiredMark />
+                </label>
                 <select
                   value={form.gstRate} onChange={(e) => updateField("gstRate", e.target.value)} disabled={gstLoading}
-                  className={`${inputCls} disabled:bg-slate-50 disabled:text-slate-400`}
+                  className={`${errors.gstRate ? inputErrCls : inputCls} disabled:bg-slate-50 disabled:text-slate-400`}
                 >
-                  <option value="">{gstLoading ? "Loading..." : "Select GST rate"}</option>
+                  <option value="">
+                    {gstLoading ? "Loading..." : gstError ? "Unavailable" : "Select GST rate"}
+                  </option>
                   {gstOptions.map((g) => (
                     <option key={g.value} value={g.value}>{g.label}</option>
                   ))}
+                  {/* A product saved on a slab that has since been retired keeps
+                      its rate, but /gst-rates/active no longer offers it. Without
+                      this the field would just render blank and the save would
+                      fail on a rule the form never showed. Disabled, so it can be
+                      read and left alone but not newly chosen. */}
+                  {isRetiredGstRate && (
+                    <option value={form.gstRate} disabled>
+                      {form.gstRate}% — retired, pick a current rate
+                    </option>
+                  )}
                 </select>
+                {gstError && (
+                  <p className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-rose-600">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      {gstError}{" "}
+                      <button
+                        type="button" onClick={loadGstRates}
+                        className="underline underline-offset-2 hover:text-rose-700"
+                      >
+                        Try again
+                      </button>
+                    </span>
+                  </p>
+                )}
+                <FieldError message={errors.gstRate} />
+                {isRetiredGstRate && !errors.gstRate && (
+                  <p className="mt-1.5 text-xs font-medium text-amber-600">
+                    This product is on a withdrawn GST slab. Choose a current rate before saving.
+                  </p>
+                )}
               </div>
               <div>
                 <label className={labelCls}>
@@ -1383,40 +1487,40 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
             <div>
               <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
                 <label className="block text-xs font-semibold text-slate-700">
-                  Stock Alert Threshold Per Warehouse
+                  Stock Alert Threshold Per Branch
                   <RequiredMark />
-                  {warehouses.length > 0 && (
+                  {branches.length > 0 && (
                     <span className="ml-2 text-xs font-normal text-slate-400">
-                      ({filledThresholdCount} of {warehouses.length} set)
+                      ({filledThresholdCount} of {branches.length} set)
                     </span>
                   )}
                 </label>
                 <button
-                  type="button" onClick={applyDefaultToAllWarehouses}
-                  disabled={form.defaultStockAlertThreshold === "" || warehousesLoading || warehouses.length === 0}
+                  type="button" onClick={applyDefaultToAllBranches}
+                  disabled={form.defaultStockAlertThreshold === "" || branchesLoading || branches.length === 0}
                   className="shrink-0 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
                 >
                   Apply default to all
                 </button>
               </div>
               <p className="mb-3 text-xs text-slate-400">
-                Alerts are raised per warehouse, so each one carries its own threshold. 0 means
-                alert only once that warehouse is completely out.
+                Alerts are raised per branch, so each one carries its own threshold. 0 means
+                alert only once that branch is completely out.
               </p>
 
-              {warehousesLoading ? (
+              {branchesLoading ? (
                 <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 py-8 text-sm text-slate-400">
-                  <Loader2 size={16} className="animate-spin" /> Loading warehouses...
+                  <Loader2 size={16} className="animate-spin" /> Loading branches...
                 </div>
-              ) : warehouses.length === 0 ? (
+              ) : branches.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
-                  {warehousesError ||
-                    "No active warehouse found. Add a warehouse before defining a product."}
+                  {branchesError ||
+                    "No active branch found. Add a branch before defining a product."}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {warehouses.map((w) => {
-                    const rowInvalid = Boolean(errors.warehouseThresholds?.[w._id]);
+                  {branches.map((w) => {
+                    const rowInvalid = Boolean(errors.branchThresholds?.[w._id]);
                     return (
                       <div
                         key={w._id}
@@ -1433,7 +1537,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                         <input
                           type="number" min="0" step="1"
                           value={thresholdFor(w._id)}
-                          onChange={(e) => updateWarehouseThreshold(w._id, e.target.value)}
+                          onChange={(e) => updateBranchThreshold(w._id, e.target.value)}
                           placeholder="0"
                           aria-label={`Stock alert threshold for ${w.name}`}
                           className={rowInvalid ? thresholdInputErrCls : thresholdInputCls}
@@ -1444,7 +1548,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                 </div>
               )}
 
-              <FieldError message={errors.warehouseThresholdsSummary} />
+              <FieldError message={errors.branchThresholdsSummary} />
             </div>
 
             <div>
@@ -1616,6 +1720,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
   const [leafCategories, setLeafCategories] = useState([]);
   const [catSearchLoading, setCatSearchLoading] = useState(false);
+  const [catSearchError, setCatSearchError] = useState("");
   const [productOptions, setProductOptions] = useState([]);
   const [productOptionsLoading, setProductOptionsLoading] = useState(false);
 
@@ -1690,10 +1795,14 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
   // against each option's full breadcrumb path
   const loadLeafCategories = useCallback(async () => {
     setCatSearchLoading(true);
+    setCatSearchError("");
     try {
       setLeafCategories(await fetchAllLeafCategories());
-    } catch {
+    } catch (err) {
+      // Same reasoning as the form's loadCategories: a silently empty filter
+      // dropdown is indistinguishable from "there are no categories".
       setLeafCategories([]);
+      setCatSearchError(err?.message || "Failed to load categories");
     } finally {
       setCatSearchLoading(false);
     }
@@ -1865,13 +1974,13 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
         warrantyYears: full.warrantyYears ?? "",
         unit: full.unit ?? "",
         defaultStockAlertThreshold: full.defaultStockAlertThreshold ?? "",
-        // Keyed by warehouse id (the API populates warehouseId to {_id,name,code}).
-        // Only warehouses this product actually saved a threshold for; any warehouse
+        // Keyed by branch id (the API populates branchId to {_id,name,code}).
+        // Only branches this product actually saved a threshold for; any branch
         // created since then is absent here and falls back to the default via
         // thresholdFor() in the form.
-        warehouseThresholds: Object.fromEntries(
-          (full.warehouseThresholds || []).map((t) => [
-            String(t.warehouseId?._id || t.warehouseId),
+        branchThresholds: Object.fromEntries(
+          (full.branchThresholds || []).map((t) => [
+            String(t.branchId?._id || t.branchId),
             String(t.threshold),
           ])
         ),
@@ -2023,6 +2132,8 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
                 label: c.displayPath || c.name,
               }))}
               loading={catSearchLoading}
+              loadError={catSearchError}
+              onRetry={loadLeafCategories}
               disabled={isCategoryLocked}
               selectedLabel={isCategoryLocked ? lockedCategory?.displayPath || lockedCategory?.name || "Selected category" : undefined}
               placeholder="All categories"
