@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { usePermissions } from '@/context/PermissionContext';
+import BranchRequired from '@/shared/guards/BranchRequired';
 import { navCategories } from '@/layouts/header/components/NavBar/NavCategories';
 import {
   resolveModuleForPath,
@@ -28,13 +29,36 @@ import {
 // reach the screen telling them so.
 const ALWAYS_ALLOWED = new Set(['/', '/home']);
 
+// The login screen, and only the login screen. A signed-out visitor has no
+// branch either, so gating '/' would replace the login form with a message
+// telling them to sign in again — a loop with no way out.
+const BRANCH_GATE_EXEMPT = new Set(['/']);
+
 const PermissionGuard = ({ children }) => {
   const pathname = usePathname();
-  const { permissions, isAdmin, loading } = usePermissions();
+  const { permissions, isAdmin, loading, error, branchId } = usePermissions();
   const filteredNav = useFilteredNav(navCategories, permissions);
 
   const target = resolveModuleForPath(navCategories, pathname);
   const homePath = filteredNav[0]?.items?.[0]?.path || '/home';
+
+  /* Branch prerequisite — checked before everything else below, including the
+     admin bypass and ALWAYS_ALLOWED, because an account with no branch cannot
+     use ANY stock screen (the backend refuses every route but two). /home is
+     deliberately covered: it derives its landing destination from the nav and
+     would otherwise drop the user onto a page that cannot load.
+
+     Three conditions, all of them load-bearing:
+       !loading  — branchId is null while the first fetch is still in flight,
+                   so without this the gate flashes on every page load.
+       !error    — a failed permissions fetch also leaves branchId null. That is
+                   a network problem, not a missing branch, and telling the user
+                   to get a branch assigned would send them down the wrong path.
+       !branchId — the actual rule. Mirrors the backend's own check, so the two
+                   agree instead of the UI rendering over a wall of 403s. */
+  if (!BRANCH_GATE_EXEMPT.has(pathname) && !loading && !error && !branchId) {
+    return <BranchRequired />;
+  }
 
   if (ALWAYS_ALLOWED.has(pathname)) return children;
 
