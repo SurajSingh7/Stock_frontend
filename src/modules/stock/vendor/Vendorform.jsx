@@ -408,7 +408,7 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, br
           </>
         )}
 
-        <Field label="PAN Number" locked={gstLocked} error={errors.panNumber} hint={gstLocked ? "Auto-filled from GST" : undefined}>
+        <Field label="PAN Number" required locked={gstLocked} error={errors.panNumber} hint={gstLocked ? "Auto-filled from GST" : undefined}>
           <input
             className={gstLocked ? lockedCls : errors.panNumber ? inputErrCls : inputCls}
             readOnly={gstLocked}
@@ -694,7 +694,7 @@ const AddressCard = ({ vendor, setVendor, errors, useGstAddress, setUseGstAddres
           </Field>
         </div>
 
-        <Field label="Area / Locality" error={errors.area}>
+        <Field label="Area / Locality" required error={errors.area}>
           <input className={errors.area ? inputErrCls : inputCls} value={vendor.address.area} onChange={(e) => setAddress({ area: e.target.value })} />
         </Field>
         <Field label="City" required error={errors.city}>
@@ -727,34 +727,65 @@ const AddressCard = ({ vendor, setVendor, errors, useGstAddress, setUseGstAddres
 
 
 
+// How many matches the category dropdown renders at once. The rest are counted
+// and reported rather than dropped on the floor.
+const CATEGORY_RESULT_LIMIT = 30;
+
 const AssignProductsCard = ({ vendor, setVendor }) => {
   const [search, setSearch] = useState("");
   const [allCategories, setAllCategories] = useState([]);
   const [searching, setSearching] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [productsByCategory, setProductsByCategory] = useState({});
   const [selectedCategory, setSelectedCategory] = useState(null);
 
+  // WHY TYPING HERE MAKES NO NETWORK CALL — this is deliberate, not a bug.
+  //
+  // The whole leaf-category list is fetched ONCE on mount (fetchAllLeafCategories
+  // pages through skip/limit until the server's `total` is covered, so it really
+  // is all of them) and every keystroke filters that list in memory.
+  //
+  // It has to work this way: the server's /categories/flat `search` param only
+  // matches the LEAF name, while this picker matches the full breadcrumb path,
+  // so "networking" can find "Electronics / Networking / Routers". A per-keystroke
+  // server search would quietly stop finding those.
+  //
   // hasProducts=true ⇒ a category with zero products can never show up here.
-  // Fetched once, then searched client-side against the full breadcrumb path
-  // (the server's `search` param only matches the leaf name).
-  useEffect(() => {
-    (async () => {
-      setSearching(true);
-      try {
-        setAllCategories(await fetchAllLeafCategories({ hasProducts: true }));
-      } catch {
-        setAllCategories([]);
-      } finally {
-        setSearching(false);
-      }
-    })();
+  const loadCategories = useCallback(async () => {
+    setSearching(true);
+    setLoadError("");
+    try {
+      setAllCategories(await fetchAllLeafCategories({ hasProducts: true }));
+    } catch (err) {
+      // Recorded, not swallowed. An empty list plus no message is
+      // indistinguishable from "no such category" — the user retypes the search
+      // and concludes the category does not exist, when really the fetch 401'd
+      // or they lack `categories:READ`.
+      setAllCategories([]);
+      setLoadError(err?.message || "Could not load categories.");
+    } finally {
+      setSearching(false);
+    }
   }, []);
 
-  const leafOptions = search
-    ? allCategories
-        .filter((c) => (c.displayPath || c.name || "").toLowerCase().includes(search.toLowerCase()))
-        .slice(0, 30)
+  // Kept as an async IIFE rather than calling loadCategories() straight from the
+  // effect body: the direct call makes loadCategories' opening setSearching(true)
+  // a synchronous setState inside an effect, which is the cascading-render
+  // pattern the lint rule flags.
+  useEffect(() => {
+    (async () => {
+      await loadCategories();
+    })();
+  }, [loadCategories]);
+
+  // Matches are capped for the dropdown's sake, but the full count is kept so
+  // the UI can say how many were hidden instead of silently showing 30.
+  const matches = search
+    ? allCategories.filter((c) =>
+        (c.displayPath || c.name || "").toLowerCase().includes(search.toLowerCase())
+      )
     : [];
+  const leafOptions = matches.slice(0, CATEGORY_RESULT_LIMIT);
 
   const loadProductsForCategory = useCallback(
     async (categoryId) => {
@@ -876,20 +907,47 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
             value={selectedCategory ? (selectedCategory.displayPath || selectedCategory.name) : search}
             onChange={(e) => { setSelectedCategory(null); setSearch(e.target.value); }}
           />
-          {search && !selectedCategory && (leafOptions.length > 0 || searching) && (
+          {/* Opens whenever there is a search term — the empty and failed cases
+              need somewhere to say so. Previously it only rendered when there
+              were results, so "load failed" and "no such category" both looked
+              like nothing happening at all. */}
+          {search && !selectedCategory && (
             <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg ring-1 ring-slate-900/5">
               {searching ? (
-                <div className="px-3 py-2 text-sm text-slate-400">Searching...</div>
-              ) : (
-                leafOptions.map((cat) => (
+                <div className="px-3 py-2 text-sm text-slate-400">Loading categories…</div>
+              ) : loadError ? (
+                <div className="px-3 py-2.5">
+                  <p className="flex items-start gap-1.5 text-xs font-medium text-rose-600">
+                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" /> {loadError}
+                  </p>
                   <button
-                    key={cat._id}
-                    type="button" onClick={() => setSelectedCategory(cat)}
-                    className="block w-full truncate px-3 py-2 text-left text-sm text-slate-800 transition hover:bg-indigo-50/60"
+                    type="button" onClick={loadCategories}
+                    className="mt-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
                   >
-                    {cat.displayPath || cat.name}
+                    Try again
                   </button>
-                ))
+                </div>
+              ) : leafOptions.length === 0 ? (
+                <div className="px-3 py-2 text-sm text-slate-400">
+                  No category matches “{search}”.
+                </div>
+              ) : (
+                <>
+                  {leafOptions.map((cat) => (
+                    <button
+                      key={cat._id}
+                      type="button" onClick={() => setSelectedCategory(cat)}
+                      className="block w-full truncate px-3 py-2 text-left text-sm text-slate-800 transition hover:bg-indigo-50/60"
+                    >
+                      {cat.displayPath || cat.name}
+                    </button>
+                  ))}
+                  {matches.length > CATEGORY_RESULT_LIMIT && (
+                    <p className="border-t border-slate-100 bg-slate-50/60 px-3 py-2 text-xs text-slate-500">
+                      Showing {CATEGORY_RESULT_LIMIT} of {matches.length} matches — keep typing to narrow it down.
+                    </p>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1112,7 +1170,13 @@ const validateVendor = (vendor, isEdit = false) => {
     if (!vendor.gst.state?.key) { f.gstState = "State is required"; push("Vendor state is required"); }
   }
 
-  if (vendor.panNumber && !RX.pan.test(vendor.panNumber.toUpperCase())) {
+  // Required: a vendor is a legal payee and PAN is what identifies one. When
+  // GST is verified this arrives auto-filled and locked, so the empty case is
+  // really the no-GST vendor, where it has to be typed.
+  if (!vendor.panNumber?.trim()) {
+    f.panNumber = "PAN number is required";
+    push(f.panNumber);
+  } else if (!RX.pan.test(vendor.panNumber.trim().toUpperCase())) {
     f.panNumber = "Enter a valid PAN (ABCDE1234F)";
     push(f.panNumber);
   }
@@ -1138,6 +1202,10 @@ const validateVendor = (vendor, isEdit = false) => {
 
   // address
   if (!vendor.address.fullAddress?.trim()) { f.fullAddress = "Complete address is required"; push(f.fullAddress); }
+  // The backend has always required this (validateCreateVendor: "address.area
+  // is required"); the form neither starred nor checked it, so leaving it blank
+  // failed on save with an error no field was pointing at.
+  if (!vendor.address.area?.trim()) { f.area = "Area / locality is required"; push(f.area); }
   if (!vendor.address.city?.trim()) { f.city = "City is required"; push(f.city); }
   if (!vendor.address.pinCode?.trim()) { f.pinCode = "PIN code is required"; push(f.pinCode); }
   else if (!RX.pin.test(vendor.address.pinCode.trim())) { f.pinCode = "Enter a valid 6-digit PIN code"; push(f.pinCode); }

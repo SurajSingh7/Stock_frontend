@@ -428,6 +428,12 @@ function SearchableSelect({
   error,
   buttonClassName,
   selectedLabel, // NEW: fallback label used when options[] doesn't yet contain `value`
+  // Why the options list is empty, when it is empty because the fetch failed.
+  // Without this an errored load renders as "No match", so the user retypes the
+  // search and concludes the thing does not exist — see the two category
+  // loaders below. `onRetry` puts the retry where the user actually is.
+  loadError,
+  onRetry,
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -516,11 +522,28 @@ function SearchableSelect({
               </div>
             )}
 
-            {!loading && visible.length === 0 && (
+            {!loading && loadError && (
+              <div className="px-3 py-2.5">
+                <p className="flex items-start gap-1.5 text-xs font-medium text-rose-600">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {loadError}
+                </p>
+                {onRetry && (
+                  <button
+                    type="button"
+                    onClick={onRetry}
+                    className="mt-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!loading && !loadError && visible.length === 0 && (
               <p className="px-3 py-2.5 text-sm text-slate-400">No match</p>
             )}
 
-            {!loading &&
+            {!loading && !loadError &&
               visible.map((o) => (
                 <div
                   key={o.value}
@@ -918,12 +941,17 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
   const [gstOptions, setGstOptions] = useState([]);
   const [gstLoading, setGstLoading] = useState(true);
+  const [gstError, setGstError] = useState("");
 
   // True when this product holds a rate that is no longer offered — i.e. an
   // admin retired that slab after the product was defined. Compared loosely
   // because the <select> hands back a string while the API sends a number.
+  // `!gstError` matters: when the fetch fails gstOptions is empty, and without
+  // that guard every saved rate would look "retired" — telling the user their
+  // slab was withdrawn when really the list never loaded.
   const isRetiredGstRate =
     !gstLoading &&
+    !gstError &&
     form.gstRate !== "" &&
     form.gstRate !== null &&
     form.gstRate !== undefined &&
@@ -944,13 +972,19 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   // each option's full breadcrumb path (see SearchableSelect's local filter)
   const [catOptions, setCatOptions] = useState([]);
   const [catLoading, setCatLoading] = useState(false);
+  const [catError, setCatError] = useState("");
 
   const loadCategories = useCallback(async () => {
     setCatLoading(true);
+    setCatError("");
     try {
       setCatOptions(await fetchAllLeafCategories());
-    } catch {
+    } catch (err) {
+      // Recorded, not swallowed — same reason as branches below. An empty list
+      // with no message reads as "no such category" when the real cause is a
+      // failed request or a missing `categories:READ` grant.
       setCatOptions([]);
+      setCatError(err?.message || "Failed to load categories");
     } finally {
       setCatLoading(false);
     }
@@ -958,10 +992,15 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
   const loadGstRates = useCallback(async () => {
     setGstLoading(true);
+    setGstError("");
     try {
       setGstOptions(await apiFetchGstRates());
-    } catch {
+    } catch (err) {
+      // GST is a REQUIRED field, so a swallowed failure here leaves an empty
+      // dropdown the user cannot satisfy and a save they cannot complete, with
+      // nothing on screen explaining why. Surfaced with a retry instead.
       setGstOptions([]);
+      setGstError(err?.message || "Failed to load GST rates");
     } finally {
       setGstLoading(false);
     }
@@ -1297,6 +1336,8 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                     raw: c,
                   }))}
                   loading={catLoading}
+                  loadError={catError}
+                  onRetry={loadCategories}
                   placeholder="Select a leaf category"
                   error={errors.category}
                 />
@@ -1361,7 +1402,9 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                   value={form.gstRate} onChange={(e) => updateField("gstRate", e.target.value)} disabled={gstLoading}
                   className={`${errors.gstRate ? inputErrCls : inputCls} disabled:bg-slate-50 disabled:text-slate-400`}
                 >
-                  <option value="">{gstLoading ? "Loading..." : "Select GST rate"}</option>
+                  <option value="">
+                    {gstLoading ? "Loading..." : gstError ? "Unavailable" : "Select GST rate"}
+                  </option>
                   {gstOptions.map((g) => (
                     <option key={g.value} value={g.value}>{g.label}</option>
                   ))}
@@ -1376,6 +1419,20 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                     </option>
                   )}
                 </select>
+                {gstError && (
+                  <p className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-rose-600">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span>
+                      {gstError}{" "}
+                      <button
+                        type="button" onClick={loadGstRates}
+                        className="underline underline-offset-2 hover:text-rose-700"
+                      >
+                        Try again
+                      </button>
+                    </span>
+                  </p>
+                )}
                 <FieldError message={errors.gstRate} />
                 {isRetiredGstRate && !errors.gstRate && (
                   <p className="mt-1.5 text-xs font-medium text-amber-600">
@@ -1663,6 +1720,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
   const [leafCategories, setLeafCategories] = useState([]);
   const [catSearchLoading, setCatSearchLoading] = useState(false);
+  const [catSearchError, setCatSearchError] = useState("");
   const [productOptions, setProductOptions] = useState([]);
   const [productOptionsLoading, setProductOptionsLoading] = useState(false);
 
@@ -1737,10 +1795,14 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
   // against each option's full breadcrumb path
   const loadLeafCategories = useCallback(async () => {
     setCatSearchLoading(true);
+    setCatSearchError("");
     try {
       setLeafCategories(await fetchAllLeafCategories());
-    } catch {
+    } catch (err) {
+      // Same reasoning as the form's loadCategories: a silently empty filter
+      // dropdown is indistinguishable from "there are no categories".
       setLeafCategories([]);
+      setCatSearchError(err?.message || "Failed to load categories");
     } finally {
       setCatSearchLoading(false);
     }
@@ -2070,6 +2132,8 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
                 label: c.displayPath || c.name,
               }))}
               loading={catSearchLoading}
+              loadError={catSearchError}
+              onRetry={loadLeafCategories}
               disabled={isCategoryLocked}
               selectedLabel={isCategoryLocked ? lockedCategory?.displayPath || lockedCategory?.name || "Selected category" : undefined}
               placeholder="All categories"
