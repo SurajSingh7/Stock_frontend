@@ -51,7 +51,8 @@ const EMPTY_FORM = {
   isFilterable: false,
   showList: false,
   order: 0,
-  applicableTrackingMethods: ['individual', 'quantity'],
+  // Nothing pre-selected — the user must tick at least one before submitting.
+  applicableTrackingMethods: [],
 };
 
 /* ---------- Design tokens — SAME as VendorsComp ---------- */
@@ -210,6 +211,11 @@ const Icon = {
   close: (
     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
       <path d="M5 5l10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  ),
+  back: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+      <path d="M16 10H4m0 0 5-5m-5 5 5 5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   empty: (
@@ -625,9 +631,15 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
 
 /* ======================== FORM FIELD COMPONENTS ======================== */
 
-const Field = ({ label, hint, error, children }) => (
+// `required` renders the same rose asterisk the product-definition form uses,
+// so a starred label means exactly one thing across every master screen: the
+// submit is blocked until it is filled in.
+const Field = ({ label, hint, error, required, children }) => (
   <div>
-    <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
+    <label className="mb-1.5 block text-sm font-medium text-slate-700">
+      {label}
+      {required && <span className="ml-0.5 text-rose-500">*</span>}
+    </label>
     {children}
     {hint && !error && <p className="mt-1.5 text-xs text-slate-400">{hint}</p>}
     {error && <p className="mt-1.5 text-xs font-medium text-rose-600">{error}</p>}
@@ -709,6 +721,42 @@ const ToggleCard = ({ label, hint, checked, onChange, disabled, color = 'indigo'
   );
 };
 
+/* ======================== FORM PAGE SHELL ======================== */
+
+// Add / Edit / View is an inline full-page view (no popup): the list is swapped
+// out for this screen and the back button returns to it.
+const FormPage = ({ title, description, onBack, children }) => (
+  <div className="min-h-screen bg-slate-50/60 p-6">
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          title="Back to field definitions"
+          className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+        >
+          {Icon.back}
+        </button>
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">{title}</h1>
+          {description && <p className="mt-0.5 text-sm text-slate-500">{description}</p>}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onBack}
+        className="hidden items-center gap-1.5 self-start rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 sm:inline-flex"
+      >
+        {Icon.back} Back
+      </button>
+    </div>
+
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      {children}
+    </div>
+  </div>
+);
+
 /* ======================== FORM COMPONENT ======================== */
 
 // Requested layout: Row 1 = Code + Label, Row 2 = Input type + Order,
@@ -722,7 +770,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
       <div className="flex-1 space-y-5">
         {/* Row 1 — Code + Label */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Code" hint={isEdit ? 'Code cannot be changed after creation.' : 'Lowercase, snake_case identifier.'} error={errors.code}>
+          <Field label="Code" required hint={isEdit ? 'Code cannot be changed after creation.' : 'Lowercase, snake_case identifier.'} error={errors.code}>
             <input
               type="text"
               value={formData.code}
@@ -733,7 +781,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             />
           </Field>
 
-          <Field label="Label" hint="Must be unique across all fields." error={errors.label}>
+          <Field label="Label" required hint="Must be unique across all fields." error={errors.label}>
             <input
               type="text"
               value={formData.label}
@@ -773,7 +821,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
         </div>
 
         {isDropdownType(formData.inputType) && (
-          <Field label="Options source key" hint="Must match a key in STOCK_FIELD_OPTIONS constants." error={errors.optionsSource}>
+          <Field label="Options source key" required hint="Must match a key in STOCK_FIELD_OPTIONS constants." error={errors.optionsSource}>
             <input
               type="text"
               value={formData.optionsSource}
@@ -819,7 +867,8 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
         {/* Row 4 — Applicable to (Tracking Method): check either or both */}
         <Field
           label="Applicable to (Tracking Method)"
-          hint="Controls which fields show up on the product's Applicable Fields picker for each tracking method."
+          required
+          hint="Pick at least one. Controls which fields show up on the product's Applicable Fields picker for each tracking method."
           error={errors.applicableTrackingMethods}
         >
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -853,7 +902,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
         )}
       </div>
 
-      <div className="-mx-5 mt-5 flex justify-end gap-2.5 border-t border-slate-100 px-5 pt-4">
+      <div className="mt-6 flex justify-end gap-2.5 border-t border-slate-100 pt-5">
         <button
           onClick={onCancel}
           className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
@@ -889,7 +938,7 @@ const FieldDefinition = () => {
   const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_ITEMS_PER_PAGE);
   const [totalItems, setTotalItems] = useState(0);
 
-  const [modalMode, setModalMode] = useState(null); // 'create' | 'edit' | 'view' | null
+  const [formMode, setFormMode] = useState(null); // 'create' | 'edit' | 'view' | null
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [activeItemId, setActiveItemId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -940,14 +989,14 @@ const FieldDefinition = () => {
 
   /* ----- Modal handlers ----- */
 
-  const openCreateModal = () => {
+  const openCreateForm = () => {
     setFormData(EMPTY_FORM);
     setFormErrors({});
     setActiveItemId(null);
-    setModalMode('create');
+    setFormMode('create');
   };
 
-  const openEditModal = (item) => {
+  const openEditForm = (item) => {
     setFormData({
       code: item.code,
       label: item.label,
@@ -961,10 +1010,10 @@ const FieldDefinition = () => {
     });
     setFormErrors({});
     setActiveItemId(item.id);
-    setModalMode('edit');
+    setFormMode('edit');
   };
 
-  const openViewModal = (item) => {
+  const openViewForm = (item) => {
     setFormData({
       code: item.code,
       label: item.label,
@@ -978,17 +1027,20 @@ const FieldDefinition = () => {
     });
     setFormErrors({});
     setActiveItemId(item.id);
-    setModalMode('view');
+    setFormMode('view');
   };
 
-  const closeModal = () => {
-    setModalMode(null);
+  const closeForm = () => {
+    setFormMode(null);
     setActiveItemId(null);
     setFormErrors({});
   };
 
   const handleFormChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+    // Clear the field's error as soon as it's touched (e.g. ticking a tracking
+    // method should drop the "select at least one" message right away).
+    setFormErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   };
 
   /* ----- Validation ----- */
@@ -1032,16 +1084,16 @@ const FieldDefinition = () => {
         applicableTrackingMethods: formData.applicableTrackingMethods,
       };
 
-      if (modalMode === 'create') {
+      if (formMode === 'create') {
         payload.code = formData.code.trim();
         await createFieldDefinition(payload);
         toast.success('Field definition created successfully.');
-      } else if (modalMode === 'edit') {
+      } else if (formMode === 'edit') {
         await updateFieldDefinition(activeItemId, payload);
         toast.success('Field definition updated successfully.');
       }
 
-      closeModal();
+      closeForm();
       await loadFieldDefinitions();
     } catch (err) {
       const message = err.message || 'Failed to save field definition.';
@@ -1082,19 +1134,36 @@ const FieldDefinition = () => {
 
   /* ----- Render ----- */
 
-  const modalTitle =
-    modalMode === 'create' ? 'Add field definition'
-    : modalMode === 'edit' ? 'Edit field definition'
+  const formTitle =
+    formMode === 'create' ? 'Add field definition'
+    : formMode === 'edit' ? 'Edit field definition'
     : 'Field definition details';
 
-  const modalDescription =
-    modalMode === 'create' ? 'Define a new dynamic attribute for products.'
-    : modalMode === 'edit' ? 'Update label, type, and rules for this field.'
+  const formDescription =
+    formMode === 'create' ? 'Define a new dynamic attribute for products.'
+    : formMode === 'edit' ? 'Update label, type, and rules for this field.'
     : null;
+
+  // Add / Edit / View replaces the list with a full-page form (back button returns).
+  if (formMode) {
+    return (
+      <FormPage title={formTitle} description={formDescription} onBack={closeForm}>
+        <Form
+          mode={formMode}
+          formData={formData}
+          onChange={handleFormChange}
+          onSubmit={handleSubmit}
+          onCancel={closeForm}
+          submitting={submitting}
+          errors={formErrors}
+        />
+      </FormPage>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
-      <Header totalItems={totalItems} onCreateClick={openCreateModal} />
+      <Header totalItems={totalItems} onCreateClick={openCreateForm} />
 
       <FilterBar
         search={search}
@@ -1110,9 +1179,9 @@ const FieldDefinition = () => {
         loading={loading}
         error={error}
         onRetry={loadFieldDefinitions}
-        onCreateClick={openCreateModal}
-        onView={openViewModal}
-        onEdit={openEditModal}
+        onCreateClick={openCreateForm}
+        onView={openViewForm}
+        onEdit={openEditForm}
         onDelete={handleDeleteClick}
         onRestore={handleRestore}
       />
@@ -1130,21 +1199,6 @@ const FieldDefinition = () => {
             }}
           />
         </div>
-      )}
-
-      {/* Requirement 2: Add/Edit/View now uses the shared premium Modal popup */}
-      {modalMode && (
-        <Modal title={modalTitle} description={modalDescription} onClose={closeModal}>
-          <Form
-            mode={modalMode}
-            formData={formData}
-            onChange={handleFormChange}
-            onSubmit={handleSubmit}
-            onCancel={closeModal}
-            submitting={submitting}
-            errors={formErrors}
-          />
-        </Modal>
       )}
 
       {/* Requirement 4: reusable confirm modal for delete */}

@@ -143,11 +143,17 @@ async function apiGetLeafCategoryById(id) {
   return json.data;
 }
 
+// GST slabs are their own master now (Master > GST Rates), not a constant
+// hardcoded in the backend. /active is authenticate-only, so filling this
+// dropdown never requires the GST Rates management permission.
 async function apiFetchGstRates() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/gst-rates`, { credentials: "include" });
+  const res = await fetch(`${API_BACKEND_URL}/stock/gst-rates/active`, { credentials: "include" });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load GST rates");
-  return json.data || [];
+  // Flattened to the {value,label} shape the <select> below already speaks.
+  // `value` is the NUMBER — it is what gets persisted, and what quotations and
+  // purchase orders have always stored.
+  return (json.data || []).map((r) => ({ value: r.rate, label: r.label || `${r.rate}%` }));
 }
 
 async function apiFetchFieldDefinitions() {
@@ -913,6 +919,16 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   const [gstOptions, setGstOptions] = useState([]);
   const [gstLoading, setGstLoading] = useState(true);
 
+  // True when this product holds a rate that is no longer offered — i.e. an
+  // admin retired that slab after the product was defined. Compared loosely
+  // because the <select> hands back a string while the API sends a number.
+  const isRetiredGstRate =
+    !gstLoading &&
+    form.gstRate !== "" &&
+    form.gstRate !== null &&
+    form.gstRate !== undefined &&
+    !gstOptions.some((g) => String(g.value) === String(form.gstRate));
+
   // Drives the per-branch threshold rows. The row set comes from THIS list,
   // never from whatever the product saved earlier — that is what makes a newly
   // created branch show up (and become mandatory) on the next edit.
@@ -1112,6 +1128,16 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     if (!form.trackingMethod) next.trackingMethod = "Please select a tracking method";
     if (!form.unit) next.unit = "Please select a unit";
     if (!form.selectedFields.length) next.selectedFields = "Select at least one field";
+    // Every product is billed, so it needs a slab. 0% is a real answer here
+    // (exempt goods) — "" is the only "not chosen" state, which is why this is
+    // an explicit empty-check rather than a falsy one.
+    if (form.gstRate === "" || form.gstRate === null || form.gstRate === undefined) {
+      next.gstRate = "Please select a GST rate";
+    } else if (isRetiredGstRate) {
+      // The saved slab has since been withdrawn — the select shows it disabled,
+      // and this is the rule that actually stops the save.
+      next.gstRate = "This GST rate has been retired. Please select a current one.";
+    }
     if (
       !form.warrantyYears ||
       isNaN(Number(form.warrantyYears)) ||
@@ -1179,7 +1205,9 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
           isRequired: sf.isRequired,
           order: index + 1,
         })),
-        gstRate: form.gstRate || null,
+        // A Number, not the raw <select> string — the field is numeric on every
+        // model that stores it (product, quotation line, purchase order line).
+        gstRate: form.gstRate === "" || form.gstRate === null ? null : Number(form.gstRate),
         warrantyYears: Number(form.warrantyYears),
         unit: form.unit || null,
         defaultStockAlertThreshold: Number(form.defaultStockAlertThreshold),
@@ -1325,16 +1353,35 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
               <div>
-                <label className={labelCls}>GST</label>
+                <label className={labelCls}>
+                  GST
+                  <RequiredMark />
+                </label>
                 <select
                   value={form.gstRate} onChange={(e) => updateField("gstRate", e.target.value)} disabled={gstLoading}
-                  className={`${inputCls} disabled:bg-slate-50 disabled:text-slate-400`}
+                  className={`${errors.gstRate ? inputErrCls : inputCls} disabled:bg-slate-50 disabled:text-slate-400`}
                 >
                   <option value="">{gstLoading ? "Loading..." : "Select GST rate"}</option>
                   {gstOptions.map((g) => (
                     <option key={g.value} value={g.value}>{g.label}</option>
                   ))}
+                  {/* A product saved on a slab that has since been retired keeps
+                      its rate, but /gst-rates/active no longer offers it. Without
+                      this the field would just render blank and the save would
+                      fail on a rule the form never showed. Disabled, so it can be
+                      read and left alone but not newly chosen. */}
+                  {isRetiredGstRate && (
+                    <option value={form.gstRate} disabled>
+                      {form.gstRate}% — retired, pick a current rate
+                    </option>
+                  )}
                 </select>
+                <FieldError message={errors.gstRate} />
+                {isRetiredGstRate && !errors.gstRate && (
+                  <p className="mt-1.5 text-xs font-medium text-amber-600">
+                    This product is on a withdrawn GST slab. Choose a current rate before saving.
+                  </p>
+                )}
               </div>
               <div>
                 <label className={labelCls}>

@@ -23,7 +23,7 @@ import {
 const ENTITY_TYPES = [
   'field-definitions', 'categories', 'product-definitions', 'vendors', 'terms-conditions',
   'inventory-items', 'quotations', 'purchase-orders', 'tracking-orders', 'invoices',
-  'branches', 'transfer-requests', 'notifications', 'Permission',
+  'branches', 'gst-rates', 'transfer-requests', 'notifications', 'Permission',
 ];
 
 /* Presets write into the same from/to the API already takes, so a quick range

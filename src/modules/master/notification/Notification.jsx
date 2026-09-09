@@ -539,9 +539,15 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
 
 /* ======================== FORM FIELD COMPONENTS ======================== */
 
-const Field = ({ label, hint, error, children }) => (
+// `required` renders the same rose asterisk the product-definition form uses,
+// so a starred label means exactly one thing across every master screen: the
+// submit is blocked until it is filled in.
+const Field = ({ label, hint, error, required, children }) => (
   <div>
-    <label className="mb-1.5 block text-sm font-medium text-slate-700">{label}</label>
+    <label className="mb-1.5 block text-sm font-medium text-slate-700">
+      {label}
+      {required && <span className="ml-0.5 text-rose-500">*</span>}
+    </label>
     {children}
     {hint && !error && <p className="mt-1.5 text-xs text-slate-400">{hint}</p>}
     {error && <p className="mt-1.5 text-xs font-medium text-rose-600">{error}</p>}
@@ -727,7 +733,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-5">
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-          <Field label="Name" error={errors.name}>
+          <Field label="Name" required error={errors.name}>
             <input
               type="text"
               value={formData.name}
@@ -787,7 +793,7 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
         </Field>
 
         {!formData.isDefault && (
-          <Field label="Assign Vendors" error={errors.applicableVendors}>
+          <Field label="Assign Vendors" required={!formData.isDefault} error={errors.applicableVendors}>
             <VendorMultiSelect
               selected={formData.applicableVendors}
               onChange={(v) => onChange('applicableVendors', v)}

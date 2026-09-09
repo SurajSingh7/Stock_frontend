@@ -165,6 +165,12 @@ export const navCategories = [
         moduleKey: "branches",
         action: ["VIEW_MENU"],
       },
+      {
+        name: "GST Rates",
+        path: "/master/gst-rate",
+        moduleKey: "gst-rates",
+        action: ["VIEW_MENU"],
+      },
     ],
   },
 ];
