@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import {
   Search, Plus, Pencil, Trash2, RotateCcw, ShieldCheck, ShieldAlert,
-  Building2, Phone, X, ChevronDown, MoreVertical,
+  Building2, Phone, X, ChevronDown, MoreVertical, Eye,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
@@ -414,9 +414,13 @@ const IconBtn = ({ title, onClick, tone = "slate", children }) => {
   );
 };
 
-/* RowMenu now renders through a portal, positioned via getBoundingClientRect
-   so it floats above everything and never gets clipped/overlapped by the
-   table's overflow-x-auto or neighboring rows (fixes the issue in the screenshot). */
+/* RowMenu renders through a portal, positioned via getBoundingClientRect so it
+   floats above everything and never gets clipped by the table's overflow-x-auto
+   or neighbouring rows. The panel is RIGHT-aligned to the button and clamped to
+   the viewport: the actions cell sits at the far right edge of the table, so any
+   offset that pushes the menu further right drops it off-screen entirely. */
+const MENU_WIDTH = 160;
+
 const RowMenu = ({ items }) => {
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0 });
@@ -443,7 +447,18 @@ const RowMenu = ({ items }) => {
   const toggleOpen = () => {
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
-      setCoords({ top: rect.bottom + 41, left: rect.right + 159 });
+      // The panel's right edge lines up with the button's, then is clamped 8px
+      // inside both viewport edges.
+      const left = Math.min(
+        Math.max(8, rect.right - MENU_WIDTH),
+        window.innerWidth - MENU_WIDTH - 8
+      );
+      // Flip above the button when there is no room below (last rows of a long
+      // page), so the menu is never pushed under the viewport fold.
+      const height = items.length * 36 + 12;
+      const below = rect.bottom + 6;
+      const top = below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 6) : below;
+      setCoords({ top, left });
     }
     setOpen((o) => !o);
   };
@@ -458,7 +473,7 @@ const RowMenu = ({ items }) => {
       {open && createPortal(
         <div
           ref={menuRef}
-          style={{ position: "fixed", top: coords.top, left: coords.left, width: 160 }}
+          style={{ position: "fixed", top: coords.top, left: coords.left, width: MENU_WIDTH }}
           className="z-[70] overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl ring-1 ring-slate-900/5"
         >
           {items.map((it) => (
@@ -757,9 +772,11 @@ const VendorsComp = () => {
                     <td className="px-4 py-3.5"><ActiveBadge isActive={vendor.isActive} /></td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center justify-end gap-1">
-                        {/* <IconBtn title="View vendor" tone="indigo" onClick={() => router.push(`/stock/vendors/${vendor._id}`)}>
+                        {/* View works on deleted vendors too — the record has to be
+                            inspectable before deciding whether to restore it. */}
+                        <IconBtn title="View vendor" tone="indigo" onClick={() => router.push(`/stock/vendors/${vendor._id}`)}>
                           <Eye className="h-4 w-4" />
-                        </IconBtn> */}
+                        </IconBtn>
                         {vendor.isActive && (
                           <IconBtn title="Edit vendor" tone="orange" onClick={() => router.push(`/stock/vendors/${vendor._id}/edit`)}>
                             <Pencil className="h-4 w-4" />

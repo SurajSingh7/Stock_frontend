@@ -2289,6 +2289,14 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
                     <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
+                        {/* View works on active AND soft-deleted rows — a deleted
+                            product still has to be inspectable before restoring it. */}
+                        <button
+                          type="button" onClick={() => setDetailRow(row)} title="View"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600"
+                        >
+                          <Eye size={15} />
+                        </button>
                         {row.isActive ? (
                           <>
                             <button
