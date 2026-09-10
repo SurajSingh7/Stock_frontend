@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Save, Plus, Trash2, ShieldCheck, Loader2, ChevronUp, ChevronDown,
-  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check,
+  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check, Pencil,
   DeleteIcon,
   Delete,
   LucideDelete,
@@ -1252,7 +1252,10 @@ const validateVendor = (vendor, isEdit = false) => {
 /* Main form                                                            */
 /* ------------------------------------------------------------------ */
 
-const VendorForm = ({ vendorId = null }) => {
+// readOnly turns this same screen into the vendor detail view (/stock/vendors/[id]).
+// It still loads through the isEdit path — the only difference is that every control
+// is inert and there is nothing to submit.
+const VendorForm = ({ vendorId = null, readOnly = false }) => {
   const router = useRouter();
   const isEdit = Boolean(vendorId);
 
@@ -1262,7 +1265,7 @@ const VendorForm = ({ vendorId = null }) => {
   // Create never offers a choice — the branch is the creator's. Reassignment
   // is an admin action, and only on an existing vendor. Declared after the
   // hook it depends on.
-  const canChangeBranch = isEdit && isAdmin;
+  const canChangeBranch = isEdit && isAdmin && !readOnly;
 
   const [vendor, setVendor] = useState(defaultVendor());
   // /branches/active is the UNSCOPED list on purpose — an admin reassigning a
@@ -1306,7 +1309,12 @@ const VendorForm = ({ vendorId = null }) => {
     if (!isEdit) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${vendorId}`, { credentials: "include" });
+      // Only the read-only view asks for soft-deleted vendors — editing one has
+      // to keep failing, so the edit path sends no flag.
+      const res = await fetch(
+        `${API_BACKEND_URL}/stock/vendors/${vendorId}${readOnly ? "?includeInactive=true" : ""}`,
+        { credentials: "include" }
+      );
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load vendor");
 
@@ -1341,7 +1349,7 @@ const VendorForm = ({ vendorId = null }) => {
     } finally {
       setLoading(false);
     }
-  }, [isEdit, vendorId]);
+  }, [isEdit, vendorId, readOnly]);
 
   useEffect(() => { loadVendor(); }, [loadVendor]);
 
@@ -1441,13 +1449,21 @@ const VendorForm = ({ vendorId = null }) => {
            </div>
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-900">
-              {isEdit ? "Edit Vendor Details" : "Create Vendor Details"}
+              {readOnly ? "View Vendor Details" : isEdit ? "Edit Vendor Details" : "Create Vendor Details"}
             </h1>
           </div>
           
           <div className="flex items-center gap-3">
-            
-            <SaveBtn className="px-4 py-2" />
+            {readOnly ? (
+              <button
+                type="button" onClick={() => router.push(`/stock/vendors/${vendorId}/edit`)}
+                className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-600 shadow-sm transition hover:border-orange-300 hover:bg-orange-50"
+              >
+                <Pencil className="h-4 w-4" /> Edit Vendor
+              </button>
+            ) : (
+              <SaveBtn className="px-4 py-2" />
+            )}
           </div>
         </div>
 
@@ -1469,7 +1485,14 @@ const VendorForm = ({ vendorId = null }) => {
           </div>
         )}
 
-        <div className="space-y-6">
+        <fieldset
+          disabled={readOnly}
+          className={`m-0 min-w-0 space-y-6 border-0 p-0 ${
+            readOnly
+              ? "[&_input]:cursor-default [&_input]:bg-slate-50 [&_select]:cursor-default [&_select]:bg-slate-50 [&_textarea]:cursor-default [&_textarea]:bg-slate-50"
+              : ""
+          }`}
+        >
           <BasicDetailsCard
             vendor={vendor} setVendor={setVendor} errors={fieldErrors}
             gstLocked={gstLocked} onVerified={handleGstVerified}
@@ -1490,16 +1513,16 @@ const VendorForm = ({ vendorId = null }) => {
           />
           <AssignProductsCard vendor={vendor} setVendor={setVendor} />
           <BankDetailsCard vendor={vendor} setVendor={setVendor} errors={fieldErrors} />
-        </div>
+        </fieldset>
 
         <div className="mt-6 flex justify-end gap-3">
           <button
             type="button" onClick={() => router.push("/stock/vendors")}
             className="rounded-lg border border-slate-200 bg-white px-5 py-2.5 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
           >
-            Cancel
+            {readOnly ? "Back" : "Cancel"}
           </button>
-          <SaveBtn className="px-5 py-2.5" />
+          {!readOnly && <SaveBtn className="px-5 py-2.5" />}
         </div>
       </div>
     </div>
