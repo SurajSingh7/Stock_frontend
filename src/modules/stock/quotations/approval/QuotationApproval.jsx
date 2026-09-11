@@ -6,6 +6,7 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Check, X, Pencil } from "lucide-react";
 import { money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { formatWarrantyShort } from "@/shared/warranty/warranty";
+import { QUOTATION_STATUS_META as STATUS_META } from "@/modules/stock/quotations/quotationStatus";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -20,12 +21,6 @@ const baseOf = (it) => round2((Number(it.quantity) || 0) * (Number(it.unitPrice)
 const gstOf = (it) => (it.gstAmount != null ? Number(it.gstAmount) : round2((baseOf(it) * (Number(it.gstRate) || 0)) / 100));
 const totalOf = (it) => (it.lineTotal != null ? Number(it.lineTotal) : round2(baseOf(it) + gstOf(it)));
 
-const STATUS_META = {
-  PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
-  APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
-  PARTIALLY_APPROVED: { label: "Partially approved", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500" },
-  REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
-};
 
 // L-1/L-2/L-3 get a colored badge, L-4+ stays neutral (per spec — only the
 // top three ranks are visually escalated).
@@ -439,10 +434,10 @@ const ReviewMode = ({ quotation, onDone }) => {
 };
 
 /* ================================================================= */
-/* Details mode — same category → product → vendor layout, read-only  */
+/* View mode — same category → product → vendor layout, read-only     */
 /* ================================================================= */
 
-const DetailsMode = ({ quotation, backTo }) => {
+const ViewMode = ({ quotation, backTo }) => {
   const router = useRouter();
   const items = quotation.items || [];
   const categories = groupCatProductVendor(items);
@@ -565,9 +560,8 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
 
   if (!quotation) return null;
 
-  const isDetails = mode === "details";
   const isViewMode = mode === "view";
-  const showReview = !isViewMode && !isDetails && quotation.status === "PENDING";
+  const showReview = !isViewMode && quotation.status === "PENDING";
   // "View" is reached from two different origins (the Quotation List's View
   // button, and the Quotation Approval list's View button for non-pending
   // rows) that both land on the SAME /stock/quotations/[id]/view URL, so the
@@ -579,9 +573,7 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
   // boundary requirement onto its page.js at build time.
   const cameFromApproval =
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("from") === "approval";
-  const backTo = isDetails
-    ? "/stock/quotations/list"
-    : isViewMode
+  const backTo = isViewMode
     ? (cameFromApproval ? "/stock/quotations/approval" : "/stock/quotations/list")
     : "/stock/quotations/approval";
 
@@ -591,7 +583,7 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
         {showReview ? (
           <ReviewMode quotation={quotation} onDone={load} />
         ) : (
-          <DetailsMode quotation={quotation} backTo={backTo} />
+          <ViewMode quotation={quotation} backTo={backTo} />
         )}
       </div>
     </div>

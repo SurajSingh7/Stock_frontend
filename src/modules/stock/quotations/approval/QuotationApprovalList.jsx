@@ -4,24 +4,19 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
-import { RotateCcw, Eye, FileText, ClipboardCheck } from "lucide-react";
+import { RotateCcw, Eye, ClipboardCheck } from "lucide-react";
 import { SearchableSelect, Modal } from "@/modules/stock/shared/StockSharedUI";
+import {
+  QUOTATION_STATUS as STATUS,
+  QUOTATION_STATUS_META as STATUS_META,
+} from "@/modules/stock/quotations/quotationStatus";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
 /* ============================================================= */
 
-const STATUS = { PENDING: "PENDING", APPROVED: "APPROVED", PARTIALLY_APPROVED: "PARTIALLY_APPROVED", REJECTED: "REJECTED" };
-
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
-
-const STATUS_META = {
-  PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
-  APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
-  PARTIALLY_APPROVED: { label: "Partial", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500" },
-  REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
-};
 
 const TAB_STYLES = {
   "": {
@@ -242,10 +237,9 @@ const QuotationApprovalList = () => {
 
   const tabs = [
     { key: "", label: "All", count: summary.ALL ?? 0 },
-    { key: STATUS.PENDING, label: "Pending", count: summary.PENDING ?? 0 },
-    { key: STATUS.APPROVED, label: "Approved", count: summary.APPROVED ?? 0 },
-    { key: STATUS.PARTIALLY_APPROVED, label: "Partial", count: summary.PARTIALLY_APPROVED ?? 0 },
-    { key: STATUS.REJECTED, label: "Rejected", count: summary.REJECTED ?? 0 },
+    ...[STATUS.PENDING, STATUS.APPROVED, STATUS.PARTIALLY_APPROVED, STATUS.REJECTED].map((key) => ({
+      key, label: STATUS_META[key].label, count: summary[key] ?? 0,
+    })),
   ];
 
   const dateLabel = status === STATUS.PENDING || status === "" ? "Submitted:" : "Decided:";
@@ -343,7 +337,7 @@ const QuotationApprovalList = () => {
       </div>
 
       <p className="mb-3 text-xs text-slate-400">
-        Date range uses the submission date for Pending, and the decision date for Approved / Partial / Rejected.
+        Date range uses the submission date for Pending, and the decision date for Fully Approved / Partially Approved / Rejected.
       </p>
 
       {/* table */}
@@ -389,12 +383,6 @@ const QuotationApprovalList = () => {
                     <td className="px-4 py-3 text-sm text-slate-500 tabular-nums">{fmtDateTime(q.updatedAt)}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {/* <button
-                          type="button" onClick={() => router.push(`/stock/quotations/${q._id}/details`)} title="Details"
-                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-                        >
-                          <FileText className="h-3.5 w-3.5" /> Details
-                        </button> */}
                         {isPending ? (
                           <button
                             type="button" onClick={() => router.push(`/stock/quotations/${q._id}/review`)} title="Review"
