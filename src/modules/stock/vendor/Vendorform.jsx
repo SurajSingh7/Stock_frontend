@@ -15,6 +15,8 @@ import { PAYMENT_TERMS } from "./vendorConstants";
 import { STATE_OPTIONS } from "@/shared/constants/indianStates";
 import { verifyGST } from "./gstVerification";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
+import WarrantyInput from "@/shared/warranty/WarrantyInput";
+import { formatWarranty, isValidWarrantyMonths, WARRANTY_RANGE_MESSAGE } from "@/shared/warranty/warranty";
 
 /* ------------------------------------------------------------------ */
 /* Tokens — SAME as PurchaseOrderPage                                  */
@@ -831,7 +833,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
             categoryName: selectedCategory.displayPath || selectedCategory.name,
             products: list.map((p) => ({
               productId: p._id,
-              overrides: { warrantyYears: p.warrantyYears ?? null },
+              overrides: { warrantyMonths: p.warrantyMonths ?? null },
             })),
           },
         ],
@@ -858,13 +860,13 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
           ...ap,
           products: [
             ...ap.products,
-            { productId, overrides: { warrantyYears: product?.warrantyYears ?? null } },
+            { productId, overrides: { warrantyMonths: product?.warrantyMonths ?? null } },
           ],
         };
       }),
     }));
 
-  const updateProductWarranty = (categoryId, productId, warrantyYears) =>
+  const updateProductWarranty = (categoryId, productId, warrantyMonths) =>
     setVendor((v) => ({
       ...v,
       assignedProducts: v.assignedProducts.map((ap) => {
@@ -872,7 +874,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
         return {
           ...ap,
           products: ap.products.map((p) =>
-            p.productId === productId ? { ...p, overrides: { warrantyYears } } : p
+            p.productId === productId ? { ...p, overrides: { warrantyMonths } } : p
           ),
         };
       }),
@@ -891,7 +893,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
           ...ap,
           products: allChecked
             ? []
-            : all.map((p) => ({ productId: p._id, overrides: { warrantyYears: p.warrantyYears ?? null } })),
+            : all.map((p) => ({ productId: p._id, overrides: { warrantyMonths: p.warrantyMonths ?? null } })),
         };
       }),
     }));
@@ -1012,27 +1014,21 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
                           <span className="min-w-0 truncate">
                             {product.name}
                             <span className="ml-1 text-xs text-slate-400">
-                              (Default Warranty: {product.warrantyYears ?? "—"} {product.warrantyYears === 1 ? "Year" : "Years"})
+                              (Default Warranty: {formatWarranty(product.warrantyMonths)})
                             </span>
                           </span>
                         </label>
                         {checked && (
                           <div className="mt-1.5 flex items-center gap-2 pl-6">
                             <label htmlFor={`vendor-warranty-${product._id}`} className="text-xs font-medium text-slate-600">
-                              Warranty (Years):
+                              Warranty:
                             </label>
-                            <input
+                            <WarrantyInput
                               id={`vendor-warranty-${product._id}`}
-                              type="number" min="1" step="1"
-                              value={sel.overrides?.warrantyYears ?? ""}
-                              onChange={(e) =>
-                                updateProductWarranty(
-                                  ap.categoryId,
-                                  product._id,
-                                  e.target.value === "" ? null : Number(e.target.value)
-                                )
-                              }
-                              className="w-16 shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                              size="sm"
+                              months={sel.overrides?.warrantyMonths ?? null}
+                              invalid={!isValidWarrantyMonths(sel.overrides?.warrantyMonths)}
+                              onChange={(m) => updateProductWarranty(ap.categoryId, product._id, m)}
                             />
                           </div>
                         )}
@@ -1232,13 +1228,11 @@ const validateVendor = (vendor, isEdit = false) => {
   const emptyCat = vendor.assignedProducts.find((ap) => (ap.products || []).length === 0);
   if (emptyCat) push(`Select at least one product in "${emptyCat.categoryName}" or remove the category`);
 
-  // every checked product needs a valid warranty override (min 1 year)
+  // every checked product needs a valid warranty override (whole months, 1–120)
   const badWarranty = vendor.assignedProducts.some((ap) =>
-    (ap.products || []).some(
-      (p) => !p.overrides || !Number.isInteger(p.overrides.warrantyYears) || p.overrides.warrantyYears < 1
-    )
+    (ap.products || []).some((p) => !isValidWarrantyMonths(p.overrides?.warrantyMonths))
   );
-  if (badWarranty) push("Every assigned product needs a warranty of at least 1 year");
+  if (badWarranty) push(`Every assigned product needs a warranty. ${WARRANTY_RANGE_MESSAGE}`);
 
   const hasFieldError =
     Object.keys(f).some((k) => k !== "contacts" && k !== "bankAccounts" && f[k]) ||
@@ -1333,7 +1327,7 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
             categoryName: ap.categoryId?.name || ap.categoryName || "",
             products: (ap.products || []).map((p) => ({
               productId: p.productId?._id || p.productId,
-              overrides: { warrantyYears: p.overrides?.warrantyYears ?? null },
+              overrides: { warrantyMonths: p.overrides?.warrantyMonths ?? null },
             })),
           })),
       };
@@ -1384,7 +1378,7 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
           categoryId: ap.categoryId,
           products: ap.products.map((p) => ({
             productId: p.productId,
-            overrides: { warrantyYears: p.overrides?.warrantyYears ?? null },
+            overrides: { warrantyMonths: p.overrides?.warrantyMonths ?? null },
           })),
         })),
       };

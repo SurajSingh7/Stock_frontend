@@ -12,6 +12,10 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
+import WarrantyInput from "@/shared/warranty/WarrantyInput";
+import {
+  formatWarranty, formatWarrantyShort, isValidWarrantyMonths, WARRANTY_RANGE_MESSAGE,
+} from "@/shared/warranty/warranty";
 
 /* ================================================================== */
 /* Constants                                                           */
@@ -96,7 +100,7 @@ const emptyForm = {
   category: null,
   name: "",
   gstRate: "",
-  warrantyYears: "",
+  warrantyMonths: null,
   unit: "",
   // Fallback for any branch created AFTER this product was last saved
   // (see the model comment), and the source value for "Apply default to all".
@@ -809,7 +813,7 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
     ["Tracking Method", TRACKING_METHOD_LABELS[row.trackingMethod] || row.trackingMethod],
     ["Fields Count", row.selectedFields?.length ?? 0],
     ["GST Rate", row.gstRate ? `${row.gstRate}%` : "\u2014"],
-    ["Warranty", row.warrantyYears ? `${row.warrantyYears} Year${row.warrantyYears === 1 ? "" : "s"}` : "\u2014"],
+    ["Warranty", formatWarranty(row.warrantyMonths)],
     ["Unit", unitLabel(row.unit) || "\u2014"],
     ["Default Alert Threshold", row.defaultStockAlertThreshold ?? "\u2014"],
     ["Status", row.status],
@@ -1177,13 +1181,10 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
       // and this is the rule that actually stops the save.
       next.gstRate = "This GST rate has been retired. Please select a current one.";
     }
-    if (
-      !form.warrantyYears ||
-      isNaN(Number(form.warrantyYears)) ||
-      !Number.isInteger(Number(form.warrantyYears)) ||
-      Number(form.warrantyYears) < 1
-    ) {
-      next.warrantyYears = "Warranty must be a whole number of at least 1 year";
+    if (form.warrantyMonths === null || form.warrantyMonths === "") {
+      next.warrantyMonths = "Warranty is required";
+    } else if (!isValidWarrantyMonths(form.warrantyMonths)) {
+      next.warrantyMonths = WARRANTY_RANGE_MESSAGE;
     }
     // 0 is a legitimate threshold (alert only once that branch is empty),
     // so "" is the only "not filled in" state here.
@@ -1247,7 +1248,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
         // A Number, not the raw <select> string — the field is numeric on every
         // model that stores it (product, quotation line, purchase order line).
         gstRate: form.gstRate === "" || form.gstRate === null ? null : Number(form.gstRate),
-        warrantyYears: Number(form.warrantyYears),
+        warrantyMonths: form.warrantyMonths,
         unit: form.unit || null,
         defaultStockAlertThreshold: Number(form.defaultStockAlertThreshold),
         // Built from the live branch list rather than the form map's keys, so a
@@ -1441,17 +1442,17 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
                 )}
               </div>
               <div>
-                <label className={labelCls}>
-                  Warranty (Years)
+                <label className={labelCls} htmlFor="product-warranty">
+                  Warranty
                   <RequiredMark />
                 </label>
-                <input
-                  type="number" min="1" step="1" value={form.warrantyYears}
-                  onChange={(e) => updateField("warrantyYears", e.target.value)}
-                  placeholder="e.g. 1"
-                  className={errors.warrantyYears ? inputErrCls : inputCls}
+                <WarrantyInput
+                  id="product-warranty"
+                  months={form.warrantyMonths}
+                  onChange={(m) => updateField("warrantyMonths", m)}
+                  invalid={Boolean(errors.warrantyMonths)}
                 />
-                <FieldError message={errors.warrantyYears} />
+                <FieldError message={errors.warrantyMonths} />
               </div>
               <div>
                 <label className={labelCls}>
@@ -1971,7 +1972,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
           : { _id: full.categoryId, name: "Existing category", displayPath: "Existing category" },
         name: full.name || "",
         gstRate: full.gstRate ?? "",
-        warrantyYears: full.warrantyYears ?? "",
+        warrantyMonths: full.warrantyMonths ?? null,
         unit: full.unit ?? "",
         defaultStockAlertThreshold: full.defaultStockAlertThreshold ?? "",
         // Keyed by branch id (the API populates branchId to {_id,name,code}).
@@ -2273,7 +2274,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
                     <td className="px-4 py-3.5 text-sm text-slate-700 tabular-nums">
                       {row.gstRate ? `${row.gstRate}%` : "\u2014"}
                       {row.unit ? ` \u00b7 ${unitLabel(row.unit)}` : ""}
-                      {row.warrantyYears ? ` \u00b7 ${row.warrantyYears}yr` : ""}
+                      {row.warrantyMonths ? ` \u00b7 ${formatWarrantyShort(row.warrantyMonths)}` : ""}
                     </td>
 
                     <td className="px-4 py-3.5">

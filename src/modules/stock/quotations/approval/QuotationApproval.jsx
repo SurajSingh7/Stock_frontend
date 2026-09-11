@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Check, X, Pencil } from "lucide-react";
 import { money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { formatWarrantyShort } from "@/shared/warranty/warranty";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -46,7 +47,7 @@ const RankBadge = ({ rank }) => {
 /*
   Ranking is computed per LEAF CATEGORY, across every vendor-product
   combination inside that category — not per product — within a SINGLE
-  quotation only (never across quotations). Priority: higher warrantyYears
+  quotation only (never across quotations). Priority: higher warrantyMonths
   first, then lower unitPrice. Array.sort is spec-stable, so equal
   warranty+price ties fall back to insertion (bid) order for free. Returns a
   Map of item._id -> rank (1-based), purely derived, never persisted.
@@ -63,7 +64,7 @@ const computeCategoryRanks = (items = []) => {
   byCategory.forEach((list) => {
     const sorted = [...list].sort(
       (a, b) =>
-        (Number(b.warrantyYears) || 0) - (Number(a.warrantyYears) || 0) ||
+        (Number(b.warrantyMonths) || 0) - (Number(a.warrantyMonths) || 0) ||
         (Number(a.unitPrice) || 0) - (Number(b.unitPrice) || 0)
     );
     sorted.forEach((it, idx) => rankMap.set(idOf(it._id), idx + 1));
@@ -110,7 +111,8 @@ const groupCatProductVendor = (items = []) => {
       unit: it.unit || it.productDefinitionId?.unit || "",
       quantity: it.quantity,
       unitPrice: it.unitPrice,
-      warrantyYears: it.warrantyYears,
+      warrantyMonths: it.warrantyMonths,
+      defaultWarrantyMonths: it.defaultWarrantyMonths,
       gstRate: it.gstRate,
       gstAmount: gstOf(it),
       lineTotal: totalOf(it),
@@ -149,7 +151,16 @@ const VendorLine = ({ v, selectable = false, checked = false, disabled = false, 
     <span className="text-xs text-slate-600">Qty <span className="font-semibold text-slate-900 tabular-nums">{v.quantity} {unitLabel(v.unit)}</span></span>
     <span className="text-xs text-slate-600">Unit price <span className="font-semibold text-slate-900 tabular-nums">{inr(v.unitPrice)}</span></span>
     <span className="text-xs text-slate-600">
-      Warranty <span className="font-semibold text-slate-900 tabular-nums">{v.warrantyYears ? `${v.warrantyYears} yr${v.warrantyYears === 1 ? "" : "s"}` : "—"}</span>
+      Warranty <span className="font-semibold text-slate-900 tabular-nums">{formatWarrantyShort(v.warrantyMonths)}</span>
+      {/* Changed for this quotation only — flagged because ranking puts warranty first. */}
+      {v.defaultWarrantyMonths != null && v.warrantyMonths !== v.defaultWarrantyMonths && (
+        <span
+          className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200"
+          title="Warranty was changed for this quotation"
+        >
+          vendor: {formatWarrantyShort(v.defaultWarrantyMonths)}
+        </span>
+      )}
     </span>
     <span className="text-xs text-slate-600">GST <span className="font-semibold text-slate-900 tabular-nums">{v.gstRate}%</span></span>
     <span className="text-xs text-slate-600">GST ₹ <span className="font-semibold text-slate-900 tabular-nums">{inr(v.gstAmount)}</span></span>
