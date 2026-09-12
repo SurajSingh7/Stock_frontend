@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Plus, Trash2, Star } from "lucide-react";
 import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import WarrantyInput from "@/shared/warranty/WarrantyInput";
+import { formatWarrantyShort, isValidWarrantyMonths, WARRANTY_RANGE_MESSAGE } from "@/shared/warranty/warranty";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -25,6 +27,9 @@ const labelCls = "mb-1.5 block text-xs font-medium uppercase tracking-wider text
 const th = "px-3 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-slate-700";
 const thRight = `${th} text-right`;
 
+const okQty = (q) => Number.isInteger(Number(q)) && Number(q) >= 1 && q !== "";
+const okPrice = (p) => p !== "" && Number.isFinite(Number(p)) && Number(p) > 0;
+
 /* meaningful-label toggle switch */
 const Toggle = ({ checked, onChange, label }) => (
   <button type="button" onClick={() => onChange(!checked)} className="flex items-center gap-2">
@@ -36,129 +41,182 @@ const Toggle = ({ checked, onChange, label }) => (
 );
 
 /*
-  Pure display-only pivot: block.vendors (Vendor -> Products, the actual state
-  shape used by toggleRow/mutateRow/collectItems below — unchanged) grouped
-  instead as Product -> Vendors, to match the Review page's Category -> Product
-  -> Vendor hierarchy. Every row keeps its original vendorId/productDefinitionId
-  so the same mutator handlers still apply — only the rendering grouping changes.
+  The API already sends the form's shape — Category -> Products -> Vendors,
+  with previous qty/price, rating and the vendor's default warranty resolved
+  server-side (GET /quotations/vendors-for-category/:catId). This only adds
+  the editable UI state: product quantity, and per vendor checked /
+  unitPrice / warrantyMonths.
 */
-const groupByProduct = (vendors = []) => {
-  const products = new Map();
-  vendors.forEach((v) => {
-    v.products.forEach((p) => {
-      if (!products.has(p.productDefinitionId)) {
-        products.set(p.productDefinitionId, { productDefinitionId: p.productDefinitionId, name: p.name, rows: [] });
-      }
-      products.get(p.productDefinitionId).rows.push({ vendorId: v.vendorId, vendorName: v.vendorName, ...p });
-    });
-  });
-  return [...products.values()];
-};
+const toBlock = (data, { autoSelect, qty }) => ({
+  categoryId: String(data.categoryId),
+  categoryName: data.categoryName || "",
+  products: (data.products || []).map((p) => ({
+    productDefinitionId: String(p.productDefinitionId),
+    name: p.name,
+    unit: p.unit || "",
+    gstRate: p.gstRate,
+    quantity: qty,
+    vendors: (p.vendors || []).map((v) => ({
+      vendorId: String(v.vendorId),
+      vendorName: v.vendorName,
+      defaultWarrantyMonths: v.defaultWarrantyMonths ?? null,
+      warrantyMonths: v.defaultWarrantyMonths ?? null,
+      previousQuantity: v.previousQuantity ?? null,
+      previousPrice: v.previousPrice ?? null,
+      averageRating: v.averageRating ?? null,
+      checked: autoSelect,
+      unitPrice: "",
+    })),
+  })),
+});
 
-/* one card per product — lists every vendor offering it */
-const ProductSection = ({ product, quantityEditable, onToggle, onPriceChange, onQtyChange }) => (
-  <div className="mb-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-    <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
-      <span className="text-sm font-bold text-slate-900">{product.name}</span>
-      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 tabular-nums">
-        {product.rows.length} vendor{product.rows.length > 1 ? "s" : ""}
-      </span>
-    </div>
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-full border-collapse">
-        <thead className="bg-white">
-          <tr className="border-b border-slate-100">
-            <th className="w-10 px-3 py-2.5" />
-            <th className={th}>Vendor</th>
-            <th className={th}>Qty</th>
-            <th className={th}>Warranty</th>
-            <th className={th}>Price</th>
-            <th className={th}>Prev Qty</th>
-            <th className={th}>Prev ₹</th>
-            <th className={th}>Rating</th>
-            <th className={th}>GST</th>
-            <th className={thRight}>Total</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {product.rows.map((row) => (
-            <tr key={row.vendorId} className={`transition ${row.checked ? "bg-indigo-50/60" : "hover:bg-slate-50/60"}`}>
-              <td className="px-3 py-2.5 text-center">
-                <input
-                  type="checkbox" checked={row.checked}
-                  onChange={() => onToggle(row.vendorId, row.productDefinitionId)}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                />
-              </td>
-              <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{row.vendorName}</td>
-              <td className="px-3 py-2.5">
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number" value={row.quantity} readOnly={!quantityEditable}
-                    onChange={(e) => onQtyChange(row.vendorId, row.productDefinitionId, e.target.value)}
-                    className={`h-8 w-16 rounded-lg border px-2 text-sm tabular-nums shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-100 ${
-                      quantityEditable ? "border-slate-200 bg-white text-slate-900" : "border-transparent bg-slate-50 text-slate-500"
-                    }`}
-                  />
-                  <span className="text-xs text-slate-400">{unitLabel(row.unit)}</span>
-                </div>
-              </td>
-              <td className="px-3 py-2.5 text-sm text-slate-700 tabular-nums">
-                {row.warrantyYears ? `${row.warrantyYears} yr${row.warrantyYears === 1 ? "" : "s"}` : "—"}
-              </td>
-              <td className="px-3 py-2.5">
-                <input
-                  type="number" value={row.unitPrice} placeholder="—"
-                  onChange={(e) => onPriceChange(row.vendorId, row.productDefinitionId, e.target.value)}
-                  className="h-8 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-900 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                />
-              </td>
-              <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">
-                {dash(row.previousQuantity)}{row.previousQuantity != null ? ` ${unitLabel(row.unit)}` : ""}
-              </td>
-              <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">{dash(row.previousPrice)}</td>
-              <td className="px-3 py-2.5 text-sm text-slate-500">
-                {row.averageRating == null ? (
-                  "—"
-                ) : (
-                  <span className="inline-flex items-center gap-1 tabular-nums">
-                    <Star className="h-3.5 w-3.5 text-amber-500" /> {row.averageRating}
-                  </span>
-                )}
-              </td>
-              <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">{row.gstRate}%</td>
-              <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-900 tabular-nums">
-                {row.checked ? previewTotal(row.quantity, row.unitPrice, row.gstRate).toLocaleString("en-IN") : 0}
-              </td>
+const mapProducts = (blocks, fn) =>
+  blocks.map((b) => ({ ...b, products: b.products.map((p) => fn(p, b)) }));
+const mapVendors = (blocks, fn) =>
+  mapProducts(blocks, (p, b) => ({ ...p, vendors: p.vendors.map((v) => fn(v, p, b)) }));
+
+/*
+  One card per product, every vendor offering it below. Quantity is per
+  PRODUCT, so each row shows the same read-only value; it is edited in the
+  card header, and only while per-product quantity editing is switched on.
+*/
+const ProductSection = ({
+  product, quantityEditable, warrantyEditable, showErrors,
+  onQtyChange, onToggle, onPriceChange, onWarrantyChange,
+}) => {
+  const qtyBad = !okQty(product.quantity);
+  return (
+    <div className="mb-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+        <span className="text-sm font-bold text-slate-900">{product.name}</span>
+        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 tabular-nums">
+          {product.vendors.length} vendor{product.vendors.length > 1 ? "s" : ""}
+        </span>
+        {quantityEditable && (
+          <label className="ml-auto flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            Qty
+            <input
+              type="number" min="1" step="1" value={product.quantity}
+              onChange={(e) => onQtyChange(e.target.value)}
+              className={`h-8 w-20 rounded-lg border bg-white px-2 text-sm font-normal tabular-nums text-slate-900 shadow-sm transition focus:outline-none focus:ring-2 ${
+                qtyBad ? "border-rose-300 focus:ring-rose-100" : "border-slate-200 focus:ring-indigo-100"
+              }`}
+            />
+            <span className="font-normal normal-case text-slate-400">{unitLabel(product.unit)}</span>
+          </label>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-full border-collapse">
+          <thead className="bg-white">
+            <tr className="border-b border-slate-100">
+              <th className="w-10 px-3 py-2.5" />
+              <th className={th}>Vendor</th>
+              <th className={th}>Warranty</th>
+              <th className={th}>Qty</th>
+              <th className={th}>Price</th>
+              <th className={th}>Prev Qty</th>
+              <th className={th}>Prev ₹</th>
+              <th className={th}>Rating</th>
+              <th className={th}>GST</th>
+              <th className={thRight}>Total</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {product.vendors.map((v) => {
+              const priceBad = showErrors && v.checked && !okPrice(v.unitPrice);
+              const warrantyBad = v.checked && warrantyEditable && !isValidWarrantyMonths(v.warrantyMonths);
+              const overridden = v.warrantyMonths !== v.defaultWarrantyMonths;
+              return (
+                <tr key={v.vendorId} className={`transition ${v.checked ? "bg-indigo-50/60" : "hover:bg-slate-50/60"}`}>
+                  <td className="px-3 py-2.5 text-center">
+                    <input
+                      type="checkbox" checked={v.checked} onChange={() => onToggle(v.vendorId)}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 text-sm font-medium text-slate-900">{v.vendorName}</td>
+                  <td className="px-3 py-2.5 text-sm text-slate-700 tabular-nums">
+                    {warrantyEditable ? (
+                      <div className="flex flex-col gap-1">
+                        <WarrantyInput
+                          size="sm" months={v.warrantyMonths} invalid={warrantyBad}
+                          onChange={(m) => onWarrantyChange(v.vendorId, m)}
+                        />
+                        {overridden && (
+                          <span className="text-[11px] text-amber-600">
+                            Vendor: {formatWarrantyShort(v.defaultWarrantyMonths)}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      formatWarrantyShort(v.warrantyMonths)
+                    )}
+                  </td>
+                  <td className={`whitespace-nowrap px-3 py-2.5 text-sm tabular-nums ${qtyBad ? "text-rose-600" : "text-slate-700"}`}>
+                    {dash(product.quantity)} <span className="text-xs text-slate-400">{unitLabel(product.unit)}</span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <input
+                      type="number" min="0" value={v.unitPrice} placeholder="—"
+                      onChange={(e) => onPriceChange(v.vendorId, e.target.value)}
+                      className={`h-8 w-20 rounded-lg border bg-white px-2 text-sm tabular-nums text-slate-900 shadow-sm transition focus:outline-none focus:ring-2 ${
+                        priceBad
+                          ? "border-rose-300 focus:border-rose-400 focus:ring-rose-100"
+                          : "border-slate-200 focus:border-indigo-400 focus:ring-indigo-100"
+                      }`}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">
+                    {dash(v.previousQuantity)}{v.previousQuantity != null ? ` ${unitLabel(product.unit)}` : ""}
+                  </td>
+                  <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">{dash(v.previousPrice)}</td>
+                  <td className="px-3 py-2.5 text-sm text-slate-500">
+                    {v.averageRating == null ? (
+                      "—"
+                    ) : (
+                      <span className="inline-flex items-center gap-1 tabular-nums">
+                        <Star className="h-3.5 w-3.5 text-amber-500" /> {v.averageRating}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 text-sm text-slate-500 tabular-nums">{product.gstRate}%</td>
+                  <td className="px-3 py-2.5 text-right text-sm font-bold text-slate-900 tabular-nums">
+                    {v.checked ? previewTotal(product.quantity, v.unitPrice, product.gstRate).toLocaleString("en-IN") : 0}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /* ============================================================= */
 /* Main                                                           */
 /* ============================================================= */
 
-const QuotationForm = ({ quotationId = null }) => {
+// Create only — a quotation is never edited. A mistake is rejected at review
+// and entered again as a new quotation.
+const QuotationForm = () => {
   const router = useRouter();
-  const isEdit = Boolean(quotationId);
 
   const [blocks, setBlocks] = useState([]);
   const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [showErrors, setShowErrors] = useState(false); // red fields only after a submit attempt
 
   const [categories, setCategories] = useState([]);   // leaf + hasProducts
   const [pickCatId, setPickCatId] = useState("");
 
   // global product-selection options
-  const [quantityEditable, setQuantityEditable] = useState(false); // default No
-  const [autoSelectAll, setAutoSelectAll] = useState(true);        // default Yes
-  const [globalQty, setGlobalQty] = useState(1);                   // applies to all rows
+  const [quantityEditable, setQuantityEditable] = useState(false); // default Off: every product uses globalQty
+  const [warrantyEditable, setWarrantyEditable] = useState(false); // default Off: every vendor's own warranty
+  const [autoSelectAll, setAutoSelectAll] = useState(true);        // default On
+  const [globalQty, setGlobalQty] = useState(1);
 
   /* ---- leaf categories that have products (server-side) ---- */
   useEffect(() => {
@@ -173,39 +231,6 @@ const QuotationForm = ({ quotationId = null }) => {
 
   const categoryOptions = categories.map((c) => ({ value: c._id, label: c.displayPath || c.name }));
 
-  /* ---- edit load ---- */
-  const loadForEdit = useCallback(async () => {
-    if (!isEdit) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations/${quotationId}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load quotation");
-      const data = json.data;
-      const byCat = new Map();
-      (data.items || []).forEach((it) => {
-        const catId = String(it.categoryId?._id || it.categoryId);
-        if (!byCat.has(catId)) byCat.set(catId, { categoryId: catId, categoryName: it.categoryName || it.categoryId?.name || "", vendors: new Map() });
-        const cat = byCat.get(catId);
-        const venId = String(it.vendorId?._id || it.vendorId);
-        if (!cat.vendors.has(venId)) cat.vendors.set(venId, { vendorId: venId, vendorName: it.vendorName || it.vendorId?.name || "", products: [] });
-        cat.vendors.get(venId).products.push({
-          productDefinitionId: String(it.productDefinitionId?._id || it.productDefinitionId),
-          name: it.productName || it.productDefinitionId?.name || "",
-          trackingMethod: it.trackingMethod || it.productDefinitionId?.trackingMethod || "",
-          unit: it.unit || it.productDefinitionId?.unit || "",
-          quantity: it.quantity, unitPrice: it.unitPrice, warrantyYears: it.warrantyYears, gstRate: it.gstRate,
-          previousQuantity: it.previousQuantity, previousPrice: it.previousPrice,
-          averageRating: it.averageRating, checked: true,
-        });
-      });
-      setBlocks([...byCat.values()].map((c) => ({ categoryId: c.categoryId, categoryName: c.categoryName, vendors: [...c.vendors.values()] })));
-      setNotes(data.notes || "");
-    } catch (err) { setError(err.message); } finally { setLoading(false); }
-  }, [isEdit, quotationId]);
-
-  useEffect(() => { loadForEdit(); }, [loadForEdit]);
-
   /* ---- add category ---- */
   const addCategory = async () => {
     const cat = categories.find((c) => c._id === pickCatId);
@@ -216,96 +241,101 @@ const QuotationForm = ({ quotationId = null }) => {
       const res = await fetch(`${API_BACKEND_URL}/stock/quotations/vendors-for-category/${cat._id}`, { credentials: "include" });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load vendors");
-      const vendors = (json.data || []).map((v) => ({
-        vendorId: String(v.vendorId), vendorName: v.vendorName,
-        products: (v.products || []).map((p) => ({
-          productDefinitionId: String(p.productDefinitionId), name: p.name, gstRate: p.gstRate,
-          trackingMethod: p.trackingMethod || "",
-          unit: p.unit || "",
-          warrantyYears: p.warrantyYears ?? null,
-          quantity: Number(globalQty) || 1, unitPrice: "", previousQuantity: null, previousPrice: null, averageRating: null,
-          checked: autoSelectAll, // auto-select toggle drives the initial state
-        })),
-      }));
-      setBlocks((prev) => [...prev, { categoryId: cat._id, categoryName: cat.displayPath || cat.name, vendors }]);
+      // Newest category on top — the one just added is the one being priced.
+      setBlocks((prev) => [toBlock(json.data, { autoSelect: autoSelectAll, qty: globalQty }), ...prev]);
       setPickCatId("");
     } catch (err) { setError(err.message); }
   };
 
   const removeCategory = (categoryId) => setBlocks((prev) => prev.filter((b) => b.categoryId !== categoryId));
 
-  const mutateRow = (vendorId, productId, patch) =>
-    setBlocks((prev) => prev.map((block) => ({
-      ...block,
-      vendors: block.vendors.map((v) => v.vendorId !== vendorId ? v : {
-        ...v, products: v.products.map((p) => p.productDefinitionId === productId ? { ...p, ...patch } : p),
-      }),
-    })));
+  const patchVendor = (categoryId, productId, vendorId, patch) =>
+    setBlocks((prev) => mapVendors(prev, (v, p, b) =>
+      b.categoryId === categoryId && p.productDefinitionId === productId && v.vendorId === vendorId ? { ...v, ...patch } : v
+    ));
 
-  const toggleRow = (vendorId, productId) =>
-    setBlocks((prev) => prev.map((block) => ({
-      ...block,
-      vendors: block.vendors.map((v) => v.vendorId !== vendorId ? v : {
-        ...v, products: v.products.map((p) => p.productDefinitionId === productId ? { ...p, checked: !p.checked } : p),
-      }),
-    })));
+  const setProductQty = (categoryId, productId, quantity) =>
+    setBlocks((prev) => mapProducts(prev, (p, b) =>
+      b.categoryId === categoryId && p.productDefinitionId === productId ? { ...p, quantity } : p
+    ));
 
-  // "Select all products automatically" toggle → check/uncheck every row
-  const applyAutoSelect = (val) => {
-    setAutoSelectAll(val);
-    setBlocks((prev) => prev.map((block) => ({
-      ...block, vendors: block.vendors.map((v) => ({ ...v, products: v.products.map((p) => ({ ...p, checked: val })) })),
-    })));
-  };
-
-  // Global quantity → fills every product row's quantity
+  // Global quantity → every product
   const applyGlobalQty = (val) => {
     setGlobalQty(val);
-    const q = val === "" ? "" : Number(val);
-    setBlocks((prev) => prev.map((block) => ({
-      ...block, vendors: block.vendors.map((v) => ({ ...v, products: v.products.map((p) => ({ ...p, quantity: q })) })),
-    })));
+    setBlocks((prev) => mapProducts(prev, (p) => ({ ...p, quantity: val })));
+  };
+
+  // Off means "every product uses the global quantity" — turning it off
+  // puts them all back on it.
+  const applyQuantityEditable = (on) => {
+    setQuantityEditable(on);
+    if (!on) setBlocks((prev) => mapProducts(prev, (p) => ({ ...p, quantity: globalQty })));
+  };
+
+  // Off means "every vendor's own warranty" — turning it off reverts any
+  // override for this quotation back to the vendor default.
+  const applyWarrantyEditable = (on) => {
+    setWarrantyEditable(on);
+    if (!on) setBlocks((prev) => mapVendors(prev, (v) => ({ ...v, warrantyMonths: v.defaultWarrantyMonths })));
+  };
+
+  const applyAutoSelect = (on) => {
+    setAutoSelectAll(on);
+    setBlocks((prev) => mapVendors(prev, (v) => ({ ...v, checked: on })));
   };
 
   /* ---- submit ---- */
-  const collectItems = () => {
-    const items = [];
-    blocks.forEach((block) => block.vendors.forEach((v) => v.products.forEach((p) => {
-      if (p.checked) items.push({
-        productDefinitionId: p.productDefinitionId, vendorId: v.vendorId,
-        categoryId: block.categoryId, categoryName: block.categoryName,
-        quantity: Number(p.quantity) || 0, unitPrice: Number(p.unitPrice) || 0,
-        warrantyYears: p.warrantyYears ?? null,
-      });
-    })));
-    return items;
+  // Only what a person decided goes to the API; category, GST, default
+  // warranty, history and totals are all resolved server-side.
+  const buildPayload = () => ({
+    notes,
+    products: blocks.flatMap((b) => b.products)
+      .map((p) => ({
+        productDefinitionId: p.productDefinitionId,
+        quantity: Number(p.quantity),
+        offers: p.vendors.filter((v) => v.checked).map((v) => ({
+          vendorId: v.vendorId,
+          unitPrice: Number(v.unitPrice),
+          // sent only as an override; absent = the vendor's own warranty
+          ...(warrantyEditable && v.warrantyMonths !== v.defaultWarrantyMonths ? { warrantyMonths: v.warrantyMonths } : {}),
+        })),
+      }))
+      .filter((p) => p.offers.length > 0),
+  });
+
+  const firstProblem = () => {
+    const picked = blocks.flatMap((b) => b.products).filter((p) => p.vendors.some((v) => v.checked));
+    if (picked.length === 0) return "Select at least one vendor before submitting";
+    const badQty = picked.find((p) => !okQty(p.quantity));
+    if (badQty) return `Enter a whole-number quantity for ${badQty.name}`;
+    const badPrice = picked.find((p) => p.vendors.some((v) => v.checked && !okPrice(v.unitPrice)));
+    if (badPrice) return `Enter a price for every selected vendor of ${badPrice.name}`;
+    if (warrantyEditable) {
+      const badW = picked.find((p) => p.vendors.some((v) => v.checked && !isValidWarrantyMonths(v.warrantyMonths)));
+      if (badW) return `${badW.name}: ${WARRANTY_RANGE_MESSAGE}`;
+    }
+    return null;
   };
 
   const handleSubmit = async () => {
-    const items = collectItems();
-    if (items.length === 0) { setError("Select at least one product before submitting"); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
-    if (items.find((it) => it.unitPrice <= 0)) { setError("Enter a price for every selected product"); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    const problem = firstProblem();
+    if (problem) {
+      setShowErrors(true);
+      setError(problem);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
     setSaving(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations${isEdit ? `/${quotationId}` : ""}`, {
-        method: isEdit ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ items, notes }),
+      const res = await fetch(`${API_BACKEND_URL}/stock/quotations`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify(buildPayload()),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to save quotation");
       router.push("/stock/quotations/list");
     } catch (err) { setError(err.message); window.scrollTo({ top: 0, behavior: "smooth" }); } finally { setSaving(false); }
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50/60 p-6">
-        <div className="mx-auto max-w-5xl animate-pulse space-y-4">
-          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-32 rounded-2xl bg-slate-100" />)}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-slate-50/60">
@@ -321,7 +351,7 @@ const QuotationForm = ({ quotationId = null }) => {
             </button>
             <div>
               <h1 className="text-lg font-semibold tracking-tight text-slate-900">
-                {isEdit ? "Edit quotation" : "Add quotation"}
+                Add quotation
               </h1>
               <p className="text-sm text-slate-500">Pick categories, then price each vendor’s products.</p>
             </div>
@@ -350,8 +380,7 @@ const QuotationForm = ({ quotationId = null }) => {
             <p className="mb-3 text-xs text-slate-500">Pick a last category, then add. Repeat for more categories.</p>
             <div className="flex flex-wrap items-end gap-3">
               <div className="min-w-[240px] flex-[2]">
-                {/* <label className={labelCls}>Category (last / leaf)</label> */}
-                    <label className={labelCls}>Category</label>
+                <label className={labelCls}>Category</label>
                 <SearchableSelect
                   value={pickCatId} onChange={setPickCatId} options={categoryOptions} placeholder="Select category"
                 />
@@ -372,11 +401,12 @@ const QuotationForm = ({ quotationId = null }) => {
             <div className="flex items-center gap-2">
               <label className="text-sm font-medium text-slate-700">Quantity (all products)</label>
               <input
-                type="number" min="1" value={globalQty} onChange={(e) => applyGlobalQty(e.target.value)}
+                type="number" min="1" step="1" value={globalQty} onChange={(e) => applyGlobalQty(e.target.value)}
                 className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-900 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
               />
             </div>
-            <Toggle checked={quantityEditable} onChange={setQuantityEditable} label="Allow per-row quantity editing" />
+            <Toggle checked={quantityEditable} onChange={applyQuantityEditable} label="Allow per-product quantity editing" />
+            <Toggle checked={warrantyEditable} onChange={applyWarrantyEditable} label="Allow warranty editing" />
             <Toggle checked={autoSelectAll} onChange={applyAutoSelect} label="Select all products automatically" />
           </div>
         )}
@@ -388,38 +418,45 @@ const QuotationForm = ({ quotationId = null }) => {
             <p className="mt-1 text-sm text-slate-400">Add one above to begin building this quotation.</p>
           </div>
         ) : (
-          blocks.map((block) => {
-            return (
-              <div key={block.categoryId} className="mb-6">
-                <div className="mb-3 flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    {block.categoryName}
-                  </span>
-                  <button
-                    type="button" onClick={() => removeCategory(block.categoryId)}
-                    className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-medium text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Remove
-                  </button>
-                </div>
-                {block.vendors.length === 0 ? (
-                  <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
-                    No vendors supply products in this category.
-                  </p>
-                ) : (
-                  groupByProduct(block.vendors).map((product) => (
-                    <ProductSection
-                      key={product.productDefinitionId} product={product} quantityEditable={quantityEditable}
-                      onToggle={toggleRow}
-                      onPriceChange={(vid, pid, val) => mutateRow(vid, pid, { unitPrice: val })}
-                      onQtyChange={(vid, pid, val) => mutateRow(vid, pid, { quantity: val })}
-                    />
-                  ))
-                )}
+          blocks.map((block) => (
+            <div key={block.categoryId} className="mb-6">
+              <div className="mb-3 flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {block.categoryName}
+                </span>
+                <button
+                  type="button" onClick={() => removeCategory(block.categoryId)}
+                  className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-2 py-1 text-xs font-medium text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remove
+                </button>
               </div>
-            );
-          })
+
+              {block.products.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">
+                  No vendors you can quote supply products in this category.
+                </p>
+              ) : (
+                block.products.map((product) => (
+                  <ProductSection
+                    key={product.productDefinitionId}
+                    product={product}
+                    quantityEditable={quantityEditable}
+                    warrantyEditable={warrantyEditable}
+                    showErrors={showErrors}
+                    onQtyChange={(q) => setProductQty(block.categoryId, product.productDefinitionId, q)}
+                    onToggle={(vid) => {
+                      const v = product.vendors.find((x) => x.vendorId === vid);
+                      patchVendor(block.categoryId, product.productDefinitionId, vid, { checked: !v.checked });
+                    }}
+                    onPriceChange={(vid, val) => patchVendor(block.categoryId, product.productDefinitionId, vid, { unitPrice: val })}
+                    onWarrantyChange={(vid, m) => patchVendor(block.categoryId, product.productDefinitionId, vid, { warrantyMonths: m })}
+                  />
+                ))
+              )}
+            </div>
+          ))
         )}
 
         {blocks.length > 0 && (

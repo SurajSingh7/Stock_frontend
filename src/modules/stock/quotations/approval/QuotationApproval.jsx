@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Check, X, Pencil } from "lucide-react";
 import { money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { formatWarrantyShort } from "@/shared/warranty/warranty";
+import { QUOTATION_STATUS_META as STATUS_META } from "@/modules/stock/quotations/quotationStatus";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -19,12 +21,6 @@ const baseOf = (it) => round2((Number(it.quantity) || 0) * (Number(it.unitPrice)
 const gstOf = (it) => (it.gstAmount != null ? Number(it.gstAmount) : round2((baseOf(it) * (Number(it.gstRate) || 0)) / 100));
 const totalOf = (it) => (it.lineTotal != null ? Number(it.lineTotal) : round2(baseOf(it) + gstOf(it)));
 
-const STATUS_META = {
-  PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
-  APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
-  PARTIALLY_APPROVED: { label: "Partially approved", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500" },
-  REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
-};
 
 // L-1/L-2/L-3 get a colored badge, L-4+ stays neutral (per spec — only the
 // top three ranks are visually escalated).
@@ -46,7 +42,7 @@ const RankBadge = ({ rank }) => {
 /*
   Ranking is computed per LEAF CATEGORY, across every vendor-product
   combination inside that category — not per product — within a SINGLE
-  quotation only (never across quotations). Priority: higher warrantyYears
+  quotation only (never across quotations). Priority: higher warrantyMonths
   first, then lower unitPrice. Array.sort is spec-stable, so equal
   warranty+price ties fall back to insertion (bid) order for free. Returns a
   Map of item._id -> rank (1-based), purely derived, never persisted.
@@ -63,7 +59,7 @@ const computeCategoryRanks = (items = []) => {
   byCategory.forEach((list) => {
     const sorted = [...list].sort(
       (a, b) =>
-        (Number(b.warrantyYears) || 0) - (Number(a.warrantyYears) || 0) ||
+        (Number(b.warrantyMonths) || 0) - (Number(a.warrantyMonths) || 0) ||
         (Number(a.unitPrice) || 0) - (Number(b.unitPrice) || 0)
     );
     sorted.forEach((it, idx) => rankMap.set(idOf(it._id), idx + 1));
@@ -110,7 +106,8 @@ const groupCatProductVendor = (items = []) => {
       unit: it.unit || it.productDefinitionId?.unit || "",
       quantity: it.quantity,
       unitPrice: it.unitPrice,
-      warrantyYears: it.warrantyYears,
+      warrantyMonths: it.warrantyMonths,
+      defaultWarrantyMonths: it.defaultWarrantyMonths,
       gstRate: it.gstRate,
       gstAmount: gstOf(it),
       lineTotal: totalOf(it),
@@ -149,7 +146,16 @@ const VendorLine = ({ v, selectable = false, checked = false, disabled = false, 
     <span className="text-xs text-slate-600">Qty <span className="font-semibold text-slate-900 tabular-nums">{v.quantity} {unitLabel(v.unit)}</span></span>
     <span className="text-xs text-slate-600">Unit price <span className="font-semibold text-slate-900 tabular-nums">{inr(v.unitPrice)}</span></span>
     <span className="text-xs text-slate-600">
-      Warranty <span className="font-semibold text-slate-900 tabular-nums">{v.warrantyYears ? `${v.warrantyYears} yr${v.warrantyYears === 1 ? "" : "s"}` : "—"}</span>
+      Warranty <span className="font-semibold text-slate-900 tabular-nums">{formatWarrantyShort(v.warrantyMonths)}</span>
+      {/* Changed for this quotation only — flagged because ranking puts warranty first. */}
+      {v.defaultWarrantyMonths != null && v.warrantyMonths !== v.defaultWarrantyMonths && (
+        <span
+          className="ml-1.5 rounded-full bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200"
+          title="Warranty was changed for this quotation"
+        >
+          vendor: {formatWarrantyShort(v.defaultWarrantyMonths)}
+        </span>
+      )}
     </span>
     <span className="text-xs text-slate-600">GST <span className="font-semibold text-slate-900 tabular-nums">{v.gstRate}%</span></span>
     <span className="text-xs text-slate-600">GST ₹ <span className="font-semibold text-slate-900 tabular-nums">{inr(v.gstAmount)}</span></span>
@@ -428,10 +434,10 @@ const ReviewMode = ({ quotation, onDone }) => {
 };
 
 /* ================================================================= */
-/* Details mode — same category → product → vendor layout, read-only  */
+/* View mode — same category → product → vendor layout, read-only     */
 /* ================================================================= */
 
-const DetailsMode = ({ quotation, backTo }) => {
+const ViewMode = ({ quotation, backTo }) => {
   const router = useRouter();
   const items = quotation.items || [];
   const categories = groupCatProductVendor(items);
@@ -554,9 +560,8 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
 
   if (!quotation) return null;
 
-  const isDetails = mode === "details";
   const isViewMode = mode === "view";
-  const showReview = !isViewMode && !isDetails && quotation.status === "PENDING";
+  const showReview = !isViewMode && quotation.status === "PENDING";
   // "View" is reached from two different origins (the Quotation List's View
   // button, and the Quotation Approval list's View button for non-pending
   // rows) that both land on the SAME /stock/quotations/[id]/view URL, so the
@@ -568,9 +573,7 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
   // boundary requirement onto its page.js at build time.
   const cameFromApproval =
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("from") === "approval";
-  const backTo = isDetails
-    ? "/stock/quotations/list"
-    : isViewMode
+  const backTo = isViewMode
     ? (cameFromApproval ? "/stock/quotations/approval" : "/stock/quotations/list")
     : "/stock/quotations/approval";
 
@@ -580,7 +583,7 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
         {showReview ? (
           <ReviewMode quotation={quotation} onDone={load} />
         ) : (
-          <DetailsMode quotation={quotation} backTo={backTo} />
+          <ViewMode quotation={quotation} backTo={backTo} />
         )}
       </div>
     </div>

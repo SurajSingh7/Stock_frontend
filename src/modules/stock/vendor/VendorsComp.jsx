@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
+import { formatWarrantyShort } from "@/shared/warranty/warranty";
 
 /* ============================================================= */
 /* Tokens — SAME as PurchaseOrderPage                             */
@@ -266,7 +267,7 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
       products: (ap.products || []).map((p) => {
         const productId = p.productId;
         const product = typeof productId === "object" ? productId : { _id: productId, name: "—" };
-        return { ...product, warrantyYears: p.overrides?.warrantyYears ?? null };
+        return { ...product, warrantyMonths: p.overrides?.warrantyMonths ?? null };
       }),
     }));
 
@@ -323,7 +324,7 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
                     g.products.map((p) => (
                       <span key={p._id} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
                         {p.name}
-                        {p.warrantyYears ? ` · ${p.warrantyYears}yr` : ""}
+                        {p.warrantyMonths ? ` · ${formatWarrantyShort(p.warrantyMonths)}` : ""}
                       </span>
                     ))
                   )}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, createContext, useContext } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Save, Plus, Trash2, ShieldCheck, Loader2, ChevronUp, ChevronDown,
@@ -15,6 +15,8 @@ import { PAYMENT_TERMS } from "./vendorConstants";
 import { STATE_OPTIONS } from "@/shared/constants/indianStates";
 import { verifyGST } from "./gstVerification";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
+import WarrantyInput from "@/shared/warranty/WarrantyInput";
+import { formatWarranty, isValidWarrantyMonths, WARRANTY_RANGE_MESSAGE } from "@/shared/warranty/warranty";
 
 /* ------------------------------------------------------------------ */
 /* Tokens — SAME as PurchaseOrderPage                                  */
@@ -47,6 +49,29 @@ const CONTACT_LABEL_SUGGESTIONS = ["TECHNICAL", "BILLING", "SALES", "SUPPORT"];
 const BANK_LABEL_SUGGESTIONS = ["SECONDARY ACCOUNT", "SALARY ACCOUNT", "ESCROW"];
 
 /* ------------------------------------------------------------------ */
+/* Read-only (view) mode                                               */
+/* ------------------------------------------------------------------ */
+
+// True on the vendor detail view. A disabled <fieldset> disables EVERY
+// control inside it — including navigation like the contact/bank tabs and
+// the card collapse arrows — so it must wrap only the editable content,
+// never a whole card. <Editable> is that wrapper; tabs and card headers sit
+// outside it and keep working when the rest is read-only.
+const ReadOnlyContext = createContext(false);
+
+const READ_ONLY_FIELDS_CLS =
+  "[&_input]:cursor-default [&_input]:bg-slate-50 [&_select]:cursor-default [&_select]:bg-slate-50 [&_textarea]:cursor-default [&_textarea]:bg-slate-50";
+
+const Editable = ({ children, className = "" }) => {
+  const readOnly = useContext(ReadOnlyContext);
+  return (
+    <fieldset disabled={readOnly} className={`m-0 min-w-0 border-0 p-0 ${readOnly ? READ_ONLY_FIELDS_CLS : ""} ${className}`}>
+      {children}
+    </fieldset>
+  );
+};
+
+/* ------------------------------------------------------------------ */
 /* Generic pieces                                                      */
 /* ------------------------------------------------------------------ */
 
@@ -74,7 +99,10 @@ const Field = ({ label, required, children, hint, error, locked }) => (
   </div>
 );
 
-const CollapsibleCard = ({ index, title, subtitle, action, children, defaultOpen = true }) => {
+// `tabs` renders above the body OUTSIDE the read-only wrapper, so tab
+// switching keeps working in view mode; `action` and the body are editable
+// content and go read-only there.
+const CollapsibleCard = ({ index, title, subtitle, action, tabs, children, defaultOpen = true }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -89,13 +117,18 @@ const CollapsibleCard = ({ index, title, subtitle, action, children, defaultOpen
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {action}
+          {action && <Editable className="flex items-center">{action}</Editable>}
           <button type="button" onClick={() => setOpen((o) => !o)} className="text-slate-400 transition hover:text-slate-600">
             {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </button>
         </div>
       </div>
-      {open && <div className="border-t border-slate-100 px-6 pb-6 pt-5">{children}</div>}
+      {open && (
+        <div className="border-t border-slate-100 px-6 pb-6 pt-5">
+          {tabs}
+          <Editable>{children}</Editable>
+        </div>
+      )}
     </div>
   );
 };
@@ -147,7 +180,10 @@ const PrimaryTag = () => (
 /* (used to place the "Primary" badge right after the "+ Other" btn).  */
 /* ------------------------------------------------------------------ */
 
+// Rendered outside the read-only wrapper (CollapsibleCard `tabs`), so the
+// tabs stay clickable in view mode; the "+ Other" control is hidden there.
 const LabelTabs = ({ items, activeIdx, onSelect, onAdd, errorsByIdx = [], suggestions = [], addLabel = "Other", trailing }) => {
+  const readOnly = useContext(ReadOnlyContext);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
 
@@ -182,7 +218,7 @@ const LabelTabs = ({ items, activeIdx, onSelect, onAdd, errorsByIdx = [], sugges
             );
           })}
 
-          {adding ? (
+          {readOnly ? null : adding ? (
             <span className="inline-flex items-center gap-1.5">
               <input
                 autoFocus value={draft}
@@ -220,7 +256,7 @@ const LabelTabs = ({ items, activeIdx, onSelect, onAdd, errorsByIdx = [], sugges
         {trailing && <div className="shrink-0">{trailing}</div>}
       </div>
 
-      {adding && suggestions.length > 0 && (
+      {!readOnly && adding && suggestions.length > 0 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-slate-400">Quick add:</span>
           {suggestions
@@ -296,8 +332,16 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, br
 
       setVendor((v) => ({
         ...v,
-        // GST is the source of truth once verified → overwrite, then lock
-        name: result.legalName || v.name,
+        // GST is the source of truth once verified → overwrite, then lock.
+        // The company goes by its TRADE name (gstVerification falls back to
+        // the legal name when GST has none).
+        name: result.tradeName || result.legalName || v.name,
+        // The LEGAL name is the registered person/entity — for a proprietor
+        // it is the owner — so it fills the PRIMARY contact's name, on every
+        // verify. That field stays editable; only the company name locks.
+        contacts: result.legalName
+          ? v.contacts.map((c) => (c.label === "PRIMARY" ? { ...c, name: result.legalName } : c))
+          : v.contacts,
         panNumber: (result.panNumber || v.panNumber || "").toUpperCase(),
         gst: {
           ...v.gst,
@@ -329,7 +373,7 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, br
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         <Field
           label="Company / Vendor Name" required locked={gstLocked} error={errors.name}
-          hint={gstLocked ? "Auto-filled from GST — the verified legal name cannot be edited" : undefined}
+          hint={gstLocked ? "Auto-filled from GST — the verified trade name cannot be edited" : undefined}
         >
           <input
             className={gstLocked ? lockedCls : errors.name ? inputErrCls : inputCls}
@@ -546,6 +590,7 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, br
 /* ------------------------------------------------------------------ */
 
 const ContactDetailsCard = ({ vendor, setVendor, errors }) => {
+  const readOnly = useContext(ReadOnlyContext);
   const [activeIdx, setActiveIdx] = useState(0);
   const contacts = vendor.contacts;
   const safeIdx = Math.min(activeIdx, contacts.length - 1);
@@ -570,23 +615,27 @@ const ContactDetailsCard = ({ vendor, setVendor, errors }) => {
   };
 
   return (
-    <CollapsibleCard index={2} title="Contact Details" subtitle="Add primary and other contact persons">
-      <LabelTabs
-        items={contacts} activeIdx={safeIdx} onSelect={setActiveIdx} onAdd={addContact}
-        errorsByIdx={errors.contacts || []} suggestions={CONTACT_LABEL_SUGGESTIONS}
-        trailing={
-          contact?.label === "PRIMARY" ? (
-            <PrimaryTag />
-          ) : contact ? (
-            <button
-              type="button" onClick={removeContact}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Remove {contact.label}
-            </button>
-          ) : null
-        }
-      />
+    <CollapsibleCard
+      index={2} title="Contact Details" subtitle="Add primary and other contact persons"
+      tabs={
+        <LabelTabs
+          items={contacts} activeIdx={safeIdx} onSelect={setActiveIdx} onAdd={addContact}
+          errorsByIdx={errors.contacts || []} suggestions={CONTACT_LABEL_SUGGESTIONS}
+          trailing={
+            contact?.label === "PRIMARY" ? (
+              <PrimaryTag />
+            ) : contact && !readOnly ? (
+              <button
+                type="button" onClick={removeContact}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Remove {contact.label}
+              </button>
+            ) : null
+          }
+        />
+      }
+    >
 
       {contact && (
         <div className="rounded-xl border border-slate-200 p-2">
@@ -831,7 +880,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
             categoryName: selectedCategory.displayPath || selectedCategory.name,
             products: list.map((p) => ({
               productId: p._id,
-              overrides: { warrantyYears: p.warrantyYears ?? null },
+              overrides: { warrantyMonths: p.warrantyMonths ?? null },
             })),
           },
         ],
@@ -858,13 +907,13 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
           ...ap,
           products: [
             ...ap.products,
-            { productId, overrides: { warrantyYears: product?.warrantyYears ?? null } },
+            { productId, overrides: { warrantyMonths: product?.warrantyMonths ?? null } },
           ],
         };
       }),
     }));
 
-  const updateProductWarranty = (categoryId, productId, warrantyYears) =>
+  const updateProductWarranty = (categoryId, productId, warrantyMonths) =>
     setVendor((v) => ({
       ...v,
       assignedProducts: v.assignedProducts.map((ap) => {
@@ -872,7 +921,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
         return {
           ...ap,
           products: ap.products.map((p) =>
-            p.productId === productId ? { ...p, overrides: { warrantyYears } } : p
+            p.productId === productId ? { ...p, overrides: { warrantyMonths } } : p
           ),
         };
       }),
@@ -891,7 +940,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
           ...ap,
           products: allChecked
             ? []
-            : all.map((p) => ({ productId: p._id, overrides: { warrantyYears: p.warrantyYears ?? null } })),
+            : all.map((p) => ({ productId: p._id, overrides: { warrantyMonths: p.warrantyMonths ?? null } })),
         };
       }),
     }));
@@ -1012,27 +1061,21 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
                           <span className="min-w-0 truncate">
                             {product.name}
                             <span className="ml-1 text-xs text-slate-400">
-                              (Default Warranty: {product.warrantyYears ?? "—"} {product.warrantyYears === 1 ? "Year" : "Years"})
+                              (Default Warranty: {formatWarranty(product.warrantyMonths)})
                             </span>
                           </span>
                         </label>
                         {checked && (
                           <div className="mt-1.5 flex items-center gap-2 pl-6">
                             <label htmlFor={`vendor-warranty-${product._id}`} className="text-xs font-medium text-slate-600">
-                              Warranty (Years):
+                              Warranty:
                             </label>
-                            <input
+                            <WarrantyInput
                               id={`vendor-warranty-${product._id}`}
-                              type="number" min="1" step="1"
-                              value={sel.overrides?.warrantyYears ?? ""}
-                              onChange={(e) =>
-                                updateProductWarranty(
-                                  ap.categoryId,
-                                  product._id,
-                                  e.target.value === "" ? null : Number(e.target.value)
-                                )
-                              }
-                              className="w-16 shrink-0 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                              size="sm"
+                              months={sel.overrides?.warrantyMonths ?? null}
+                              invalid={!isValidWarrantyMonths(sel.overrides?.warrantyMonths)}
+                              onChange={(m) => updateProductWarranty(ap.categoryId, product._id, m)}
                             />
                           </div>
                         )}
@@ -1063,6 +1106,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
 /* ------------------------------------------------------------------ */
 
 const BankDetailsCard = ({ vendor, setVendor, errors }) => {
+  const readOnly = useContext(ReadOnlyContext);
   const [activeIdx, setActiveIdx] = useState(0);
   const banks = vendor.bankAccounts;
   const safeIdx = Math.min(activeIdx, banks.length - 1);
@@ -1087,23 +1131,27 @@ const BankDetailsCard = ({ vendor, setVendor, errors }) => {
   };
 
   return (
-    <CollapsibleCard index={5} title="Bank Details" subtitle="Add bank account details for payments">
-      <LabelTabs
-        items={banks} activeIdx={safeIdx} onSelect={setActiveIdx} onAdd={addBank}
-        errorsByIdx={errors.bankAccounts || []} suggestions={BANK_LABEL_SUGGESTIONS} addLabel="Other Account"
-        trailing={
-          bank?.label === "PRIMARY" ? (
-            <PrimaryTag />
-          ) : bank ? (
-            <button
-              type="button" onClick={removeBank}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Remove {bank.label}
-            </button>
-          ) : null
-        }
-      />
+    <CollapsibleCard
+      index={5} title="Bank Details" subtitle="Add bank account details for payments"
+      tabs={
+        <LabelTabs
+          items={banks} activeIdx={safeIdx} onSelect={setActiveIdx} onAdd={addBank}
+          errorsByIdx={errors.bankAccounts || []} suggestions={BANK_LABEL_SUGGESTIONS} addLabel="Other Account"
+          trailing={
+            bank?.label === "PRIMARY" ? (
+              <PrimaryTag />
+            ) : bank && !readOnly ? (
+              <button
+                type="button" onClick={removeBank}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Remove {bank.label}
+              </button>
+            ) : null
+          }
+        />
+      }
+    >
 
       {bank && (
         <div className="rounded-xl border border-slate-200 p-5">
@@ -1232,13 +1280,11 @@ const validateVendor = (vendor, isEdit = false) => {
   const emptyCat = vendor.assignedProducts.find((ap) => (ap.products || []).length === 0);
   if (emptyCat) push(`Select at least one product in "${emptyCat.categoryName}" or remove the category`);
 
-  // every checked product needs a valid warranty override (min 1 year)
+  // every checked product needs a valid warranty override (whole months, 1–120)
   const badWarranty = vendor.assignedProducts.some((ap) =>
-    (ap.products || []).some(
-      (p) => !p.overrides || !Number.isInteger(p.overrides.warrantyYears) || p.overrides.warrantyYears < 1
-    )
+    (ap.products || []).some((p) => !isValidWarrantyMonths(p.overrides?.warrantyMonths))
   );
-  if (badWarranty) push("Every assigned product needs a warranty of at least 1 year");
+  if (badWarranty) push(`Every assigned product needs a warranty. ${WARRANTY_RANGE_MESSAGE}`);
 
   const hasFieldError =
     Object.keys(f).some((k) => k !== "contacts" && k !== "bankAccounts" && f[k]) ||
@@ -1333,7 +1379,7 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
             categoryName: ap.categoryId?.name || ap.categoryName || "",
             products: (ap.products || []).map((p) => ({
               productId: p.productId?._id || p.productId,
-              overrides: { warrantyYears: p.overrides?.warrantyYears ?? null },
+              overrides: { warrantyMonths: p.overrides?.warrantyMonths ?? null },
             })),
           })),
       };
@@ -1384,7 +1430,7 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
           categoryId: ap.categoryId,
           products: ap.products.map((p) => ({
             productId: p.productId,
-            overrides: { warrantyYears: p.overrides?.warrantyYears ?? null },
+            overrides: { warrantyMonths: p.overrides?.warrantyMonths ?? null },
           })),
         })),
       };
@@ -1485,14 +1531,12 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
           </div>
         )}
 
-        <fieldset
-          disabled={readOnly}
-          className={`m-0 min-w-0 space-y-6 border-0 p-0 ${
-            readOnly
-              ? "[&_input]:cursor-default [&_input]:bg-slate-50 [&_select]:cursor-default [&_select]:bg-slate-50 [&_textarea]:cursor-default [&_textarea]:bg-slate-50"
-              : ""
-          }`}
-        >
+        {/* View mode: each card's editable content goes read-only through
+            ReadOnlyContext (see <Editable>), while tabs and collapse arrows
+            stay usable — a single fieldset around everything used to disable
+            those too. */}
+        <ReadOnlyContext.Provider value={readOnly}>
+        <div className="space-y-6">
           <BasicDetailsCard
             vendor={vendor} setVendor={setVendor} errors={fieldErrors}
             gstLocked={gstLocked} onVerified={handleGstVerified}
@@ -1513,7 +1557,8 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
           />
           <AssignProductsCard vendor={vendor} setVendor={setVendor} />
           <BankDetailsCard vendor={vendor} setVendor={setVendor} errors={fieldErrors} />
-        </fieldset>
+        </div>
+        </ReadOnlyContext.Provider>
 
         <div className="mt-6 flex justify-end gap-3">
           <button

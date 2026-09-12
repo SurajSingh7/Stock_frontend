@@ -1,28 +1,22 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
-import { Plus, RotateCcw, Eye, FileText, CheckCircle2, MoreVertical } from "lucide-react";
+import { Plus, RotateCcw, Eye } from "lucide-react";
 import { SearchableSelect, Modal } from "@/modules/stock/shared/StockSharedUI";
+import {
+  QUOTATION_STATUS as STATUS,
+  QUOTATION_STATUS_META as STATUS_META,
+} from "@/modules/stock/quotations/quotationStatus";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
 /* ============================================================= */
 
-const STATUS = { PENDING: "PENDING", APPROVED: "APPROVED", PARTIALLY_APPROVED: "PARTIALLY_APPROVED", REJECTED: "REJECTED" };
-
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
-
-const STATUS_META = {
-  PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
-  APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
-  PARTIALLY_APPROVED: { label: "Partial", badge: "bg-indigo-50 text-indigo-700 ring-indigo-200", dot: "bg-indigo-500" },
-  REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
-};
 
 const TAB_STYLES = {
   "": {
@@ -153,121 +147,6 @@ const CategoriesCell = ({ q, onMore }) => {
   );
 };
 
-/* ============================================================= */
-/* Overflow (⋮) menu — extensible list of secondary actions       */
-/* ============================================================= */
-
-// Renders the flyout via a portal, positioned from the trigger button's
-// actual screen coordinates (position: fixed) instead of `absolute` inside
-// the row. The table wrapper is `overflow-x-auto`, and per the CSS spec
-// setting overflow-x to anything but visible forces overflow-y to compute as
-// "auto" too — so an `absolute` dropdown gets silently clipped at the
-// table's edge (worst for rows near the bottom). Purchase Orders' identical
-// ⋮ menu never hits this because its rows are plain cards, not a
-// horizontally-scrollable <table>.
-const ACTION_MENU_WIDTH = 176; // w-44
-
-const ActionMenu = ({ items, onSelect }) => {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState(null);
-  const btnRef = useRef(null);
-  const menuRef = useRef(null);
-
-  const openMenu = () => {
-    const rect = btnRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPos({
-      top: rect.bottom + 6,
-      left: Math.min(rect.right - ACTION_MENU_WIDTH, window.innerWidth - ACTION_MENU_WIDTH - 8),
-    });
-    setOpen(true);
-  };
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const closeOnOutside = (e) => {
-      if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
-      setOpen(false);
-    };
-    // capture:true so this also fires on the table's own scroll container,
-    // not just window — keeps a fixed-position menu from drifting away
-    // from its trigger button while scrolling.
-    const closeOnReflow = () => setOpen(false);
-    document.addEventListener("mousedown", closeOnOutside);
-    window.addEventListener("scroll", closeOnReflow, true);
-    window.addEventListener("resize", closeOnReflow);
-    return () => {
-      document.removeEventListener("mousedown", closeOnOutside);
-      window.removeEventListener("scroll", closeOnReflow, true);
-      window.removeEventListener("resize", closeOnReflow);
-    };
-  }, [open]);
-
-  if (items.length === 0) return null;
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => (open ? setOpen(false) : openMenu())}
-        aria-label="More actions"
-        title="More actions"
-        className={`flex h-7 w-7 items-center justify-center rounded-md border bg-white shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 ${
-          open ? "border-indigo-300 bg-indigo-50 text-indigo-600" : "border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-        }`}
-      >
-        <MoreVertical className="h-4 w-4" />
-      </button>
-
-      {open && pos && createPortal(
-        <div
-          ref={menuRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, width: ACTION_MENU_WIDTH }}
-          className="z-60 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5"
-        >
-          {items.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              onClick={() => { setOpen(false); onSelect(a.key); }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            >
-              {a.icon && <a.icon className="h-3.5 w-3.5" />}
-              {a.label}
-            </button>
-          ))}
-        </div>,
-        document.body
-      )}
-    </>
-  );
-};
-
-/* ============================================================= */
-/* Row actions — View stays inline, Details moves into ⋮ menu     */
-/* ============================================================= */
-
-const CreatorAction = ({ quotation, onView, onDetails }) => (
-  <div className="flex items-center justify-end gap-1.5">
-    {quotation.status !== STATUS.PENDING && (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-        Done
-      </span>
-    )}
-    <button
-      type="button" onClick={() => onView(quotation)} title="View"
-      className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
-    >
-      <Eye className="h-3.5 w-3.5" /> View
-    </button>
-    <ActionMenu
-      items={[{ key: "details", label: "Details", icon: FileText }]}
-      onSelect={(key) => { if (key === "details") onDetails(quotation); }}
-    />
-  </div>
-);
 
 /* ============================================================= */
 /* Main                                                           */
@@ -365,10 +244,9 @@ const QuotationComp = () => {
 
   const tabs = [
     { key: "", label: "All", count: summary.ALL ?? 0 },
-    { key: STATUS.PENDING, label: "Pending", count: summary.PENDING ?? 0 },
-    { key: STATUS.APPROVED, label: "Approved", count: summary.APPROVED ?? 0 },
-    { key: STATUS.PARTIALLY_APPROVED, label: "Partial", count: summary.PARTIALLY_APPROVED ?? 0 },
-    { key: STATUS.REJECTED, label: "Rejected", count: summary.REJECTED ?? 0 },
+    ...[STATUS.PENDING, STATUS.APPROVED, STATUS.PARTIALLY_APPROVED, STATUS.REJECTED].map((key) => ({
+      key, label: STATUS_META[key].label, count: summary[key] ?? 0,
+    })),
   ];
 
   // const dateLabel = status === STATUS.PENDING || status === "" ? "Submitted:" : "Decided:";
@@ -474,7 +352,7 @@ const QuotationComp = () => {
       </div>
 
       <p className="mb-3 text-xs text-slate-400">
-        Date range uses the submission date for Pending, and the decision date for Approved / Partial / Rejected.
+        Date range uses the submission date for Pending, and the decision date for Fully Approved / Partially Approved / Rejected.
       </p>
 
       {/* table */}
@@ -518,11 +396,13 @@ const QuotationComp = () => {
                     <td className="px-4 py-3"><StatusBadge status={q.status} /></td>
                     <td className="px-4 py-3 text-sm text-slate-500 tabular-nums">{fmtDateTime(q.updatedAt)}</td>
                     <td className="px-4 py-3 text-right">
-                      <CreatorAction
-                        quotation={q}
-                        onView={(qt) => router.push(`/stock/quotations/${qt._id}/view`)}
-                        onDetails={(qt) => router.push(`/stock/quotations/${qt._id}/details`)}
-                      />
+                      {/* View is the only action — a quotation is never edited */}
+                      <button
+                        type="button" onClick={() => router.push(`/stock/quotations/${q._id}/view`)} title="View"
+                        className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
+                      >
+                        <Eye className="h-3.5 w-3.5" /> View
+                      </button>
                     </td>
                   </tr>
                 );
