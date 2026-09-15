@@ -5,13 +5,16 @@ import { createPortal } from "react-dom";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
+import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
 import StatusTracker, { stageIndexForStatus } from "./StatusTracker";
 import InvoiceReceiveView from "./InvoiceReceiveView";
-import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText } from "lucide-react";
+import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmt = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const fmtTime = (d) =>
+  d ? new Date(d).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
@@ -178,76 +181,6 @@ const Modal = ({ onClose, title, children, maxWidth = "max-w-lg" }) => {
 /* Popups                                                         */
 /* ============================================================= */
 
-// Matches the PO PDF's item table + summary layout — Sr/Description/Product/
-// Qty/Basic Price/CGST/SGST(or IGST)/Amount, then a right-aligned totals
-// block (Basic Price, CGST, SGST/IGST, Grand total).
-const ProductsPopup = ({ row, onClose }) => {
-  const itemTh = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
-  const itemThRight = `${itemTh} text-right`;
-  const itemTd = "px-3 py-2 text-sm text-slate-700";
-  const itemTdRight = `${itemTd} text-right tabular-nums`;
-  const isIgst = row.taxType === "IGST";
-  const n = (v) => Number(v || 0).toLocaleString("en-IN");
-
-  return (
-    <Modal onClose={onClose} title={`${row.vendorName} · ${row.items.length} items`} maxWidth="max-w-3xl">
-      <div className="overflow-x-auto rounded-xl border border-slate-100">
-        <table className="w-full min-w-full border-collapse">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className={itemTh}>Sr.</th>
-              <th className={itemTh}>Description</th>
-              <th className={itemTh}>Product</th>
-              <th className={itemThRight}>Qty</th>
-              <th className={itemThRight}>Basic Price</th>
-              {isIgst ? <th className={itemThRight}>IGST</th> : (
-                <>
-                  <th className={itemThRight}>CGST</th>
-                  <th className={itemThRight}>SGST</th>
-                </>
-              )}
-              <th className={itemThRight}>Amount</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {row.items.map((it, i) => (
-              <tr key={i} className="transition hover:bg-slate-50/60">
-                <td className={itemTd}>{i + 1}</td>
-                <td className={itemTd}>{it.categoryName}</td>
-                <td className={`${itemTd} font-medium text-slate-900`}>{it.productName}</td>
-                <td className={itemTdRight}>{it.quantity}</td>
-                <td className={itemTdRight}>{n(it.taxable)}</td>
-                {isIgst ? <td className={itemTdRight}>{n(it.igst)}</td> : (
-                  <>
-                    <td className={itemTdRight}>{n(it.cgst)}</td>
-                    <td className={itemTdRight}>{n(it.sgst)}</td>
-                  </>
-                )}
-                <td className={`${itemTdRight} font-medium text-slate-900`}>{n(it.lineTotal)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-4 ml-auto w-full max-w-[220px] space-y-1.5 text-sm">
-        <div className="flex justify-between text-slate-500"><span>Basic Price</span><span className="tabular-nums">{money(row.subTotal)}</span></div>
-        {isIgst ? (
-          <div className="flex justify-between text-slate-500"><span>IGST</span><span className="tabular-nums">{money(row.igstTotal)}</span></div>
-        ) : (
-          <>
-            <div className="flex justify-between text-slate-500"><span>CGST</span><span className="tabular-nums">{money(row.cgstTotal)}</span></div>
-            <div className="flex justify-between text-slate-500"><span>SGST</span><span className="tabular-nums">{money(row.sgstTotal)}</span></div>
-          </>
-        )}
-        <div className="flex justify-between border-t-2 border-slate-200 pt-1.5 font-bold text-slate-900">
-          <span>Grand total</span><span className="tabular-nums">{money(row.totalAmount)}</span>
-        </div>
-      </div>
-    </Modal>
-  );
-};
-
 const AddEntityPopup = ({ row, onClose, onDone }) => {
   const { entities, aliases, loading } = useInternalEntities();
   const [alias, setAlias] = useState("");
@@ -328,6 +261,30 @@ const AddEntityPopup = ({ row, onClose, onDone }) => {
           </div>
         </div>
       )}
+
+      {/* What this order will actually contain. Read-only on purpose: changing
+          it is a separate, permission-gated decision ("Not Required"), so
+          assigning an entity can never quietly drop a line. */}
+      <div className="mt-5">
+        <p className={labelCls}>This order will contain</p>
+        <div className="mt-1.5 max-h-48 overflow-y-auto rounded-xl border border-slate-200">
+          {(row.items || []).map((it) => (
+            <div key={String(it.quotationItemId)} className="flex items-center gap-3 border-b border-slate-100 px-3 py-2 text-sm last:border-b-0">
+              <span className="text-emerald-600">✓</span>
+              <span className="flex-1 font-medium text-slate-900">{it.productName}</span>
+              <span className="text-xs tabular-nums text-slate-500">{it.quantity}</span>
+              <span className="w-24 text-right text-xs font-semibold tabular-nums text-slate-700">{money(it.lineTotal)}</span>
+            </div>
+          ))}
+          {(row.excludedItems || []).map((it) => (
+            <div key={String(it.quotationItemId)} className="flex items-center gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2 text-sm last:border-b-0">
+              <span className="text-slate-400">✗</span>
+              <span className="flex-1 text-slate-400 line-through">{it.productName}</span>
+              <span className="max-w-[45%] truncate text-xs text-slate-500" title={it.reason}>{it.reason}</span>
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="mt-5 flex justify-end gap-2.5">
         <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Cancel</button>
         <button
@@ -341,41 +298,141 @@ const AddEntityPopup = ({ row, onClose, onDone }) => {
   );
 };
 
-const NotRequiredPopup = ({ row, onClose, onDone }) => {
+/*
+  Decide which of a vendor's approved lines will not be ordered.
+
+  The same dialog serves both ends of the flow, because it is the same
+  decision — only the person and the moment differ:
+    endpoint "not-required" — Tracking Orders, before an entity is assigned
+    endpoint "revise"       — PO board, right up until a PO exists
+  The API takes the COMPLETE list of excluded lines, so unticking here removes
+  a line and re-ticking puts it back; "whole vendor" is simply every line.
+*/
+export const ExclusionPopup = ({
+  row,
+  endpoint = "not-required",
+  title = "Mark as Not Required",
+  confirmLabel = "Save decision",
+  onClose,
+  onDone,
+}) => {
+  // Lines already excluded come back on the row separately from the ones still
+  // being ordered; together they are every approved line for this vendor.
+  const ordered = row.items || [];
+  const excluded = row.excludedItems || [];
+  const allLines = [...ordered, ...excluded];
+
+  const [wholeVendor, setWholeVendor] = useState(excluded.length > 0 && ordered.length === 0);
+  const [keptIds, setKeptIds] = useState(() => new Set(ordered.map((it) => String(it.quotationItemId))));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
+  const toggle = (id) =>
+    setKeptIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const excludedIds = wholeVendor
+    ? allLines.map((it) => String(it.quotationItemId))
+    : allLines.map((it) => String(it.quotationItemId)).filter((id) => !keptIds.has(id));
+
+  const nothingLeft = excludedIds.length === allLines.length && allLines.length > 0;
+  const unchanged =
+    excludedIds.length === excluded.length &&
+    excluded.every((e) => excludedIds.includes(String(e.quotationItemId)));
+
+  const submit = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(
+        `${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/${endpoint}`,
+        {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+          body: JSON.stringify({ excludedItemIds: excludedIds, reason: reason.trim() }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+      onDone();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <Modal onClose={onClose} title="Mark as Not Required">
+    <Modal onClose={onClose} title={`${title} · ${row.vendorName}`}>
       {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
-      <p className="mb-3 text-sm text-slate-600">
-        PO creation for <span className="font-medium text-slate-800">{row.vendorName}</span> will be turned off for this quotation.
-      </p>
-      <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (required)" className={`${inputCls} mb-4`} />
+
+      <div className="mb-4 flex flex-col gap-2">
+        {[
+          { val: true, label: "This vendor is not required at all" },
+          { val: false, label: "Only some products are not required" },
+        ].map((opt) => (
+          <label key={String(opt.val)} className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+            <input
+              type="radio" checked={wholeVendor === opt.val} onChange={() => setWholeVendor(opt.val)}
+              className="h-4 w-4 border-slate-300 text-rose-600 focus:ring-rose-500"
+            />
+            {opt.label}
+          </label>
+        ))}
+      </div>
+
+      <div className={`mb-4 max-h-64 overflow-y-auto rounded-xl border border-slate-200 ${wholeVendor ? "opacity-50" : ""}`}>
+        {allLines.length === 0 ? (
+          <p className="px-3 py-4 text-sm text-slate-500">No approved lines for this vendor.</p>
+        ) : (
+          allLines.map((it) => {
+            const id = String(it.quotationItemId);
+            const kept = wholeVendor ? false : keptIds.has(id);
+            return (
+              <label
+                key={id}
+                className={`flex cursor-pointer items-center gap-3 border-b border-slate-100 px-3 py-2 text-sm last:border-b-0 ${
+                  kept ? "" : "bg-slate-50"
+                }`}
+              >
+                <input
+                  type="checkbox" checked={kept} disabled={wholeVendor} onChange={() => toggle(id)}
+                  className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed"
+                />
+                <span className={`flex-1 font-medium ${kept ? "text-slate-900" : "text-slate-400 line-through"}`}>
+                  {it.productName}
+                </span>
+                <span className="text-xs tabular-nums text-slate-500">{it.quantity}</span>
+                <span className="w-24 text-right text-xs font-semibold tabular-nums text-slate-700">
+                  {money(it.lineTotal)}
+                </span>
+              </label>
+            );
+          })
+        )}
+      </div>
+
+      {nothingLeft && !wholeVendor && (
+        <p className="mb-3 text-xs font-medium text-amber-700">
+          Nothing is left ticked — this vendor will be marked Not Required.
+        </p>
+      )}
+
+      <textarea
+        rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
+        placeholder="Reason (required)" className={`${inputCls} mb-4`}
+      />
+
       <div className="flex justify-end gap-2.5">
         <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">Cancel</button>
         <button
-          type="button" disabled={busy || !reason.trim()}
-          onClick={async () => {
-            setBusy(true); setError(null);
-            try {
-              const res = await fetch(`${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/not-required`, {
-                method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-                body: JSON.stringify({ reason: reason.trim() }),
-              });
-              const json = await res.json();
-              if (!res.ok || !json.success) throw new Error(json.message || "Failed");
-              onDone();
-            } catch (e) {
-              setError(e.message);
-            } finally {
-              setBusy(false);
-            }
-          }}
+          type="button" disabled={busy || !reason.trim() || unchanged} onClick={submit}
           className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? "Saving…" : "Mark Not Required"}
+          {busy ? "Saving…" : confirmLabel}
         </button>
       </div>
     </Modal>
@@ -597,9 +654,18 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, onView, onEdit }) =>
     return <div className="h-16 animate-pulse rounded-xl bg-slate-100" />;
   }
   if (invoices.length === 0) {
+    // Says what it means rather than just that a list is empty: nothing has
+    // been received yet, and the number that matters is still on order.
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-700">
-        <Info className="h-4 w-4 shrink-0" /> No invoice has been added yet.
+      <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 px-6 py-8 text-center">
+        <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
+          <ClipboardList className="h-5 w-5 text-blue-600" />
+        </span>
+        <p className="mt-3 text-sm font-semibold text-slate-800">No invoice received yet</p>
+        <p className="mt-1 text-xs text-slate-500">
+          All {orderedQty ?? 0} ordered {orderedQty === 1 ? "unit is" : "units are"} still pending.
+          Invoices appear here as goods arrive.
+        </p>
       </div>
     );
   }
@@ -666,6 +732,140 @@ const SummaryField = ({ label, value, valueCls = "text-slate-900" }) => (
   </div>
 );
 
+// A number that means something by its colour — used for the ordered /
+// received / pending trio, which always add up.
+const QTY_TONE = {
+  slate: "bg-slate-50 text-slate-700 ring-slate-200",
+  emerald: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  amber: "bg-amber-50 text-amber-700 ring-amber-200",
+};
+// Label and number on one line. These are the figures people come to the card
+// to read, so the number stays large and heavy — the label only has to be
+// legible enough to say which number it is.
+const QtyStat = ({ label, value, tone = "slate" }) => (
+  <span
+    className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 ring-1 ring-inset ${QTY_TONE[tone]}`}
+  >
+    <span className="text-[11px] font-bold uppercase tracking-wider opacity-80">{label}</span>
+    <span className="text-lg font-extrabold leading-none tabular-nums">{value}</span>
+  </span>
+);
+
+/*
+  The PO's date, with the time it was actually created.
+
+  poDate is a date the creator PICKS on the form, so its time of day is
+  meaningless (midnight). The clock reading that IS real is when the PO row was
+  written, so the two are shown together rather than printing "12:00 AM".
+*/
+const poDateLabel = (row) => {
+  if (!row.poNumber) return "—";
+  const date = fmt(row.poDate);
+  const t = row.poCreatedAt
+    ? new Date(row.poCreatedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
+    : "";
+  return t ? `${date}, ${t}` : date;
+};
+
+/*
+  What this vendor is actually being bought — the approved selections, minus
+  anything marked Not Required (the board already removes those from items[],
+  so there is nothing to filter here).
+
+  Warranty is shown because it is what the approver ranked on in the first
+  place: L-1 is decided by warranty before price, so a reader comparing this
+  list against the quotation needs it visible.
+*/
+const ApprovedProductTable = ({ items = [] }) => {
+  if (items.length === 0) {
+    return <p className="py-6 text-center text-sm text-slate-500">No approved products on this order.</p>;
+  }
+  const th = "px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-600";
+  const td = "px-3 py-2 text-sm text-slate-800";
+
+  const totals = items.reduce(
+    (acc, it) => ({
+      quantity: acc.quantity + (Number(it.quantity) || 0),
+      taxable: acc.taxable + (Number(it.taxable) || 0),
+      gstAmount: acc.gstAmount + (Number(it.gstAmount) || 0),
+      lineTotal: acc.lineTotal + (Number(it.lineTotal) || 0),
+    }),
+    { quantity: 0, taxable: 0, gstAmount: 0, lineTotal: 0 }
+  );
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-100">
+      <table className="w-full min-w-[920px] text-left">
+        <thead className="border-b border-slate-100 bg-slate-50/60">
+          <tr>
+            <th className={th}>Category</th>
+            <th className={th}>Product</th>
+            <th className={th}>Warranty</th>
+            <th className={`${th} text-right`}>Qty</th>
+            <th className={`${th} text-right`}>Unit Price</th>
+            <th className={`${th} text-right`}>Basic Amount</th>
+            <th className={`${th} text-right`}>GST %</th>
+            <th className={`${th} text-right`}>GST (Amt)</th>
+            <th className={`${th} text-right`}>Grand Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it, i) => (
+            <tr
+              key={it.quotationItemId || i}
+              className="border-b border-slate-50 transition last:border-b-0 hover:bg-emerald-50/40"
+            >
+              <td className={`${td} text-slate-500`}>{it.categoryName || "—"}</td>
+              <td className={`${td} font-semibold text-slate-900`}>{it.productName || "—"}</td>
+              <td className={td}>
+                <span className="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-inset ring-sky-100">
+                  {warrantyLabel(it.warrantyMonths)}
+                </span>
+              </td>
+              <td className={`${td} text-right tabular-nums`}>{it.quantity}</td>
+              <td className={`${td} text-right tabular-nums`}>{money(it.unitPrice)}</td>
+              <td className={`${td} text-right tabular-nums`}>{money(it.taxable)}</td>
+              <td className={`${td} text-right tabular-nums text-slate-500`}>{it.gstRate ?? 0}%</td>
+              <td className={`${td} text-right tabular-nums`}>{money(it.gstAmount)}</td>
+              <td className={`${td} text-right font-bold tabular-nums text-slate-900`}>{money(it.lineTotal)}</td>
+            </tr>
+          ))}
+        </tbody>
+        {/* Qty, Basic Amount and GST (Amt) are genuine sums and reconcile:
+            basic + gst = grand. Unit Price and GST % are left blank on purpose —
+            adding four different rates describes nothing, and percentages do not
+            add at all (these rows carry both 18% and 12%). An average there
+            would read as a real rate and mislead. */}
+        <tfoot>
+          <tr className="border-t-2 border-slate-200 bg-slate-50">
+            <td className={`${td} font-bold text-slate-900`} colSpan={3}>
+              Total <span className="font-medium text-slate-400">· {items.length} products</span>
+            </td>
+            <td className={`${td} text-right font-bold tabular-nums text-slate-900`}>{totals.quantity}</td>
+            <td className={`${td} text-right font-medium text-slate-400`}>—</td>
+            <td className={`${td} text-right font-bold tabular-nums text-slate-900`}>{money(totals.taxable)}</td>
+            <td className={`${td} text-right font-medium text-slate-400`}>—</td>
+            <td className={`${td} text-right font-bold tabular-nums text-slate-900`}>{money(totals.gstAmount)}</td>
+            <td className={`${td} text-right text-base font-extrabold tabular-nums text-emerald-700`}>
+              {money(totals.lineTotal)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+};
+
+// Whole months, shown the way people say them: 24 -> "2 yrs", 18 -> "1 yr 6 mo".
+const warrantyLabel = (months) => {
+  const n = Number(months);
+  if (!n || n < 1) return "—";
+  const y = Math.floor(n / 12);
+  const mo = n % 12;
+  if (y && mo) return `${y} yr${y > 1 ? "s" : ""} ${mo} mo`;
+  if (y) return `${y} yr${y > 1 ? "s" : ""}`;
+  return `${mo} mo`;
+};
+
 // GST breakdown label — only the pair that applies (CGST+SGST same-state,
 // IGST inter-state), matching the PO's own taxType.
 const gstSummaryLabel = (row) => {
@@ -676,14 +876,84 @@ const gstSummaryLabel = (row) => {
   return "—";
 };
 
-const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onAddItems, onEditInvoice, onViewPoDoc, onHoverStage }) => {
+/*
+  How this PO reached the vendor.
+
+  Two genuinely different things wear the same green tick on the card: the
+  system emailed it, or somebody handled it outside and marked it done. The
+  card only promises "it went"; this says which, and to whom.
+*/
+const MailInfoPopup = ({ row, onClose }) => {
+  const mr = row.mailResult || {};
+  const bySystem = mr.mode === "SENT";
+  const list = (arr) => (arr && arr.length ? arr.join(", ") : "—");
+
+  return (
+    <Modal onClose={onClose} title={`Mail · ${row.poNumber || row.vendorName}`}>
+      <div
+        className={`mb-4 flex items-center gap-2 rounded-xl px-3 py-2.5 ring-1 ring-inset ${
+          bySystem
+            ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
+            : "bg-amber-50 text-amber-800 ring-amber-200"
+        }`}
+      >
+        <MailCheck className="h-4 w-4 shrink-0" />
+        <p className="text-sm font-semibold">
+          {bySystem ? "Emailed by the system" : "Sent manually, outside the system"}
+        </p>
+      </div>
+
+      <p className="mb-3 text-sm text-slate-600">
+        {bySystem
+          ? "The PO was emailed from here and the delivery was recorded, so the addresses below are exactly what it went to."
+          : "Somebody sent this PO themselves — by their own email, WhatsApp, or by hand — and marked it done. Nothing was sent from this system, so there are no delivery details beyond what they recorded."}
+      </p>
+
+      <div className="space-y-2 rounded-xl border border-slate-200 p-3">
+        <SummaryField label="Sent at" value={mr.sentAt ? `${fmt(mr.sentAt)} ${fmtTime(mr.sentAt)}` : "—"} />
+        {bySystem && <SummaryField label="From" value={mr.from || "—"} />}
+        {bySystem && <SummaryField label="To" value={list(mr.to)} />}
+        {bySystem && mr.cc?.length ? <SummaryField label="Cc" value={list(mr.cc)} /> : null}
+        {mr.channel ? <SummaryField label="Channel" value={mr.channel} /> : null}
+      </div>
+
+      <div className="mt-5 flex justify-end">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onHistory, onAddItems, onEditInvoice, onViewPoDoc, onHoverStage }) => {
   const m = STATUS_META[row.status] || {};
   const isReceivingFlow = RECEIVING_FLOW_STATUSES.has(row.status);
   const hasPo = !!row.poNumber;
 
   const [invoices, setInvoices] = useState([]);
   const [invLoading, setInvLoading] = useState(false);
-  const [popup, setPopup] = useState(null); // { type: "products" | "overallSummary" | "viewInvoice", ... }
+  const hasInvoices = invoices.length > 0;
+
+  // How many approved products were dropped, and how many there were to begin
+  // with. items[] already excludes them, so the original total is the two added
+  // back together.
+  const droppedCount = row.excludedItems?.length || 0;
+  const approvedTotal = row.items.length + droppedCount;
+
+  /*
+    Which of the two views leads. Products until an invoice exists, then
+    invoices — from that moment the open question is "what has arrived", not
+    "what did we order".
+
+    Held as null until the invoices come back so the answer is decided once,
+    when it is actually known; a default of "products" would visibly flip to
+    Invoice a moment later on every card that has one.
+  */
+  const [pickedTab, setPickedTab] = useState(null);
+  const tab = pickedTab ?? (hasInvoices ? "invoice" : "products");
+  const setTab = setPickedTab;
+  const [popup, setPopup] = useState(null); // { type: "overallSummary" | "viewInvoice" | "mailInfo", ... }
 
   const loadInvoices = useCallback(async () => {
     if (!isReceivingFlow) return;
@@ -710,16 +980,45 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
       {/* Header — PO Number + Status (left), action buttons (right) */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-5 py-4">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">{quotationNumber}</span>
-          <span className="text-base font-bold text-slate-900">PO Number : <span className="font-semibold text-slate-900">{row.poNumber || "—"}</span></span>
+          {/* The quotation number is how people find the order they mean, so it
+              reads as a label, not as faint metadata. */}
+          <span className="rounded-lg bg-indigo-50 px-2.5 py-1 text-sm font-bold tracking-tight text-indigo-700 ring-1 ring-inset ring-indigo-100">
+            {quotationNumber}
+          </span>
+          <span className="text-base font-bold text-slate-900">
+            PO Number : <span className="font-semibold text-slate-900">{row.poNumber || "—"}</span>
+          </span>
           <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide shadow-sm ${m.pill || "bg-slate-400 text-white"}`}>
             <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
             {m.label || row.status}
           </span>
-          {row.mailResult?.mode && (
-            <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
-              {row.mailResult.mode === "SENT" ? "Mail Sent (ERP)" : "Mail Sent (Manual)"}
+          {hasPo && (
+            <span className="text-sm text-slate-500">
+              Po Date : <span className="font-medium text-slate-700">{poDateLabel(row)}</span>
             </span>
+          )}
+          {/* An icon, not a sentence: that the mail went is a yes/no worth a
+              glance, and HOW it went is a question you only sometimes ask. */}
+          {row.mailResult?.mode && (
+            <button
+              type="button" onClick={() => setPopup({ type: "mailInfo" })}
+              title="How this PO reached the vendor"
+              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-emerald-700 ring-1 ring-inset ring-emerald-200 transition hover:bg-emerald-100"
+            >
+              <MailCheck className="h-4 w-4" />
+            </button>
+          )}
+          {/* This order has been sent back from the PO board before. Shown here
+              rather than buried, because the count is the first thing that
+              explains why a row is back at Entity Pending. */}
+          {historyCount(row) > 0 && (
+            <button
+              type="button" onClick={() => onHistory(row)}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100"
+              title="Resets and product decisions on this order"
+            >
+              <RotateCcw className="h-3 w-3" /> History · {historyCount(row)}
+            </button>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -731,7 +1030,11 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               <PlusCircle className="h-3.5 w-3.5" /> Add Entity
             </button>
           )}
-          {(row.status === "ENTITY_PENDING" || row.status === "PO_PENDING") && (
+          {/* Only before the entity is assigned. Once it is, the order has moved
+              to the accounts team and changing its lines is their call —
+              "Revise Order" on the PO board, which carries its own permission.
+              NOT_REQUIRED stays clickable because it is the only way back. */}
+          {row.status === "ENTITY_PENDING" && (
             <button
               type="button" onClick={() => onNotRequired(row)}
               className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
@@ -758,18 +1061,30 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
         </div>
       </div>
 
-      {/* Summary strip */}
-      <div className="grid grid-cols-1 gap-x-8 gap-y-3 bg-slate-50/60 px-5 py-4 sm:grid-cols-3">
-        <SummaryField label="PO Date" value={hasPo ? fmt(row.poDate) : "—"} />
-        <SummaryField label="Vendor" value={row.vendorName} />
-        {hasPo && <SummaryField label="GST" value={gstSummaryLabel(row)} />}
+      {/* Row 2 — who and how much, on one line */}
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-2 bg-slate-50/60 px-5 py-3">
+        {/* The vendor is the subject of the whole card — everything else on
+            this row is a number about them. */}
+        <div className="flex items-baseline gap-1.5 text-sm">
+          <span className="font-bold text-slate-900">Vendor :</span>
+          <span className="rounded-lg bg-violet-50 px-2 py-0.5 text-sm font-bold text-violet-700 ring-1 ring-inset ring-violet-100">
+            {row.vendorName || "—"}
+          </span>
+        </div>
         {hasPo && <SummaryField label="Basic Price" value={money(row.subTotal)} />}
+        {hasPo && <SummaryField label="GST" value={gstSummaryLabel(row)} />}
+        {/* Plain text, not a button. It used to open a popup listing the items —
+            the Approved Product tab below now shows that same list with its own
+            totals row, so the popup was a second way to read the same thing. */}
         <SummaryField
           label="Grand Total"
           value={
-            <button type="button" onClick={() => setPopup({ type: "products" })} className="hover:underline">
-              {money(row.totalAmount)} <span className="font-normal text-slate-400">({row.items.length} item{row.items.length > 1 ? "s" : ""})</span>
-            </button>
+            <>
+              {money(row.totalAmount)}{" "}
+              <span className="font-normal text-slate-400">
+                ({row.items.length} item{row.items.length === 1 ? "" : "s"})
+              </span>
+            </>
           }
         />
         {hasPo && (
@@ -785,18 +1100,91 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
             }
           />
         )}
-        {hasPo && (
-          <>
-            <SummaryField label="Total Ordered Qty" value={row.totalQuantity} />
-            <SummaryField label="Received Qty" value={row.receivedQuantity ?? 0} valueCls="text-emerald-700" />
-            <SummaryField label="Pending Qty" value={row.pendingQuantity ?? Math.max(0, row.totalQuantity - (row.receivedQuantity || 0))} valueCls="text-amber-700" />
-          </>
-        )}
       </div>
 
-      {/* Invoice table — only once the receiving flow has started */}
-      {isReceivingFlow && (
-        <div className="border-t border-slate-100 px-5 py-4">
+      {/* Row 3 — the two views of this order, and the quantities that apply to
+          both. Invoice leads once one exists, because from that moment the
+          question is "what has arrived", not "what did we order". */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3">
+        {/* Underline tabs: the selected one is marked by the rule beneath it,
+            so neither view looks like a button you press to DO something. */}
+        {/* Underline tabs, one colour each: the selected one is marked by the
+            rule beneath it, so neither view looks like a button you press to DO
+            something. Both stay clickable — an empty Invoice tab still answers
+            a real question ("has anything arrived?"), and a dead grey tab
+            leaves people wondering whether it is broken. */}
+        <div className="flex gap-6 border-b border-slate-200">
+          <button
+            type="button"
+            onClick={() => setTab("invoice")}
+            className={
+              "-mb-px inline-flex items-center gap-1.5 border-b-2 px-1 pb-2 text-sm font-semibold transition " +
+              (tab === "invoice"
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-slate-500 hover:text-blue-600")
+            }
+          >
+            Invoice
+            <span
+              className={
+                "rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums " +
+                (tab === "invoice" ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-500")
+              }
+            >
+              {invoices.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("products")}
+            className={
+              "-mb-px inline-flex items-center gap-1.5 border-b-2 px-1 pb-2 text-sm font-semibold transition " +
+              (tab === "products"
+                ? "border-emerald-600 text-emerald-600"
+                : "border-transparent text-slate-500 hover:text-emerald-600")
+            }
+          >
+            Approved Product
+            {/* "3/5" says something a bare "3" cannot: two approved products
+                were dropped. Without it the count silently shrinks and nobody
+                has any reason to wonder why. A plain number when nothing was
+                dropped, so the slash only ever appears when it means something. */}
+            <span
+              title={
+                droppedCount > 0
+                  ? `${droppedCount} of ${approvedTotal} approved products are Not Required — open History to see who dropped them and why`
+                  : undefined
+              }
+              className={
+                "rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums " +
+                (droppedCount > 0
+                  ? "bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200"
+                  : tab === "products"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-slate-100 text-slate-500")
+              }
+            >
+              {droppedCount > 0 ? `${row.items.length}/${approvedTotal}` : row.items.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Three numbers that always add up, so they are coloured by meaning
+            rather than by decoration: ordered is the neutral total, green is
+            what is in, amber is what is still owed. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <QtyStat label="Ordered" value={row.totalQuantity ?? 0} tone="slate" />
+          <QtyStat label="Received" value={row.receivedQuantity ?? 0} tone="emerald" />
+          <QtyStat
+            label="Pending"
+            value={row.pendingQuantity ?? Math.max(0, (row.totalQuantity || 0) - (row.receivedQuantity || 0))}
+            tone="amber"
+          />
+        </div>
+      </div>
+
+      <div className="border-t border-slate-100 px-5 py-4">
+        {tab === "invoice" ? (
           <InvoiceTableBlock
             invoices={invoices}
             loading={invLoading}
@@ -804,12 +1192,13 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
             onView={(inv) => setPopup({ type: "viewInvoice", invoice: inv })}
             onEdit={(inv) => onEditInvoice(row, inv)}
           />
-        </div>
-      )}
-
-      {popup?.type === "products" && <ProductsPopup row={row} onClose={() => setPopup(null)} />}
+        ) : (
+          <ApprovedProductTable items={row.items} />
+        )}
+      </div>
       {popup?.type === "overallSummary" && <OverallSummaryPopup row={row} invoices={invoices} onClose={() => setPopup(null)} />}
       {popup?.type === "viewInvoice" && <InvoiceDetailPopup invoice={popup.invoice} onClose={() => setPopup(null)} />}
+      {popup?.type === "mailInfo" && <MailInfoPopup row={row} onClose={() => setPopup(null)} />}
     </div>
   );
 };
@@ -984,6 +1373,7 @@ const TrackingOrdersComp = () => {
                 refreshSignal={boardVersion}
                 onAddEntity={(r) => setPopup({ type: "addEntity", row: r })}
                 onNotRequired={(r) => setPopup({ type: "notRequired", row: r })}
+                onHistory={(r) => setPopup({ type: "resetHistory", row: r })}
                 onAddItems={(r) => setView({ mode: "receiveInvoice", row: r })}
                 onEditInvoice={(r, invoice) => setView({ mode: "editInvoice", row: r, invoice })}
                 onViewPoDoc={(r) => setView({ mode: "viewPoDoc", poId: r.poId, poNumber: r.poNumber })}
@@ -1010,7 +1400,12 @@ const TrackingOrdersComp = () => {
       )}
 
       {popup?.type === "addEntity" && <AddEntityPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
-      {popup?.type === "notRequired" && <NotRequiredPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
+      {popup?.type === "notRequired" && (
+        <ExclusionPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
+      {popup?.type === "resetHistory" && (
+        <OrderHistoryPopup row={popup.row} onClose={() => setPopup(null)} />
+      )}
     </div>
   );
 };

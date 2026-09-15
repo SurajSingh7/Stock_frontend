@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Check, X, Pencil } from "lucide-react";
-import { money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { formatWarrantyShort } from "@/shared/warranty/warranty";
 import { QUOTATION_STATUS_META as STATUS_META } from "@/modules/stock/quotations/quotationStatus";
 
@@ -12,14 +12,15 @@ import { QUOTATION_STATUS_META as STATUS_META } from "@/modules/stock/quotations
 /* Constants — SAME tokens as PurchaseOrderPage                   */
 /* ============================================================= */
 
-const DECISION = { APPROVED: "APPROVED", REJECTED: "REJECTED" };
-const idOf = (v) => String(v?._id || v || "");
-const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
-const inr = (n) => `\u20B9${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+/*
+  GET /quotations/:id already returns the shape this screen draws —
+  categories[] -> products[] -> offers[], each offer carrying its L-rank and
+  its approved flag. Both the grouping and the ranking are procurement rules,
+  not layout, so they belong to the server; this file only renders them.
+*/
 
-const baseOf = (it) => round2((Number(it.quantity) || 0) * (Number(it.unitPrice) || 0));
-const gstOf = (it) => (it.gstAmount != null ? Number(it.gstAmount) : round2((baseOf(it) * (Number(it.gstRate) || 0)) / 100));
-const totalOf = (it) => (it.lineTotal != null ? Number(it.lineTotal) : round2(baseOf(it) + gstOf(it)));
+const DECISION = { APPROVED: "APPROVED", REJECTED: "REJECTED" };
+const inr = (n) => `\u20B9${Number(n || 0).toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 
 
 // L-1/L-2/L-3 get a colored badge, L-4+ stays neutral (per spec — only the
@@ -39,34 +40,6 @@ const RankBadge = ({ rank }) => {
   );
 };
 
-/*
-  Ranking is computed per LEAF CATEGORY, across every vendor-product
-  combination inside that category — not per product — within a SINGLE
-  quotation only (never across quotations). Priority: higher warrantyMonths
-  first, then lower unitPrice. Array.sort is spec-stable, so equal
-  warranty+price ties fall back to insertion (bid) order for free. Returns a
-  Map of item._id -> rank (1-based), purely derived, never persisted.
-*/
-const computeCategoryRanks = (items = []) => {
-  const byCategory = new Map();
-  items.forEach((it) => {
-    const cId = idOf(it.categoryId) || it.categoryName;
-    const list = byCategory.get(cId) || [];
-    list.push(it);
-    byCategory.set(cId, list);
-  });
-  const rankMap = new Map();
-  byCategory.forEach((list) => {
-    const sorted = [...list].sort(
-      (a, b) =>
-        (Number(b.warrantyMonths) || 0) - (Number(a.warrantyMonths) || 0) ||
-        (Number(a.unitPrice) || 0) - (Number(b.unitPrice) || 0)
-    );
-    sorted.forEach((it, idx) => rankMap.set(idOf(it._id), idx + 1));
-  });
-  return rankMap;
-};
-
 const cardTitleCls = "text-xs font-bold uppercase tracking-wider text-slate-600";
 const fieldLabelCls = "text-xs font-bold uppercase tracking-wider text-slate-600";
 const backBtnCls =
@@ -82,39 +55,6 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-/* items[] → CATEGORY → PRODUCT → [vendor offers with full numbers] */
-const groupCatProductVendor = (items = []) => {
-  const cats = new Map();
-  items.forEach((it) => {
-    const cId = idOf(it.categoryId) || it.categoryName;
-    if (!cats.has(cId)) cats.set(cId, { categoryId: cId, categoryName: it.categoryName || "", products: new Map() });
-    const cat = cats.get(cId);
-    const pId = idOf(it.productDefinitionId);
-    if (!cat.products.has(pId))
-      cat.products.set(pId, {
-        productDefinitionId: pId,
-        productName: it.productName || "",
-        trackingMethod: it.trackingMethod || it.productDefinitionId?.trackingMethod || "",
-        unit: it.unit || it.productDefinitionId?.unit || "",
-        vendors: [],
-      });
-    cat.products.get(pId).vendors.push({
-      itemId: idOf(it._id),
-      vendorId: idOf(it.vendorId),
-      vendorName: it.vendorName || "",
-      trackingMethod: it.trackingMethod || it.productDefinitionId?.trackingMethod || "",
-      unit: it.unit || it.productDefinitionId?.unit || "",
-      quantity: it.quantity,
-      unitPrice: it.unitPrice,
-      warrantyMonths: it.warrantyMonths,
-      defaultWarrantyMonths: it.defaultWarrantyMonths,
-      gstRate: it.gstRate,
-      gstAmount: gstOf(it),
-      lineTotal: totalOf(it),
-    });
-  });
-  return [...cats.values()].map((c) => ({ ...c, products: [...c.products.values()] }));
-};
 
 // Soft row background per rank (L-1/L-2/L-3 only — L-4+ stays default/hover).
 const RANK_ROW_BG = {
@@ -124,7 +64,9 @@ const RANK_ROW_BG = {
 };
 
 /* one vendor offer line — same layout in review / details / view */
-const VendorLine = ({ v, selectable = false, checked = false, disabled = false, onToggle, won = false, rank }) => (
+// `unit` comes from the product, not the offer — every offer on a product is
+// priced in the same unit, so it is not repeated on each one.
+const VendorLine = ({ v, unit, selectable = false, checked = false, disabled = false, onToggle, won = false, rank }) => (
   <div
     className={`flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg px-3 py-2 text-sm transition ${
       RANK_ROW_BG[rank] || "hover:bg-slate-50"
@@ -143,7 +85,7 @@ const VendorLine = ({ v, selectable = false, checked = false, disabled = false, 
         <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-xs font-semibold text-emerald-700">approved</span>
       )}
     </span>
-    <span className="text-xs text-slate-600">Qty <span className="font-semibold text-slate-900 tabular-nums">{v.quantity} {unitLabel(v.unit)}</span></span>
+    <span className="text-xs text-slate-600">Qty <span className="font-semibold text-slate-900 tabular-nums">{v.quantity} {unitLabel(unit)}</span></span>
     <span className="text-xs text-slate-600">Unit price <span className="font-semibold text-slate-900 tabular-nums">{inr(v.unitPrice)}</span></span>
     <span className="text-xs text-slate-600">
       Warranty <span className="font-semibold text-slate-900 tabular-nums">{formatWarrantyShort(v.warrantyMonths)}</span>
@@ -159,6 +101,17 @@ const VendorLine = ({ v, selectable = false, checked = false, disabled = false, 
     </span>
     <span className="text-xs text-slate-600">GST <span className="font-semibold text-slate-900 tabular-nums">{v.gstRate}%</span></span>
     <span className="text-xs text-slate-600">GST ₹ <span className="font-semibold text-slate-900 tabular-nums">{inr(v.gstAmount)}</span></span>
+    {/* An approved line the buyer later decided not to order. The approval is
+        untouched — without this the screen would read "Approved" and imply the
+        goods were bought. */}
+    {v.excluded && (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 ring-1 ring-inset ring-slate-200"
+        title={v.excludedReason}
+      >
+        ⊘ Not ordered{v.excludedReason ? ` — ${v.excludedReason}` : ""}
+      </span>
+    )}
     <span className="ml-auto flex items-center gap-2 text-xs text-slate-600">
       Total <span className="text-sm font-bold text-slate-900 tabular-nums">{inr(v.lineTotal)}</span>
       <RankBadge rank={rank} />
@@ -227,8 +180,7 @@ const Field = ({ label, value }) => (
 
 const ReviewMode = ({ quotation, onDone }) => {
   const router = useRouter();
-  const categories = groupCatProductVendor(quotation.items);
-  const rankMap = computeCategoryRanks(quotation.items);
+  const categories = quotation.categories || [];
 
   const [decisions, setDecisions] = useState({});
   const [rowError, setRowError] = useState({});
@@ -313,12 +265,12 @@ const ReviewMode = ({ quotation, onDone }) => {
               const isSelProduct = d.sel?.productDefinitionId === p.productDefinitionId;
               return (
                 <ProductBlock key={p.productDefinitionId} product={p} highlight={isSelProduct}>
-                  {p.vendors.map((v) => {
+                  {p.offers.map((v) => {
                     const checked = d.sel?.productDefinitionId === p.productDefinitionId && d.sel?.vendorId === v.vendorId;
                     return (
                       <VendorLine
-                        key={v.vendorId} v={v} selectable checked={!!checked}
-                        disabled={isLocked} rank={rankMap.get(v.itemId)}
+                        key={v.vendorId} v={v} unit={p.unit} selectable checked={!!checked}
+                        disabled={isLocked} rank={v.rank}
                         onToggle={() => pickVendor(cat.categoryId, p.productDefinitionId, v.vendorId)}
                       />
                     );
@@ -439,18 +391,8 @@ const ReviewMode = ({ quotation, onDone }) => {
 
 const ViewMode = ({ quotation, backTo }) => {
   const router = useRouter();
-  const items = quotation.items || [];
-  const categories = groupCatProductVendor(items);
-  const rankMap = computeCategoryRanks(items);
-
-  const caByCat = new Map((quotation.categoryApprovals || []).map((ca) => [idOf(ca.categoryId) || ca.categoryName, ca]));
-  const approvedPairs = new Set(
-    (quotation.categoryApprovals || []).flatMap((ca) => (ca.selections || []).map((s) => `${idOf(s.productDefinitionId)}::${idOf(s.vendorId)}`))
-  );
-
-  const totalBase = round2(items.reduce((s, it) => s + baseOf(it), 0));
-  const totalGst = round2(items.reduce((s, it) => s + gstOf(it), 0));
-  const grand = round2(items.reduce((s, it) => s + totalOf(it), 0));
+  const categories = quotation.categories || [];
+  const summary = quotation.summary || {};
 
   return (
     <div>
@@ -469,48 +411,38 @@ const ViewMode = ({ quotation, backTo }) => {
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <Field label="Quotation No" value={quotation.quotationNumber} />
           <Field label="Status" value={(STATUS_META[quotation.status] || STATUS_META.PENDING).label} />
-          <Field label="Created By" value={quotation.createdByName} />
-          <Field label="Grand Total" value={money(grand)} />
+          <Field label="Created By" value={quotation.createdBy?.name} />
+          {/* Deliberately NOT a money figure: summing every bid, winning and
+              losing, produces an amount nobody will ever pay. What is true
+              before a decision is how big the quotation is. */}
+          <Field
+            label="Size"
+            value={`${summary.categories || 0} categories · ${summary.products || 0} products · ${summary.offers || 0} offers`}
+          />
         </div>
       </Card>
 
       {categories.map((cat) => {
-        const ca = caByCat.get(cat.categoryId);
-        const st = ca?.status;
-        const tone = st === "REJECTED" ? "red" : st === "APPROVED" ? "green" : "gray";
-        const statusLabel = st === "REJECTED" ? "Rejected" : st === "APPROVED" ? "Approved" : "Pending";
+        const tone = cat.status === "REJECTED" ? "red" : cat.status === "APPROVED" ? "green" : "gray";
+        const statusLabel = cat.status === "REJECTED" ? "Rejected" : cat.status === "APPROVED" ? "Approved" : "Pending";
         return (
           <CategoryCard
             key={cat.categoryId} categoryName={cat.categoryName} statusLabel={statusLabel} tone={tone}
-            remarks={st === "REJECTED" ? ca?.remarks : ""}
+            remarks={cat.status === "REJECTED" ? cat.remarks : ""}
           >
-            {cat.products.map((p) => {
-              const anyWon = p.vendors.some((v) => approvedPairs.has(`${p.productDefinitionId}::${v.vendorId}`));
-              return (
-                <ProductBlock key={p.productDefinitionId} product={p} highlight={anyWon}>
-                  {p.vendors.map((v) => (
-                    <VendorLine
-                      key={v.vendorId} v={v} rank={rankMap.get(v.itemId)}
-                      won={approvedPairs.has(`${p.productDefinitionId}::${v.vendorId}`)}
-                    />
-                  ))}
-                </ProductBlock>
-              );
-            })}
+            {cat.products.map((p) => (
+              <ProductBlock
+                key={p.productDefinitionId} product={p}
+                highlight={p.offers.some((v) => v.isApproved)}
+              >
+                {p.offers.map((v) => (
+                  <VendorLine key={v.vendorId} v={v} unit={p.unit} rank={v.rank} won={v.isApproved} />
+                ))}
+              </ProductBlock>
+            ))}
           </CategoryCard>
         );
       })}
-
-      <Card title="Totals">
-        <div className="grid grid-cols-3 gap-4">
-          <Field label="Taxable" value={money(totalBase)} />
-          <Field label="GST" value={money(totalGst)} />
-          <div className="min-w-0">
-            <p className={fieldLabelCls}>Grand Total</p>
-            <p className="mt-0.5 text-base font-bold text-slate-900 tabular-nums">{money(grand)}</p>
-          </div>
-        </div>
-      </Card>
 
       {quotation.notes ? (
         <Card title="Notes">

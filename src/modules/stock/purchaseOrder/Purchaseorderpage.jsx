@@ -15,9 +15,13 @@ import {
   Download,
   Mail,
   CheckCircle2,
+  History,
 } from "lucide-react";
 import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields } from "./SendMailPopup";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
+// Shared with the Tracking Orders page on purpose: both boards show the same
+// reset history, and two copies of it would drift.
+import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 
 /* ============================================================= */
@@ -318,7 +322,7 @@ const ProductsPopup = ({ row, onClose }) => {
 const InfoPopup = ({ row, onClose }) => (
   <Modal onClose={onClose} title="Skipped products">
     <div className="space-y-2.5">
-      {row.skipped.map((s, i) => (
+      {row.excludedItems.map((s, i) => (
         <div key={i} className="rounded-xl bg-amber-50 px-4 py-3 text-sm ring-1 ring-inset ring-amber-100">
           <p className="font-medium text-slate-900">
             {s.productName}{" "}
@@ -337,6 +341,98 @@ const InfoPopup = ({ row, onClose }) => (
  * both land from a single "Approve & Send PO" click. The mail fields are the
  * exact ones from SendMailPopup, reused rather than re-implemented.
  */
+/*
+  Send a vendor order back to the very start.
+
+  This is the accounts team's ONLY way to change an order once it has left the
+  Tracking Orders page — they cannot edit its lines, because that decision
+  belongs to whoever holds the Not Required permission. A reset deletes the PO,
+  clears the entity and returns the row to ENTITY_PENDING, where those people
+  can change it and send it forward again.
+
+  Deliberately destructive, so it asks first and requires a reason: the PO
+  number it deletes is not reused, and the entity has to be chosen again.
+*/
+const ResetOrderPopup = ({ row, onClose, onDone }) => {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/reset`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ reason: reason.trim() }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to reset order");
+      onDone();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={`Reset order — ${row.vendorName}`}>
+      {error && (
+        <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>
+      )}
+
+      <p className="text-sm text-slate-700">Are you sure? This will:</p>
+      <ul className="mt-2 space-y-1.5 text-sm text-slate-600">
+        {row.poNumber ? (
+          <li className="flex gap-2">
+            <span className="text-rose-500">•</span>
+            delete <span className="font-medium text-slate-800">{row.poNumber}</span> — the number is not reused
+          </li>
+        ) : null}
+        {row.entityAlias ? (
+          <li className="flex gap-2">
+            <span className="text-rose-500">•</span>
+            clear the entity <span className="font-medium text-slate-800">{row.entityAlias}</span>, so it can be chosen again
+          </li>
+        ) : null}
+        <li className="flex gap-2">
+          <span className="text-rose-500">•</span>
+          send the order back to the Tracking Orders page
+        </li>
+      </ul>
+      <p className="mt-3 text-xs text-slate-500">
+        Lines already marked Not Required stay out — the tracking team can change them there.
+      </p>
+
+      <textarea
+        rows={3}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Reason (required) — this is what the tracking team will see"
+        className={`${inputCls} mb-4 mt-4`}
+      />
+
+      <div className="flex justify-end gap-2.5">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">
+          Cancel
+        </button>
+        <button
+          type="button" disabled={busy || !reason.trim()} onClick={submit}
+          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? "Resetting…" : "Reset Order"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
 const ReviewPopup = ({ row, onClose, onDone }) => {
   const mail = useSendMailForm(row);
   const [busy, setBusy] = useState(false);
@@ -551,13 +647,17 @@ const buildRowActions = (row) => {
   const inline = [];
   const menu = [];
 
-  if (row.disabled) {
-    inline.push({ type: "text", key: "enable", label: "Enable", tone: "gray" });
-    return { inline, menu };
-  }
-
   if (s === "PO_PENDING" && row.items.length > 0) {
     inline.push({ type: "text", key: "create", label: "Create PO", tone: "indigo" });
+  }
+
+  // The accounts team cannot edit an order's lines — that decision belongs to
+  // the Tracking Orders page. What they can do is send the whole thing back
+  // there: Reset Order deletes the PO, clears the entity and returns the row to
+  // ENTITY_PENDING. Not offered once the PO is approved, because by then it has
+  // been mailed to the vendor.
+  if (s === "PO_PENDING" || s === "GENERATED" || s === "REJECTED") {
+    inline.push({ type: "iconText", key: "reset", label: "Reset Order", text: "Reset", icon: RotateCcw, tone: "gray" });
   }
 
   if (s !== "PO_PENDING") {
@@ -585,7 +685,11 @@ const buildRowActions = (row) => {
 
   menu.push({ key: "details", label: "Details", tone: "gray", icon: FileText });
 
-  if (row.skipped?.length > 0) {
+  if (historyCount(row) > 0) {
+    menu.push({ key: "history", label: `History (${historyCount(row)})`, tone: "gray", icon: History });
+  }
+
+  if (row.excludedItems?.length > 0) {
     inline.push({ type: "text", key: "info", label: "Info", tone: "gray" });
   }
 
@@ -736,13 +840,8 @@ const PurchaseOrderPage = () => {
   };
 
   const onAction = (type, row, q) => {
-    if (type === "enable") {
-      fetch(`${API_BACKEND_URL}/stock/quotations/${q.sourceQuotationId}/enable-vendor`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ vendorId: row.vendorId }),
-      }).then(loadBoard);
-      return;
-    }
+    if (type === "reset") return setPopup({ type: "reset", row });
+    if (type === "history") return setPopup({ type: "history", row });
     if (type === "create") {
       return setView({
         mode: "create",
@@ -983,6 +1082,12 @@ const PurchaseOrderPage = () => {
         </div>
       )}
 
+      {popup?.type === "reset" && (
+        <ResetOrderPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
+      {popup?.type === "history" && (
+        <OrderHistoryPopup row={popup.row} onClose={() => setPopup(null)} />
+      )}
       {popup?.type === "products" && <ProductsPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "info" && <InfoPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "review" && <ReviewPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
