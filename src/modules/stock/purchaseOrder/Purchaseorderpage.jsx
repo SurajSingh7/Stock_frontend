@@ -17,7 +17,7 @@ import {
   CheckCircle2,
   History,
 } from "lucide-react";
-import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields } from "./SendMailPopup";
+import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields, hasNoRecipient } from "./SendMailPopup";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 // Shared with the Tracking Orders page on purpose: both boards show the same
 // reset history, and two copies of it would drift.
@@ -463,7 +463,16 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
   };
 
   const approveAndSend = async () => {
-    if (mail.sendEmail && !mail.to.trim()) return setError("A To email is required");
+    // mail.to is the vendor's own "To" contacts (an array), not a typed field
+    // — there is no free-text To input in SendMailFields. Same check as
+    // SendMailPopup's own submit(), so the message reads the same everywhere.
+    if (mail.sendEmail && hasNoRecipient(row)) {
+      return setError(
+        "This vendor has no contact marked To. Open Master → Vendors, edit " +
+          (row.vendorName || "the vendor") +
+          ", and set at least one contact's Recipient Type to To."
+      );
+    }
     setBusy(true); setError(null);
     try {
       // Skipped on a retry: the PO is already APPROVED, only the send failed.
@@ -517,11 +526,26 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
         </>
       ) : (
         <>
+          {mail.sendEmail && hasNoRecipient(row) && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+              <span className="mt-0.5 shrink-0">⚠</span>
+              <span>
+                <strong>{row.vendorName || "This vendor"}</strong> has no contact marked <strong>To</strong>.
+                Edit the vendor and set one, or switch off Send Email Notification to mark this PO manual.
+              </span>
+            </div>
+          )}
+
           <SendMailFields row={row} form={mail} />
 
           <div className="mt-6 flex justify-end gap-2.5 border-t border-slate-200 pt-5">
             <button type="button" onClick={() => setRejecting(true)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50">Reject</button>
-            <button type="button" disabled={busy} onClick={approveAndSend} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">
+            <button
+              type="button"
+              disabled={busy || (mail.sendEmail && hasNoRecipient(row))}
+              onClick={approveAndSend}
+              className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
               {busy ? "Working…" : approved ? "Retry send" : "Approve & Send PO"}
             </button>
           </div>
