@@ -95,6 +95,26 @@ function buildInvoiceFormData(payload, file) {
   return formData;
 }
 
+// selectedFields in display order, keeping each one's isRequired flag. Both
+// tracking methods draw from the same list — Individual renders one set of
+// these per unit row, Group renders one set per batch.
+const orderedFields = (productDef) =>
+  (productDef?.selectedFields || [])
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .filter((sf) => sf.fieldDefId)
+    .map((sf) => ({ def: sf.fieldDefId, isRequired: !!sf.isRequired }));
+
+// The tracked values a Group line carries. Group keeps exactly ONE row per
+// line — never one per unit, and never a separate one for FOC: the free units
+// arrive in the same physical lot as the paid ones (20 meters delivered, 3 of
+// them free) and share its unique number. The isFoc flag is read leniently so
+// a line saved before that rule still resolves.
+const groupBatchValues = (lineState) => {
+  const rows = lineState.rows || [];
+  return (rows.find((r) => !r.isFoc) || rows[0])?.fieldValues || {};
+};
+
 const emptyLineState = () => ({
   rows: [],
   quantity: "",
@@ -237,6 +257,33 @@ const UnitPriceSummary = ({ poLine, taxType }) => {
   );
 };
 
+// One set of tracked fields covering the whole Group receipt: 3 pieces
+// received together share a single unique number, they are not three separate
+// units — and the FOC units are part of that same lot, so they are covered by
+// this one set too rather than asking for the number a second time.
+const GroupFieldSet = ({ label, fields, values, onChange }) => (
+  <div className="mb-3 rounded-xl border border-slate-200 bg-white p-3">
+    <div className="mb-2.5">
+      <p className="text-xs font-bold uppercase tracking-wider text-slate-700">{label}</p>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      {fields.map(({ def, isRequired }) => (
+        <div key={def._id}>
+          <label className={labelCls}>
+            {def.label}
+            {isRequired && <span className="ml-0.5 text-rose-500">*</span>}
+          </label>
+          <DynamicFieldInput
+            fieldDef={def}
+            value={values[def.code]}
+            onChange={(v) => onChange(def.code, v)}
+          />
+        </div>
+      ))}
+    </div>
+  </div>
+);
+
 const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alreadyReceived, onOpenRating }) => {
   const isIndividual = productDef?.trackingMethod === "individual";
   const unit = unitLabel(productDef?.unit);
@@ -249,11 +296,8 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
   const overLimit = usedByOthers + receivedNow > orderedQty;
   const focQtyNum = Math.max(0, Number(lineState.focQuantity) || 0);
 
-  const selectedFields = (productDef?.selectedFields || [])
-    .slice()
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    .map((sf) => sf.fieldDefId)
-    .filter(Boolean);
+  const fields = orderedFields(productDef);
+  const selectedFields = fields.map((f) => f.def);
 
   const addRows = (n) => {
     const rows = [...lineState.rows, ...Array.from({ length: n }, () => ({ fieldValues: {}, isFoc: false }))];
@@ -264,6 +308,15 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
   };
   const setRowField = (idx, code, value) => {
     const rows = lineState.rows.map((r, i) => (i === idx ? { ...r, fieldValues: { ...r.fieldValues, [code]: value } } : r));
+    onLineChange({ ...lineState, rows });
+  };
+
+  // A Group edit writes into that one row, creating it on the first
+  // keystroke — there is no "add row" step when the whole received quantity,
+  // paid and FOC together, is a single lot.
+  const setGroupField = (code, value) => {
+    const current = groupBatchValues(lineState);
+    const rows = [{ fieldValues: { ...current, [code]: value }, isFoc: false }];
     onLineChange({ ...lineState, rows });
   };
 
@@ -368,6 +421,21 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
           {lineState.rating.rating ? `Vendor Rating · ${lineState.rating.rating}/5` : "Vendor Rating"}
         </button>
       </div>
+
+      {!isIndividual && fields.length > 0 && (receivedNow > 0 || focQtyNum > 0) && (
+        <GroupFieldSet
+          label={`Batch details · ${receivedNow} ${unit}${focQtyNum > 0 ? ` + ${focQtyNum} FOC` : ""}`}
+          fields={fields}
+          values={groupBatchValues(lineState)}
+          onChange={setGroupField}
+        />
+      )}
+
+      {!isIndividual && fields.length === 0 && (
+        <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-400">
+          This product has no tracked fields configured — the quantity above is all that gets recorded.
+        </p>
+      )}
 
       {isIndividual && selectedFields.length === 0 && (
         <p className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-400">
@@ -527,7 +595,13 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
             initialLines[key] = existing
               ? {
                   rows: existingRows,
-                  quantity: existingRows.length ? "" : String(existing.receivedQuantity ?? ""),
+                  // Individual derives its quantity from the rows themselves;
+                  // Group carries both rows AND a quantity, so the saved
+                  // quantity must be restored explicitly.
+                  quantity:
+                    defs[it.productDefinitionId]?.trackingMethod === "individual"
+                      ? ""
+                      : String(existing.receivedQuantity ?? ""),
                   focEnabled: true,
                   focQuantity: focQty ? String(focQty) : "",
                   rating: existing.rating || { rating: null, notes: "" },
@@ -608,9 +682,18 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
         const key = String(it.quotationItemId);
         const ls = lines[key] || emptyLineState();
         const isIndividual = productDefs[it.productDefinitionId]?.trackingMethod === "individual";
-        const rows = isIndividual ? ls.rows.filter(isRowFilled) : [];
-        const receivedQuantity = isIndividual ? rows.filter((r) => !r.isFoc).length : Number(ls.quantity || 0);
-        const focQuantity = isIndividual ? rows.filter((r) => r.isFoc).length : Math.max(0, Number(ls.focQuantity) || 0);
+        const filledRows = isIndividual ? ls.rows.filter(isRowFilled) : [];
+        const receivedQuantity = isIndividual ? filledRows.filter((r) => !r.isFoc).length : Number(ls.quantity || 0);
+        const focQuantity = isIndividual ? filledRows.filter((r) => r.isFoc).length : Math.max(0, Number(ls.focQuantity) || 0);
+        // Group sends a single row describing the whole receipt — the paid and
+        // FOC units are one lot and share these values. An empty fieldValues
+        // still goes up so the backend can reject a missing required field
+        // rather than silently storing a blank batch.
+        const rows = isIndividual
+          ? filledRows
+          : receivedQuantity > 0 || focQuantity > 0
+            ? [{ fieldValues: groupBatchValues(ls), isFoc: false }]
+            : [];
         return { quotationItemId: it.quotationItemId, receivedQuantity, focQuantity, rows, rating: ls.rating?.rating ? ls.rating : null };
       })
       .filter((l) => l.receivedQuantity > 0 || l.focQuantity > 0);
@@ -645,6 +728,25 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
         const filledFoc = ls.rows.filter((r) => r.isFoc && isRowFilled(r)).length;
         if (targetFoc > 0 && filledFoc < targetFoc) {
           return setError(`${it.productName}: fill all ${targetFoc} FOC row(s) before submitting`);
+        }
+      } else {
+        // Group: the same required-field rule the backend enforces, checked
+        // here so it reads as a form error instead of a save failure. One
+        // check for the line — paid and FOC share the one set of values.
+        const ls = lines[key] || emptyLineState();
+        const required = orderedFields(productDefs[it.productDefinitionId]).filter((fd) => fd.isRequired);
+        const lineQty = Number(ls.quantity || 0) + Math.max(0, Number(ls.focQuantity) || 0);
+        if (required.length && lineQty > 0) {
+          const values = groupBatchValues(ls);
+          const missing = required.filter((fd) => {
+            const v = values[fd.def.code];
+            return v === undefined || v === null || v === "";
+          });
+          if (missing.length) {
+            return setError(
+              `${it.productName}: fill ${missing.map((fd) => fd.def.label).join(", ")} for this batch`
+            );
+          }
         }
       }
     }

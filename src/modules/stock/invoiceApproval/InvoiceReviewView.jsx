@@ -104,6 +104,9 @@ const LineCard = ({ line, taxType }) => {
     .filter(Boolean);
   const rows = line.rows || [];
   const visibleRows = rows.slice(0, visible);
+  // Group lines carry a single row covering the whole receipt. Older lines may
+  // still hold a separate FOC row, so fall back rather than assuming index 0.
+  const groupValues = isIndividual ? null : (rows.find((r) => !r.isFoc) || rows[0])?.fieldValues || null;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -211,6 +214,23 @@ const LineCard = ({ line, taxType }) => {
               </div>
             )}
           </>
+        )}
+
+        {/* Group records its fields once for the whole receipt rather than per
+            unit, and the FOC units belong to that same lot — so there is one
+            card here, never a table to paginate. */}
+        {!isIndividual && groupValues && selectedFields.length > 0 && (
+          <div className="rounded-xl border border-slate-200 bg-white p-3">
+            <p className="mb-2.5 text-xs font-bold uppercase tracking-wider text-slate-700">
+              Batch details · {line.receivedQuantity ?? 0} {unitLabel(line.unit)}
+              {line.focQuantity > 0 ? ` + ${line.focQuantity} FOC` : ""}
+            </p>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {selectedFields.map((fd) => (
+                <DetailField key={fd._id} label={fd.label} value={groupValues[fd.code] ?? "—"} />
+              ))}
+            </div>
+          </div>
         )}
       </div>
     </div>

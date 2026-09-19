@@ -1170,7 +1170,11 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     if (!form.name.trim()) next.name = "Product name is required";
     if (!form.trackingMethod) next.trackingMethod = "Please select a tracking method";
     if (!form.unit) next.unit = "Please select a unit";
-    if (!form.selectedFields.length) next.selectedFields = "Select at least one field";
+    // Individual only: each unit is identified BY its field values, so a
+    // product with none of them can never be received. Group records a
+    // quantity, and its batch fields are optional.
+    if (form.trackingMethod === "individual" && !form.selectedFields.length)
+      next.selectedFields = "Select at least one field";
     // Every product is billed, so it needs a slab. 0% is a real answer here
     // (exempt goods) — "" is the only "not chosen" state, which is why this is
     // an explicit empty-check rather than a falsy one.
@@ -1587,7 +1591,14 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
               <div>
                 <label className={labelCls}>
                   Applicable Fields
-                  <RequiredMark />
+                  {/* Required for Individual, where the field values ARE the
+                      unit's identity. Group is a counted quantity, so its
+                      batch fields are a bonus and picking none is valid. */}
+                  {form.trackingMethod === "individual" ? (
+                    <RequiredMark />
+                  ) : (
+                    <span className="ml-1.5 text-xs font-normal text-slate-400">(optional)</span>
+                  )}
                   <span className="ml-2 text-xs font-normal text-slate-400">({form.selectedFields.length} selected)</span>
                 </label>
                 <FieldDefinitionMultiSelect

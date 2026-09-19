@@ -27,7 +27,7 @@ const Col = ({ label, children, className = "" }) => (
 /* Batch breakdown — every receiving event that makes up a Group   */
 /* card's total, opened via the small "info" button next to Qty.   */
 /* ============================================================= */
-const BatchBreakdownModal = ({ productName, unitText, defId, branchId, onClose }) => {
+const BatchBreakdownModal = ({ productName, unitText, defId, branchId, fields = [], onClose }) => {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
 
@@ -48,7 +48,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, onClose }
   }, [defId, branchId]);
 
   return (
-    <Modal onClose={onClose} title={`Batch Breakdown — ${productName}`} maxWidth="max-w-lg">
+    <Modal onClose={onClose} title={`Batch Breakdown — ${productName}`} maxWidth={fields.length > 0 ? "max-w-2xl" : "max-w-lg"}>
       {error && <p className="mb-3 text-sm text-rose-600">{error}</p>}
       {rows === null ? (
         <div className="space-y-2">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-10 animate-pulse rounded-lg bg-slate-100" />)}</div>
@@ -61,6 +61,9 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, onClose }
               <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <th className="px-3 py-2.5">Invoice</th>
                 <th className="px-3 py-2.5">Date</th>
+                {fields.map((fd) => (
+                  <th key={fd._id} className="px-3 py-2.5">{fd.label}</th>
+                ))}
                 <th className="px-3 py-2.5 text-right">Quantity</th>
               </tr>
             </thead>
@@ -69,6 +72,9 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, onClose }
                 <tr key={r.invoiceId || r.invoiceNumber}>
                   <td className="px-3 py-2 font-medium text-slate-900">{r.invoiceNumber || "—"}</td>
                   <td className="px-3 py-2 text-slate-600">{fmtDate(r.invoiceDate)}</td>
+                  {fields.map((fd) => (
+                    <td key={fd._id} className="px-3 py-2 text-slate-700">{r.fieldValues?.[fd.code] ?? "—"}</td>
+                  ))}
                   <td className="px-3 py-2 text-right tabular-nums text-slate-700">{r.quantity} {unitText}</td>
                 </tr>
               ))}
@@ -126,16 +132,21 @@ const ViewDetailsModal = ({ card, onClose }) => {
         )}
       </div>
 
-      {!isGroup && fields.length > 0 && (
+      {fields.length > 0 && (
         <div className="mt-5 border-t border-slate-100 pt-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Product Fields</p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {fields.map((fd) => (
-              <div key={fd._id}>
-                <p className="text-xs text-slate-400">{fd.label}</p>
-                <p className="text-sm font-medium text-slate-900">{card.fieldValues?.[fd.code] ?? "—"}</p>
-              </div>
-            ))}
+            {fields.map((fd) => {
+              const varies = isGroup && card.variedFields?.includes(fd.code);
+              return (
+                <div key={fd._id}>
+                  <p className="text-xs text-slate-400">{fd.label}</p>
+                  <p className={`text-sm font-medium ${varies ? "text-amber-600" : "text-slate-900"}`}>
+                    {varies ? "Varies by batch" : card.fieldValues?.[fd.code] ?? "—"}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -159,7 +170,7 @@ const InventoryRow = ({ card, onView, onShowBatches }) => {
       <Col label="Category Path" className="w-40">{def.categoryPath || "—"}</Col>
       <Col label="Product" className="w-40 font-medium text-slate-900">{def.name || "—"}</Col>
 
-      {isGroup ? (
+      {isGroup && (
         <Col label="Quantity" className="w-40">
           <span className="inline-flex items-center gap-1.5">
             <span className="font-semibold text-indigo-700">{card.totalQty} {unit}</span>
@@ -171,11 +182,26 @@ const InventoryRow = ({ card, onView, onShowBatches }) => {
             </button>
           </span>
         </Col>
-      ) : (
-        fields.map((fd) => (
-          <Col key={fd._id} label={fd.label} className="w-32">{card.fieldValues?.[fd.code] ?? "—"}</Col>
-        ))
       )}
+
+      {/* Both tracking methods show their tracked fields here. For Individual
+          the value belongs to this one unit; for Group the card rolls up every
+          batch, so a value only shows when all of them agree — otherwise it
+          says Multiple and points at the batch breakdown. */}
+      {fields.map((fd) => (
+        <Col key={fd._id} label={fd.label} className="w-32">
+          {isGroup && card.variedFields?.includes(fd.code) ? (
+            <button
+              type="button" onClick={() => onShowBatches(card)}
+              className="font-medium text-indigo-600 underline decoration-dotted underline-offset-2 transition hover:text-indigo-700"
+            >
+              Multiple
+            </button>
+          ) : (
+            card.fieldValues?.[fd.code] ?? "—"
+          )}
+        </Col>
+      ))}
 
       <Col label="Branch" className="w-36">{card.branchId?.name || "—"}</Col>
 
@@ -331,6 +357,7 @@ const ItemInventory = () => {
           unitText={unitLabel(batchesFor.productDefinitionId?.unit)}
           defId={batchesFor.productDefinitionId?._id}
           branchId={batchesFor.branchId?._id}
+          fields={(batchesFor.productDefinitionId?.selectedFields || []).map((sf) => sf.fieldDefId).filter(Boolean)}
           onClose={() => setBatchesFor(null)}
         />
       )}
