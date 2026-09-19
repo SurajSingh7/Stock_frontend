@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { usePermissions } from "@/context/PermissionContext";
 
 const SHIPMENT_PREFERENCE_OPTIONS = [
   "Self Pickup", "Vendor Delivery", "Courier", "Transport", "Third-Party Logistics", "Hand Delivery",
@@ -69,7 +70,13 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   // createPurchaseOrder, which derives it server-side from the tracking
   // order rather than trusting anything sent from this form).
   const selectedEntity = contextBuyerEntity || null;
-  const [requester, setRequester] = useState("Suraj");
+
+  // Requester is whoever is signed in — displayed here, but stamped by the
+  // backend from the session, which is why nothing below ever sends it.
+  // On an edit it shows the person who originally raised the PO instead.
+  const { userData } = usePermissions();
+  const signedInName = [userData?.firstName, userData?.lastName].filter(Boolean).join(" ");
+  const [requester, setRequester] = useState("");
   const [poDate, setPoDate] = useState(todayStr());
   const [shipment, setShipment] = useState(SHIPMENT_PREFERENCE_OPTIONS[1]);
   // Read-only — resolved from the Terms & Conditions master API, never
@@ -126,7 +133,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
               checked: true, reason: "",
             }))
           );
-          setRequester(po.requester || "Suraj");
+          setRequester(po.requester || "");
           if (po.poDate) setPoDate(new Date(po.poDate).toISOString().slice(0, 10));
           setShipment(po.shipmentPreference || SHIPMENT_PREFERENCE_OPTIONS[1]);
           // Already-resolved snapshot from when this PO was created — never re-resolved on edit.
@@ -207,8 +214,8 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
       if (isEdit) {
         const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, {
           method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-          // terms/buyerEntity are immutable after create — never sent from here.
-          body: JSON.stringify({ requester, poDate, shipmentPreference: shipment, notes }),
+          // terms/buyerEntity/requester are immutable after create — never sent from here.
+          body: JSON.stringify({ poDate, shipmentPreference: shipment, notes }),
         });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.message || "Failed to update PO");
@@ -219,7 +226,8 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             sourceQuotationId, vendorId,
             quotationItemIds: checked.map((r) => r.quotationItemId),
             skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
-            requester, poDate, shipmentPreference: shipment, notes,
+            // requester is stamped server-side from the session, not sent.
+            poDate, shipmentPreference: shipment, notes,
             termsConditionId: selectedTermsId || undefined,
           }),
         });
@@ -309,7 +317,13 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <label className={labelCls}>Requester</label>
-            <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls} />
+            <input
+              value={(isEdit ? requester : signedInName) || ""}
+              readOnly disabled className={inputCls}
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              {isEdit ? "Who raised this PO — not editable." : "You, from your sign-in — not editable."}
+            </p>
           </div>
           <div>
             <label className={labelCls}>PO date</label>

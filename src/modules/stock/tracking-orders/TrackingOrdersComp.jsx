@@ -57,12 +57,13 @@ const TAB_LIST = [
   { key: "PARTIAL", label: "Partial" },
   { key: "COMPLETED", label: "Completed" },
   { key: "REJECTED", label: "PO Rejected" },
-  { key: "NOT_REQUIRED", label: "Not Required" },
+  // No NOT_REQUIRED tab — a vendor dropped whole leaves this board entirely
+  // and is read (and undone) on the Not Required register.
 ];
 
 const DEFAULT_COUNTS = {
   ALL: 0, ENTITY_PENDING: 0, PO_PENDING: 0, PO_GENERATED: 0,
-  PO_APPROVED: 0, IN_PROGRESS: 0, PARTIAL: 0, COMPLETED: 0, REJECTED: 0, NOT_REQUIRED: 0,
+  PO_APPROVED: 0, IN_PROGRESS: 0, PARTIAL: 0, COMPLETED: 0, REJECTED: 0,
 };
 
 // Add Items only while there's still something to receive. Receiving opens at
