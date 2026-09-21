@@ -8,6 +8,7 @@ import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
 import StatusTracker, { stageIndexForStatus } from "./StatusTracker";
 import InvoiceReceiveView from "./InvoiceReceiveView";
+import { usePermissions } from "@/context/PermissionContext";
 import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -42,7 +43,10 @@ const STATUS_META = {
   PO_APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
   IN_PROGRESS: { label: "In Progress", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", border: "border-l-amber-400", pill: "bg-amber-500 text-white" },
   PARTIAL: { label: "Partial", badge: "bg-yellow-50 text-yellow-700 ring-yellow-200", dot: "bg-yellow-500", border: "border-l-yellow-400", pill: "bg-yellow-500 text-white" },
-  COMPLETED: { label: "Completed", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
+  FULLY_CLOSED: { label: "Fully Closed", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
+  // Violet, not emerald: both are end states, but this one did not get
+  // everything that was ordered and should not read as a success.
+  SHORT_CLOSED: { label: "Short Closed", badge: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500", border: "border-l-violet-400", pill: "bg-violet-500 text-white" },
   REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400", pill: "bg-rose-500 text-white" },
   NOT_REQUIRED: { label: "Not Required", badge: "bg-slate-100 text-slate-500 ring-slate-200", dot: "bg-slate-400", border: "border-l-slate-300", pill: "bg-slate-400 text-white" },
 };
@@ -55,7 +59,8 @@ const TAB_LIST = [
   { key: "PO_APPROVED", label: "PO Approved" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "PARTIAL", label: "Partial" },
-  { key: "COMPLETED", label: "Completed" },
+  { key: "FULLY_CLOSED", label: "Fully Closed" },
+  { key: "SHORT_CLOSED", label: "Short Closed" },
   { key: "REJECTED", label: "PO Rejected" },
   // No NOT_REQUIRED tab — a vendor dropped whole leaves this board entirely
   // and is read (and undone) on the Not Required register.
@@ -63,14 +68,35 @@ const TAB_LIST = [
 
 const DEFAULT_COUNTS = {
   ALL: 0, ENTITY_PENDING: 0, PO_PENDING: 0, PO_GENERATED: 0,
-  PO_APPROVED: 0, IN_PROGRESS: 0, PARTIAL: 0, COMPLETED: 0, REJECTED: 0,
+  PO_APPROVED: 0, IN_PROGRESS: 0, PARTIAL: 0, FULLY_CLOSED: 0, SHORT_CLOSED: 0, REJECTED: 0,
 };
 
 // Add Items only while there's still something to receive. Receiving opens at
 // PO_APPROVED — there is no PO_SENT stage any more, approving a PO mails it.
 const RECEIVABLE_STATUSES = new Set(["PO_APPROVED", "IN_PROGRESS", "PARTIAL"]);
 // Overall Summary / Invoices are meaningful once the PO has been approved.
-const RECEIVING_FLOW_STATUSES = new Set(["PO_APPROVED", "IN_PROGRESS", "PARTIAL", "COMPLETED"]);
+const RECEIVING_FLOW_STATUSES = new Set(["PO_APPROVED", "IN_PROGRESS", "PARTIAL", "FULLY_CLOSED", "SHORT_CLOSED"]);
+
+// Short close closes an order EARLY, so it is offered only where "we got some
+// of it and that is all we are getting" is true. RECEIVABLE_STATUSES above is
+// deliberately untouched — SHORT_CLOSED is absent from it, which is what stops
+// Add Items, on the server as well as here.
+const SHORT_CLOSABLE_STATUSES = new Set(["PARTIAL"]);
+
+/*
+  Whether this user holds one action on the tracking-orders module.
+
+  The board's other buttons don't check permissions client-side — the backend
+  403s on click and that is good enough for an action everyone with the page
+  has. Short close and reopen were given their own permissions precisely so
+  most people never see them, so here the check has to happen before render.
+  Admins bypass every permission server-side, so they bypass it here too.
+*/
+const canDo = (permissions, isAdmin, action) => {
+  if (isAdmin) return true;
+  const mod = (permissions || []).find((m) => m.moduleKey === "tracking-orders");
+  return (mod?.actions || []).map((a) => String(a).toUpperCase()).includes(action);
+};
 
 /* ============================================================= */
 /* Searchable status filter — same pattern as the PO Approval     */
@@ -927,7 +953,98 @@ const MailInfoPopup = ({ row, onClose }) => {
   );
 };
 
-const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onHistory, onAddItems, onEditInvoice, onViewPoDoc, onHoverStage }) => {
+/* ============================================================= */
+/* Short close / reopen — one popup for both, because they ask    */
+/* for exactly the same thing: a reason. Only the wording, the    */
+/* endpoint and the colour differ.                                */
+/* ============================================================= */
+const CLOSURE_COPY = {
+  shortClose: {
+    title: "Short Close",
+    endpoint: "short-close",
+    confirm: "Short Close",
+    placeholder: "Vendor cancelled the remaining quantity…",
+    note: "No more items can be received against this order once it is short closed. It can be reopened later if that changes.",
+    tone: "amber",
+  },
+  reopen: {
+    title: "Reopen",
+    endpoint: "reopen",
+    confirm: "Reopen",
+    placeholder: "Vendor has agreed to send the balance…",
+    note: "The order goes back to Partial and items can be received against it again.",
+    tone: "violet",
+  },
+};
+
+const ClosureDecisionPopup = ({ row, mode, onClose, onDone }) => {
+  const copy = CLOSURE_COPY[mode];
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(
+        `${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/${copy.endpoint}`,
+        {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+          body: JSON.stringify({ reason: reason.trim() }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+      onDone();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toneCls =
+    copy.tone === "amber"
+      ? { note: "bg-amber-50 text-amber-800 ring-amber-100", btn: "bg-amber-600 hover:bg-amber-500" }
+      : { note: "bg-violet-50 text-violet-800 ring-violet-100", btn: "bg-violet-600 hover:bg-violet-500" };
+
+  return (
+    <Modal onClose={onClose} title={`${copy.title} · ${row.vendorName}`}>
+      {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
+
+      <label className="mb-1.5 block text-xs font-semibold text-slate-700">
+        Reason <span className="text-rose-500">*</span>
+      </label>
+      <textarea
+        id="closure-reason"
+        rows={3}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder={copy.placeholder}
+        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+      />
+
+      <p className={`mt-3 rounded-lg px-3 py-2 text-xs ring-1 ring-inset ${toneCls.note}`}>{copy.note}</p>
+
+      <div className="mt-5 flex justify-end gap-2">
+        <button
+          type="button" onClick={onClose} disabled={busy}
+          className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={submit} disabled={busy || !reason.trim()}
+          className={`rounded-lg px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:bg-slate-300 ${toneCls.btn}`}
+        >
+          {busy ? "Saving…" : copy.confirm}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onHistory, onAddItems, onEditInvoice, onViewPoDoc, onHoverStage, onShortClose, onReopen, canShortClose, canReopen }) => {
   const m = STATUS_META[row.status] || {};
   const isReceivingFlow = RECEIVING_FLOW_STATUSES.has(row.status);
   const hasPo = !!row.poNumber;
@@ -935,6 +1052,10 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
   const [invoices, setInvoices] = useState([]);
   const [invLoading, setInvLoading] = useState(false);
   const hasInvoices = invoices.length > 0;
+  // An order cannot be closed while someone is still deciding on an invoice —
+  // approving it afterwards would change a total that was already declared
+  // final. The server refuses it too; this only puts the reason on screen.
+  const pendingInvoices = invoices.filter((inv) => inv.status === "PENDING").length;
 
   // How many approved products were dropped, and how many there were to begin
   // with. items[] already excludes them, so the original total is the two added
@@ -1009,14 +1130,15 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               <MailCheck className="h-4 w-4" />
             </button>
           )}
-          {/* This order has been sent back from the PO board before. Shown here
-              rather than buried, because the count is the first thing that
-              explains why a row is back at Entity Pending. */}
+          {/* Every decision taken on this order by hand — resets, product
+              drops, short closes. Shown here rather than buried, because the
+              count is the first thing that explains why a row is where it is:
+              back at Entity Pending, or closed short of what was ordered. */}
           {historyCount(row) > 0 && (
             <button
               type="button" onClick={() => onHistory(row)}
               className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100"
-              title="Resets and product decisions on this order"
+              title="Resets, product decisions and closures on this order"
             >
               <RotateCcw className="h-3 w-3" /> History · {historyCount(row)}
             </button>
@@ -1051,10 +1173,49 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               <ClipboardList className="h-3.5 w-3.5" /> Overall Summary
             </button>
           )}
+          {/* Shown disabled rather than hidden while an invoice is pending:
+              hiding it makes the option look like it does not exist, and the
+              user has no way to learn what to do about it. */}
+          {canShortClose && SHORT_CLOSABLE_STATUSES.has(row.status) && (
+            <button
+              type="button"
+              disabled={pendingInvoices > 0}
+              onClick={() => onShortClose(row)}
+              title={
+                pendingInvoices > 0
+                  ? `${pendingInvoices} invoice${pendingInvoices > 1 ? "s are" : " is"} awaiting approval — decide ${pendingInvoices > 1 ? "them" : "it"} first`
+                  : "Close this order with less than was ordered"
+              }
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 shadow-sm transition hover:border-amber-400 hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <Ban className="h-3.5 w-3.5" /> Short Close
+            </button>
+          )}
+          {canReopen && row.status === "SHORT_CLOSED" && (
+            <button
+              type="button" onClick={() => onReopen(row)}
+              title="Reopen this order so items can be received again"
+              className="inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 shadow-sm transition hover:border-violet-400 hover:bg-violet-100"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Reopen
+            </button>
+          )}
           {RECEIVABLE_STATUSES.has(row.status) && (
             <button
               type="button" onClick={() => onAddItems(row)}
               className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500"
+            >
+              <PlusCircle className="h-3.5 w-3.5" /> Add Items
+            </button>
+          )}
+          {/* Kept on screen, disabled, so the order plainly still HAS a
+              receiving action that short closing took away — rather than the
+              button vanishing and leaving no trace of why. */}
+          {row.status === "SHORT_CLOSED" && (
+            <button
+              type="button" disabled
+              title="This order is short closed — reopen it to receive more"
+              className="inline-flex cursor-not-allowed items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400 shadow-sm"
             >
               <PlusCircle className="h-3.5 w-3.5" /> Add Items
             </button>
@@ -1209,6 +1370,11 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
 /* ============================================================= */
 
 const TrackingOrdersComp = () => {
+  // Resolved once here and passed down, rather than each card looking it up.
+  const { permissions, isAdmin } = usePermissions();
+  const canShortClose = canDo(permissions, isAdmin, "SHORT_CLOSE");
+  const canReopen = canDo(permissions, isAdmin, "REOPEN");
+
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1374,6 +1540,10 @@ const TrackingOrdersComp = () => {
                 refreshSignal={boardVersion}
                 onAddEntity={(r) => setPopup({ type: "addEntity", row: r })}
                 onNotRequired={(r) => setPopup({ type: "notRequired", row: r })}
+                onShortClose={(r) => setPopup({ type: "shortClose", row: r })}
+                onReopen={(r) => setPopup({ type: "reopen", row: r })}
+                canShortClose={canShortClose}
+                canReopen={canReopen}
                 onHistory={(r) => setPopup({ type: "resetHistory", row: r })}
                 onAddItems={(r) => setView({ mode: "receiveInvoice", row: r })}
                 onEditInvoice={(r, invoice) => setView({ mode: "editInvoice", row: r, invoice })}
@@ -1401,6 +1571,9 @@ const TrackingOrdersComp = () => {
       )}
 
       {popup?.type === "addEntity" && <AddEntityPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
+      {(popup?.type === "shortClose" || popup?.type === "reopen") && (
+        <ClosureDecisionPopup row={popup.row} mode={popup.type} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
       {popup?.type === "notRequired" && (
         <ExclusionPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
       )}

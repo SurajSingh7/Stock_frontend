@@ -9,7 +9,7 @@ export const STAGES = [
   { key: "PO_APPROVED", label: "PO Approved" },
   { key: "IN_PROGRESS", label: "In Progress" },
   { key: "PARTIAL", label: "Partial" },
-  { key: "COMPLETED", label: "Completed" },
+  { key: "FULLY_CLOSED", label: "Fully Closed" },
 ];
 
 // Tracking-order status -> stage index on the 7-node tracker above.
@@ -21,7 +21,12 @@ export const stageIndexForStatus = (status) => {
     case "PO_APPROVED": return 3;
     case "IN_PROGRESS": return 4;
     case "PARTIAL": return 5;
-    case "COMPLETED": return 6;
+    case "FULLY_CLOSED": return 6;
+    // A short closed order stopped AT Partial — that is genuinely how far it
+    // got, and the tracker only reports progress. Mapping it to the last node
+    // would light up "Fully Closed" on an order that never received
+    // everything; the board's own badge is what says it is closed.
+    case "SHORT_CLOSED": return 5;
     default: return -1; // REJECTED / NOT_REQUIRED — off the happy path
   }
 };

@@ -25,7 +25,7 @@ const fmtTime = (d) =>
 
 /* What the chip counts: everything that ever happened to this order. */
 export const historyCount = (row) =>
-  (row?.resets?.length || 0) + (row?.activity?.length || 0);
+  (row?.resets?.length || 0) + (row?.activity?.length || 0) + (row?.closures?.length || 0);
 
 const Shell = ({ title, onClose, children }) => {
   const [mounted, setMounted] = useState(false);
@@ -76,10 +76,14 @@ const Empty = ({ text }) => <p className="py-8 text-center text-sm text-slate-50
 const OrderHistoryPopup = ({ row, onClose }) => {
   const resets = [...(row.resets || [])].reverse();
   const activity = [...(row.activity || [])].reverse();
+  const closures = [...(row.closures || [])].reverse();
 
   // Open on whichever tab actually has something, so the popup never greets
-  // you with an empty list when the other tab is full.
-  const [tab, setTab] = useState(resets.length === 0 && activity.length > 0 ? "products" : "resets");
+  // you with an empty list when another tab is full. Newest concern first:
+  // closures, then resets, then product decisions.
+  const [tab, setTab] = useState(
+    closures.length > 0 ? "closures" : resets.length === 0 && activity.length > 0 ? "products" : "resets"
+  );
 
   const tabCls = (id) =>
     "rounded-lg px-3 py-1.5 text-sm font-semibold transition " +
@@ -87,7 +91,10 @@ const OrderHistoryPopup = ({ row, onClose }) => {
 
   return (
     <Shell title={"History · " + (row.vendorName || "")} onClose={onClose}>
-      <div className="mb-4 flex gap-1.5 rounded-xl bg-slate-50 p-1">
+      <div className="mb-4 flex flex-wrap gap-1.5 rounded-xl bg-slate-50 p-1">
+        <button type="button" onClick={() => setTab("closures")} className={tabCls("closures")}>
+          Closures ({closures.length})
+        </button>
         <button type="button" onClick={() => setTab("resets")} className={tabCls("resets")}>
           Resets ({resets.length})
         </button>
@@ -96,7 +103,47 @@ const OrderHistoryPopup = ({ row, onClose }) => {
         </button>
       </div>
 
-      {tab === "resets" ? (
+      {tab === "closures" ? (
+        closures.length === 0 ? (
+          <Empty text="This order has never been short closed." />
+        ) : (
+          <div className="space-y-3">
+            {closures.map((c, i) => {
+              const closed = c.type === "SHORT_CLOSE";
+              // The shortfall as it stood AT the decision — the stored snapshot,
+              // never recomputed, because "how much did we walk away from" has
+              // to be answered as of that moment.
+              const shortfall = Math.max(0, (c.orderedQty || 0) - (c.receivedQty || 0));
+              return (
+                <div
+                  key={i}
+                  className={"rounded-xl border p-3 " + (closed ? "border-amber-200" : "border-violet-200")}
+                >
+                  <p className={"text-sm font-semibold " + (closed ? "text-amber-700" : "text-violet-700")}>
+                    {closed ? "Short Closed" : "Reopened"}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span>{fmt(c.at)} {fmtTime(c.at)}</span>
+                    <span>&middot;</span>
+                    <span>{c.byName || "—"}</span>
+                  </div>
+                  <p className="mt-1.5 text-sm text-slate-800">{c.reason || "—"}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-600 ring-1 ring-inset ring-slate-200">
+                      received {c.receivedQty ?? 0} of {c.orderedQty ?? 0}
+                    </span>
+                    {closed && shortfall > 0 ? (
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-amber-700 ring-1 ring-inset ring-amber-200">
+                        {shortfall} left unreceived
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
+      ) : tab === "resets" ? (
         resets.length === 0 ? (
           <Empty text="This order has never been reset." />
         ) : (
