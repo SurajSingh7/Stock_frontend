@@ -60,11 +60,13 @@ async function fetchTrackingDetail(trackingOrderId) {
   return json.data;
 }
 // Branches this user may receive goods into — their own HRMS branch, or a
-// wider set if an admin gave them one. Scoped on the invoices module, so
-// receiving staff don't need the Master > Branch permission to fill this
-// field. An empty list means "no branch assigned", not a failure.
+// wider set if an admin gave them one. ?module=invoices is what makes this
+// answer the receiving question specifically: the permission checked and the
+// branch scope applied are both the invoices module's, so receiving staff
+// don't need the Master > Branch permission to fill this field. An empty list
+// means "no branch assigned", not a failure.
 async function fetchReceivingBranches() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/receiving-branches`, { credentials: "include" });
+  const res = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=invoices`, { credentials: "include" });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
   return {

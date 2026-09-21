@@ -251,9 +251,13 @@ const ItemInventory = () => {
         const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
         const j = await r.json(); if (j.success) setCategories(j.data || []);
       } catch {}
+      // Only the branches this user can actually see inventory in — offering a
+      // branch whose rows are all scoped away would just filter to an empty
+      // list. ?module=inventory-items keeps this off branches:READ, which a
+      // stock viewer has no reason to hold.
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setBranches(j.data || []);
+        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=inventory-items`, { credentials: "include" });
+        const j = await r.json(); if (j.success) setBranches(j.data?.branches || []);
       } catch {}
     })();
   }, []);

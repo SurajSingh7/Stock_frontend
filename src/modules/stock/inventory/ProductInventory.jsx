@@ -149,9 +149,10 @@ const ProductInventory = () => {
         const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
         const j = await r.json(); if (j.success) setCategories(j.data || []);
       } catch {}
+      // Same scoped picker as Item Inventory — see the note there.
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setBranches(j.data || []);
+        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=inventory-items`, { credentials: "include" });
+        const j = await r.json(); if (j.success) setBranches(j.data?.branches || []);
       } catch {}
     })();
   }, []);
