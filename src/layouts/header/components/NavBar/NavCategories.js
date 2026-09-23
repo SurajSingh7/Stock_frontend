@@ -39,6 +39,18 @@ export const navCategories = [
       },
     ],
   },
+   {
+    category: "Invoice list",
+    items: [
+      {
+        name: "Invoice List",
+        path: "/stock/invoice-list",
+        moduleKey: "invoice-list",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+
 
   {
     category: "Quotation",
@@ -72,6 +84,12 @@ export const navCategories = [
         moduleKey: "quotations",
         action: ["VIEW_MENU"],
       },
+      {
+        name: "Payment Approval",
+        path: "/stock/payment-approval",
+        moduleKey: "payment-approval",
+        action: ["VIEW_MENU"],
+      },
     ],
   },
   {
@@ -87,6 +105,18 @@ export const navCategories = [
         name: "Invoice Approval",
         path: "/stock/invoice-approval",
         moduleKey: "invoices",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Payments",
+        path: "/stock/payments",
+        moduleKey: "payments",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Vendor Ledger",
+        path: "/stock/vendor-ledger",
+        moduleKey: "vendor-ledger",
         action: ["VIEW_MENU"],
       },
     ],
