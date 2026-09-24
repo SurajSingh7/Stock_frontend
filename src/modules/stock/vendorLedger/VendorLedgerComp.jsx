@@ -5,6 +5,9 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Info, Users, Receipt, FileMinus, PlusCircle, Wallet, AlertTriangle } from "lucide-react";
 import { SearchableSelect, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
+import {
+  MOVEMENT_FILTER, MOVEMENT_OPTIONS, STAGE_ORDER, stageMeta, stageBreakdown,
+} from "@/modules/stock/shared/ledgerStages";
 import PeriodPicker, { defaultPeriod } from "./PeriodPicker";
 import VendorLedgerDetail from "./VendorLedgerDetail";
 
@@ -44,6 +47,32 @@ const Tile = ({ icon: Icon, label, value, tone }) => (
   </div>
 );
 
+/*
+  Where the outstanding is stuck, under one vendor's figure.
+
+  Only non-zero stages are drawn: an empty strip is the right answer for a
+  vendor who owes nothing, and four zeroes on every settled row would bury the
+  rows that need attention.
+*/
+const StageStrip = ({ outstandingBy, stageCount }) => {
+  const parts = stageBreakdown(outstandingBy, stageCount);
+  if (!parts.length) return null;
+  return (
+    <span className="mt-1 flex flex-wrap justify-end gap-1">
+      {parts.map((p) => (
+        <span
+          key={p.key}
+          title={`${p.label} — ${p.count} ${p.count === 1 ? "invoice" : "invoices"}. ${p.hint}`}
+          className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${p.chip}`}
+        >
+          {p.short} {money(p.amount)}
+          {p.count > 1 && <span className="ml-0.5 opacity-60">&times;{p.count}</span>}
+        </span>
+      ))}
+    </span>
+  );
+};
+
 const VendorLedgerComp = () => {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({});
@@ -55,6 +84,8 @@ const VendorLedgerComp = () => {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [branchId, setBranchId] = useState("");
   const [ageing, setAgeing] = useState("");
+  // Every invoice by default. This is a filter, never the page's only truth.
+  const [movement, setMovement] = useState(MOVEMENT_FILTER.ALL);
   const [period, setPeriod] = useState(defaultPeriod);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -86,6 +117,7 @@ const VendorLedgerComp = () => {
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (branchId) params.set("branchId", branchId);
       if (ageing) params.set("ageing", ageing);
+      if (movement && movement !== MOVEMENT_FILTER.ALL) params.set("movement", movement);
       // Whichever tab produced them, only from/to ever reach the API.
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
@@ -102,7 +134,7 @@ const VendorLedgerComp = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debouncedSearch, branchId, ageing, period.from, period.to]);
+  }, [page, limit, debouncedSearch, branchId, ageing, movement, period.from, period.to]);
 
   useEffect(() => { loadList(); }, [loadList]);
 
@@ -111,7 +143,8 @@ const VendorLedgerComp = () => {
     [branches]
   );
 
-  const hasFilters = !!search || !!branchId || !!ageing;
+  const hasFilters = !!search || !!branchId || !!ageing || movement !== MOVEMENT_FILTER.ALL;
+  const stageTotals = totals.outstandingBy || {};
 
   if (view.mode === "ledger") {
     return (
@@ -144,6 +177,43 @@ const VendorLedgerComp = () => {
         </div>
       </div>
 
+      {/* The same outstanding, split by why it has not moved.
+
+          This is the answer to "I rejected that approval, why is it still
+          here": the money is still owed, and now the page says where it is
+          stuck instead of leaving a rejected invoice looking identical to one
+          about to be paid. */}
+      {(totals.outstanding || 0) > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <span className="mr-1 text-xs font-bold uppercase tracking-wider text-slate-500">
+            Outstanding is sitting at
+          </span>
+          {STAGE_ORDER.map((k) => {
+            const m = stageMeta(k);
+            const amount = stageTotals[k] || 0;
+            return (
+              <span
+                key={k} title={m.hint}
+                className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold ${
+                  amount > 0 ? m.tile : "border-slate-200 bg-slate-50 text-slate-300"
+                }`}
+              >
+                {m.label}
+                <span className="tabular-nums">{money(amount)}</span>
+              </span>
+            );
+          })}
+          {(totals.writtenOff || 0) > 0 && (
+            <span
+              className="ml-auto flex items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-600"
+              title="Invoices closed for less than their payable. This money will never be paid, so it is not outstanding."
+            >
+              Written off <span className="tabular-nums">{money(totals.writtenOff)}</span>
+            </span>
+          )}
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           <span>{error}</span>
@@ -169,11 +239,23 @@ const VendorLedgerComp = () => {
           >
             {AGEING_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          {/* "Only show it once an amount is entered", as a filter. Applied per
+              invoice, so a vendor whose invoices all fail it drops off the
+              list rather than showing a row of zeroes. */}
+          <select
+            value={movement} onChange={(e) => { setMovement(e.target.value); setPage(1); }}
+            className={inputCls} aria-label="Money movement"
+          >
+            {MOVEMENT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </div>
         {hasFilters && (
           <button
             type="button"
-            onClick={() => { setSearch(""); setBranchId(""); setAgeing(""); setPage(1); }}
+            onClick={() => {
+              setSearch(""); setBranchId(""); setAgeing("");
+              setMovement(MOVEMENT_FILTER.ALL); setPage(1);
+            }}
             className="mt-3 inline-flex items-center gap-1 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-1.5 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100"
           >
             <RotateCcw className="h-4 w-4" /> Clear Filter
@@ -222,7 +304,18 @@ const VendorLedgerComp = () => {
                   </td>
                   <td className={tdRight + " font-semibold text-slate-900"}>{money(r.netPayable)}</td>
                   <td className={tdRight + " text-emerald-700"}>{r.paid ? money(r.paid) : <span className="text-slate-300">—</span>}</td>
-                  <td className={tdRight + " font-bold text-slate-900"}>{money(r.outstanding)}</td>
+                  <td className={tdRight}>
+                    <span className="block font-bold text-slate-900">{money(r.outstanding)}</span>
+                    <StageStrip outstandingBy={r.outstandingBy} stageCount={r.stageCount} />
+                    {r.writtenOff > 0 && (
+                      <span
+                        className="mt-0.5 block text-[10px] text-slate-400"
+                        title="Closed for less than the payable — this will never be paid, so it is not outstanding"
+                      >
+                        {money(r.writtenOff)} written off
+                      </span>
+                    )}
+                  </td>
                   <td className={td}>
                     {r.overdueCount > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-200">
@@ -271,7 +364,9 @@ const VendorLedgerComp = () => {
 
       <p className="mt-3 text-xs text-slate-400">
         Billing, credit notes, misc and paid follow the period above. Outstanding and overdue are as on today,
-        across every invoice — how much is stuck is not a question about a date range.
+        across every invoice — how much is stuck is not a question about a date range. A rejected payment
+        approval still counts as outstanding: the vendor billed us either way, so the ledger says where it is
+        stuck rather than hiding it. Open a vendor&apos;s ledger to see it invoice by invoice.
       </p>
     </div>
   );

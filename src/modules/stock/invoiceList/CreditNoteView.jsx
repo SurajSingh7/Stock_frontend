@@ -9,14 +9,32 @@ import { inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI
 /* Credit note — a full page, not a popup, because picking units  */
 /* out of a 40-piece delivery needs room to search and scroll.    */
 /*                                                                */
-/* Two kinds of line, and they ask completely different           */
-/* questions. Individual: WHICH units (by serial / MAC). Group:    */
-/* HOW MUCH. The server decides what is claimable; this page only  */
-/* renders what it was told and sends back what was picked.        */
+/* ONE product at a time, chosen by tab. Stacking every product   */
+/* vertically meant scrolling past forty checkboxes to reach the  */
+/* second one; tabs put a single product's decision in front of   */
+/* you and nothing else.                                          */
+/*                                                                */
+/* Each product offers three choices rather than a checkbox list  */
+/* alone: nothing, ALL of it, or a hand-picked set. "All" exists   */
+/* because a whole faulty consignment is common, and ticking 38    */
+/* boxes to say so is not a decision — it is data entry.          */
+/*                                                                */
+/* Two kinds of line still ask different questions underneath.    */
+/* Individual: WHICH units (by serial / MAC). Group: HOW MUCH.    */
+/* The server decides what is claimable; this page only renders   */
+/* what it was told and sends back what was picked.               */
 /* ============================================================= */
 
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+// What one product line is currently claiming. Held per product so switching
+// tabs never loses what was decided on the one before.
+const MODE = { NONE: "NONE", ALL: "ALL", PICK: "PICK" };
+
+// Mirrors the server: basic at the billed rate, plus that line's GST slab. A
+// credit note that gave back basic only would under-settle by the tax.
+const withGst = (basic, gstRate) => basic + (basic * (gstRate || 0)) / 100;
 
 const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
   const isEdit = !!adjustment;
@@ -25,10 +43,12 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  // quotationItemId -> Set of inventoryItemIds (individual) or a number (group)
-  const [picked, setPicked] = useState({});
-  const [quantities, setQuantities] = useState({});
+  const [activeTab, setActiveTab] = useState(null);
+  const [modes, setModes] = useState({});           // quotationItemId -> MODE
+  const [picked, setPicked] = useState({});         // quotationItemId -> Set of inventoryItemIds
+  const [quantities, setQuantities] = useState({}); // quotationItemId -> string (group lines)
   const [unitSearch, setUnitSearch] = useState({});
+
   const [extras, setExtras] = useState(() =>
     isEdit ? (adjustment.extras || []).map((e) => ({ note: e.note || "", amount: String(e.amount ?? "") })) : []
   );
@@ -53,15 +73,28 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load items");
       const loaded = json.data?.lines || [];
       setLines(loaded);
+      setActiveTab(loaded[0] ? String(loaded[0].quotationItemId) : null);
 
       if (isEdit) {
+        const nextModes = {};
         const nextPicked = {};
         const nextQty = {};
         loaded.forEach((l) => {
           const key = String(l.quotationItemId);
-          if ((l.selectedUnitIds || []).length) nextPicked[key] = new Set(l.selectedUnitIds.map(String));
-          if (l.selectedQuantity) nextQty[key] = String(l.selectedQuantity);
+          if ((l.selectedUnitIds || []).length) {
+            nextPicked[key] = new Set(l.selectedUnitIds.map(String));
+            /*
+              Reopened as ALL only when the claim really was everything
+              creditable. Defaulting to ALL would silently widen a hand-picked
+              claim the moment somebody opened the note to fix its reason.
+            */
+            nextModes[key] = l.selectedUnitIds.length === l.creditableQuantity ? MODE.ALL : MODE.PICK;
+          } else if (l.selectedQuantity) {
+            nextQty[key] = String(l.selectedQuantity);
+            nextModes[key] = l.selectedQuantity === l.creditableQuantity ? MODE.ALL : MODE.PICK;
+          }
         });
+        setModes(nextModes);
         setPicked(nextPicked);
         setQuantities(nextQty);
       }
@@ -75,6 +108,9 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
 
   useEffect(() => { load(); }, [load]);
 
+  const modeOf = useCallback((key) => modes[key] || MODE.NONE, [modes]);
+  const setMode = (key, mode) => setModes((p) => ({ ...p, [key]: mode }));
+
   const toggleUnit = (key, unitId) => {
     setPicked((prev) => {
       const set = new Set(prev[key] || []);
@@ -82,7 +118,28 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
       else set.add(unitId);
       return { ...prev, [key]: set };
     });
+    // Ticking a box IS picking — the radio follows the action rather than
+    // making someone set the mode first and then wonder why nothing saved.
+    setMode(key, MODE.PICK);
   };
+
+  // What one product line currently claims, in units and in rupees.
+  const lineClaim = useCallback(
+    (l) => {
+      const key = String(l.quotationItemId);
+      const mode = modeOf(key);
+      const isIndividual = l.trackingMethod === "individual";
+
+      let qty = 0;
+      if (mode === MODE.ALL) qty = l.creditableQuantity || 0;
+      else if (mode === MODE.PICK) {
+        qty = isIndividual ? picked[key]?.size || 0 : Number(quantities[key]) || 0;
+      }
+      const basic = qty * (l.rate || 0);
+      return { qty, amount: Math.round(withGst(basic, l.gstRate) * 100) / 100 };
+    },
+    [modeOf, picked, quantities]
+  );
 
   const addExtra = () => setExtras((p) => [...p, { note: "", amount: "" }]);
   const updateExtra = (i, field, value) =>
@@ -95,26 +152,18 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
     preview, never the figure that gets stored.
   */
   const totals = useMemo(() => {
-    let itemsAmount = 0;
-    lines.forEach((l) => {
-      const key = String(l.quotationItemId);
-      const qty = l.trackingMethod === "individual" ? (picked[key]?.size || 0) : (Number(quantities[key]) || 0);
-      // Mirrors the server: basic at the billed rate, plus that line GST slab.
-      // A credit note that gave back basic only would under-settle by the tax.
-      const basic = qty * (l.rate || 0);
-      itemsAmount += basic + (basic * (l.gstRate || 0)) / 100;
-    });
+    const itemsAmount = lines.reduce((s, l) => s + lineClaim(l).amount, 0);
     const extrasAmount = extras.reduce((s, e) => s + (Number(e.amount) || 0), 0);
     return {
       itemsAmount: Math.round(itemsAmount * 100) / 100,
       extrasAmount: Math.round(extrasAmount * 100) / 100,
       total: Math.round((itemsAmount + extrasAmount) * 100) / 100,
     };
-  }, [lines, picked, quantities, extras]);
+  }, [lines, lineClaim, extras]);
 
-  const pickedUnitCount = useMemo(
-    () => Object.values(picked).reduce((s, set) => s + (set?.size || 0), 0),
-    [picked]
+  const totalUnits = useMemo(
+    () => lines.reduce((s, l) => s + lineClaim(l).qty, 0),
+    [lines, lineClaim]
   );
 
   // While editing, the payable already has the OLD figure taken off it — so
@@ -129,11 +178,24 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
       const payloadLines = lines
         .map((l) => {
           const key = String(l.quotationItemId);
+          const mode = modeOf(key);
+          if (mode === MODE.NONE) return null;
+
           if (l.trackingMethod === "individual") {
-            const ids = [...(picked[key] || [])];
+            /*
+              ALL sends every unit the server said was creditable, so what
+              travels is always an explicit list. The server never has to
+              re-interpret what "all" meant at the moment the form was open —
+              by then another note may have taken some of those units.
+            */
+            const ids =
+              mode === MODE.ALL
+                ? l.units.filter((u) => !u.blockReason).map((u) => String(u._id))
+                : [...(picked[key] || [])];
             return ids.length ? { quotationItemId: key, inventoryItemIds: ids } : null;
           }
-          const qty = Number(quantities[key]) || 0;
+
+          const qty = mode === MODE.ALL ? l.creditableQuantity || 0 : Number(quantities[key]) || 0;
           return qty > 0 ? { quotationItemId: key, quantity: qty } : null;
         })
         .filter(Boolean);
@@ -168,6 +230,9 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
     }
   };
 
+  const active = lines.find((l) => String(l.quotationItemId) === activeTab) || null;
+  const claimed = lines.filter((l) => lineClaim(l).qty > 0);
+
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mx-auto max-w-5xl">
@@ -186,7 +251,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
             <span>{invoice.vendorName}</span>
             <span>{invoice.poNumber || "—"}</span>
             <span>Invoice date {fmtDate(invoice.invoiceDate)}</span>
-            <span>Payable <strong className="text-slate-900">{money(invoice.payable)}</strong></span>
+            <span>Payable <strong className="text-slate-900">{money(basePayable)}</strong></span>
           </div>
         </div>
 
@@ -197,7 +262,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
           </div>
         )}
 
-        {/* ── Faulty items ─────────────────────────────────────── */}
+        {/* ── Faulty items, one product per tab ────────────────── */}
         <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-700">Faulty items</p>
 
@@ -206,132 +271,56 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
           ) : lines.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">This invoice has no lines.</p>
           ) : (
-            <div className="space-y-4">
-              {lines.map((l) => {
-                const key = String(l.quotationItemId);
-                const isIndividual = l.trackingMethod === "individual";
-                const term = (unitSearch[key] || "").trim().toLowerCase();
+            <>
+              <div className="mb-5 flex flex-wrap gap-2">
+                {lines.map((l) => {
+                  const key = String(l.quotationItemId);
+                  const on = activeTab === key;
+                  const claim = lineClaim(l);
+                  return (
+                    <button
+                      key={key} type="button" onClick={() => setActiveTab(key)}
+                      className={`rounded-xl border px-4 py-2.5 text-left transition ${
+                        on
+                          ? "border-indigo-400 bg-indigo-50/60 shadow-sm"
+                          : "border-slate-200 bg-white hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className={`block text-sm font-semibold ${on ? "text-indigo-700" : "text-slate-800"}`}>
+                        {l.productName}
+                        {/* The badge is what makes tabs safe: what was decided
+                            on a product is visible without opening it. */}
+                        {claim.qty > 0 && (
+                          <span className="ml-1.5 font-bold text-emerald-600">({claim.qty})</span>
+                        )}
+                      </span>
+                      <span className="block text-[11px] text-slate-400">
+                        {l.trackingMethod === "individual" ? "Individual" : "Group"} ·{" "}
+                        {l.creditableQuantity} {unitLabel(l.unit)} creditable
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
 
-                // Blocked units stay on screen with their reason. Hiding them
-                // would leave someone hunting for stock they can see elsewhere.
-                const visible = isIndividual
-                  ? l.units.filter((u) =>
-                      !term ||
-                      Object.values(u.fieldValues || {}).some((v) =>
-                        String(v ?? "").toLowerCase().includes(term)
-                      )
-                    )
-                  : [];
-
-                return (
-                  <div key={key} className="rounded-xl border border-slate-200">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{l.productName}</p>
-                        <p className="text-xs text-slate-500">
-                          {isIndividual ? "Individual" : "Group"} · {unitLabel(l.unit)} ·
-                          {" "}Received {l.receivedQuantity}
-                          {l.focQuantity > 0 ? ` + ${l.focQuantity} FOC` : ""} ·
-                          {" "}{money(l.rate)} each{l.gstRate > 0 ? ` + ${l.gstRate}% GST` : ""}
-                        </p>
-                      </div>
-                      {isIndividual ? (
-                        <div className="relative">
-                          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                          <input
-                            type="text"
-                            value={unitSearch[key] || ""}
-                            onChange={(e) => setUnitSearch((p) => ({ ...p, [key]: e.target.value }))}
-                            placeholder="Search serial / MAC…"
-                            className="w-52 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100"
-                          />
-                        </div>
-                      ) : (
-                        <span className="text-xs font-semibold text-slate-600">
-                          {l.creditableQuantity} {unitLabel(l.unit)} still creditable
-                        </span>
-                      )}
-                    </div>
-
-                    {isIndividual ? (
-                      l.units.length === 0 ? (
-                        <p className="px-4 py-4 text-sm text-slate-400">No units recorded for this line.</p>
-                      ) : (
-                        <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
-                          {visible.map((u) => {
-                            const blocked = !!u.blockReason;
-                            const on = picked[key]?.has(String(u._id));
-                            return (
-                              <label
-                                key={u._id}
-                                className={`flex flex-wrap items-center gap-3 px-4 py-2 text-sm ${
-                                  blocked ? "cursor-not-allowed bg-slate-50 text-slate-400" : "cursor-pointer hover:bg-indigo-50/40"
-                                }`}
-                              >
-                                <input
-                                  type="checkbox" disabled={blocked} checked={!!on}
-                                  onChange={() => toggleUnit(key, String(u._id))}
-                                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40"
-                                />
-                                {l.fields.map((f) => (
-                                  <span key={f.code} className="min-w-0">
-                                    <span className="text-xs text-slate-400">{f.label}: </span>
-                                    <span className={blocked ? "" : "text-slate-800"}>
-                                      {u.fieldValues?.[f.code] ?? "—"}
-                                    </span>
-                                  </span>
-                                ))}
-                                {u.isFoc && (
-                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">FOC</span>
-                                )}
-                                {blocked && (
-                                  <span className="ml-auto rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                    {u.blockReason}
-                                  </span>
-                                )}
-                              </label>
-                            );
-                          })}
-                          {visible.length === 0 && (
-                            <p className="px-4 py-4 text-sm text-slate-400">No unit matches that search.</p>
-                          )}
-                        </div>
-                      )
-                    ) : (
-                      <div className="flex flex-wrap items-end gap-4 px-4 py-3">
-                        <div>
-                          <label htmlFor={`qty-${key}`} className="mb-1.5 block text-xs font-semibold text-slate-700">
-                            Faulty quantity ({unitLabel(l.unit)})
-                          </label>
-                          <input
-                            id={`qty-${key}`}
-                            type="number" min="0" max={l.creditableQuantity}
-                            value={quantities[key] ?? ""}
-                            onChange={(e) => setQuantities((p) => ({ ...p, [key]: e.target.value }))}
-                            disabled={l.creditableQuantity <= 0}
-                            className="w-36 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
-                          />
-                        </div>
-                        <p className="pb-2 text-sm font-semibold tabular-nums text-slate-900">
-                          {money((Number(quantities[key]) || 0) * (l.rate || 0))}
-                        </p>
-                      </div>
-                    )}
-
-                    {isIndividual && (picked[key]?.size || 0) > 0 && (
-                      <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50/60 px-4 py-2 text-xs">
-                        <span className="text-slate-500">
-                          {picked[key].size} of {l.units.filter((u) => !u.blockReason).length} selected
-                        </span>
-                        <span className="font-semibold tabular-nums text-slate-900">
-                          {money(picked[key].size * (l.rate || 0))}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+              {active && (
+                <ProductPanel
+                  line={active}
+                  mode={modeOf(String(active.quotationItemId))}
+                  onMode={(m) => setMode(String(active.quotationItemId), m)}
+                  picked={picked[String(active.quotationItemId)]}
+                  onToggleUnit={(id) => toggleUnit(String(active.quotationItemId), id)}
+                  quantity={quantities[String(active.quotationItemId)] ?? ""}
+                  onQuantity={(v) => {
+                    setQuantities((p) => ({ ...p, [String(active.quotationItemId)]: v }));
+                    setMode(String(active.quotationItemId), MODE.PICK);
+                  }}
+                  search={unitSearch[String(active.quotationItemId)] || ""}
+                  onSearch={(v) => setUnitSearch((p) => ({ ...p, [String(active.quotationItemId)]: v }))}
+                  claim={lineClaim(active)}
+                />
+              )}
+            </>
           )}
         </div>
 
@@ -410,9 +399,32 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
 
         {/* ── Summary ──────────────────────────────────────────── */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="space-y-1.5 text-sm">
+          {/* Listed per product, because the tabs show only one at a time —
+              without this you would have to click through them to find out
+              what the note actually claims. */}
+          {claimed.length > 0 && (
+            <div className="mb-3 space-y-1">
+              {claimed.map((l) => {
+                const c = lineClaim(l);
+                return (
+                  <div key={String(l.quotationItemId)} className="flex justify-between text-sm">
+                    <span className="text-slate-600">
+                      {l.productName}
+                      <span className="ml-1.5 text-xs text-slate-400">
+                        {c.qty} {unitLabel(l.unit)}
+                        {modeOf(String(l.quotationItemId)) === MODE.ALL ? " · all" : ""}
+                      </span>
+                    </span>
+                    <span className="tabular-nums text-slate-800">{money(c.amount)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="space-y-1.5 border-t border-slate-100 pt-3 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-500">Faulty items{pickedUnitCount > 0 ? ` (${pickedUnitCount} units)` : ""}</span>
+              <span className="text-slate-500">Faulty items{totalUnits > 0 ? ` (${totalUnits})` : ""}</span>
               <span className="font-medium tabular-nums text-slate-900">{money(totals.itemsAmount)}</span>
             </div>
             <div className="flex justify-between">
@@ -438,9 +450,9 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
             </p>
           )}
 
-          {pickedUnitCount > 0 && (
+          {totalUnits > 0 && (
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
-              {pickedUnitCount} inventory {pickedUnitCount === 1 ? "unit" : "units"} will be marked faulty and leave available stock
+              {totalUnits} inventory {totalUnits === 1 ? "unit" : "units"} will be marked faulty and leave available stock
               {isEdit ? ". Units dropped from this note go back to available." : " as soon as this is saved."}
             </p>
           )}
@@ -460,6 +472,165 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+};
+
+/* ── One product's panel ───────────────────────────────────────── */
+/* Declared at module scope, not inside the page: a component built */
+/* during a render is a new type on every render, and React would    */
+/* remount the whole unit list — losing scroll position on exactly   */
+/* the list long enough to have one.                                 */
+const ProductPanel = ({
+  line: l, mode, onMode, picked, onToggleUnit,
+  quantity, onQuantity, search, onSearch, claim,
+}) => {
+  const isIndividual = l.trackingMethod === "individual";
+  const term = (search || "").trim().toLowerCase();
+  const allAmount =
+    Math.round(withGst((l.creditableQuantity || 0) * (l.rate || 0), l.gstRate) * 100) / 100;
+
+  // Blocked units stay on screen with their reason. Hiding them would leave
+  // someone hunting for stock they can see elsewhere.
+  const visible = isIndividual
+    ? l.units.filter((u) =>
+        !term ||
+        Object.values(u.fieldValues || {}).some((v) =>
+          String(v ?? "").toLowerCase().includes(term)
+        )
+      )
+    : [];
+
+  const radio = (value, label, extra) => (
+    <label
+      className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm transition ${
+        mode === value ? "border-indigo-300 bg-indigo-50/60" : "border-slate-200 hover:bg-slate-50"
+      }`}
+    >
+      <span className="flex items-center gap-2.5">
+        <input
+          type="radio" name={`mode-${l.quotationItemId}`} checked={mode === value}
+          onChange={() => onMode(value)}
+          className="h-4 w-4 border-slate-300 text-indigo-600 focus:ring-indigo-500"
+        />
+        <span className="text-slate-800">{label}</span>
+      </span>
+      {extra}
+    </label>
+  );
+
+  return (
+    <div className="rounded-xl border border-slate-200">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{l.productName}</p>
+          <p className="text-xs text-slate-500">
+            {money(l.rate)} each{l.gstRate > 0 ? ` + ${l.gstRate}% GST` : ""} ·
+            {" "}Received {l.receivedQuantity}
+            {l.focQuantity > 0 ? ` + ${l.focQuantity} FOC` : ""} ·
+            {" "}{l.creditableQuantity} {unitLabel(l.unit)} still creditable
+          </p>
+        </div>
+        {claim.qty > 0 && (
+          <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+            {claim.qty} claimed · {money(claim.amount)}
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-2 p-4">
+        {radio(MODE.NONE, "Nothing from this product")}
+        {radio(
+          MODE.ALL,
+          `All ${l.creditableQuantity} creditable ${unitLabel(l.unit) || "units"}`,
+          l.creditableQuantity > 0 ? (
+            <span className="text-sm font-semibold tabular-nums text-slate-900">{money(allAmount)}</span>
+          ) : (
+            <span className="text-xs text-slate-400">nothing creditable</span>
+          )
+        )}
+        {radio(
+          MODE.PICK,
+          isIndividual ? "Pick units" : "Enter quantity",
+          isIndividual ? (
+            <span className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text" value={search}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => onSearch(e.target.value)}
+                placeholder="Search serial / MAC…"
+                className="w-48 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-3 text-xs text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100"
+              />
+            </span>
+          ) : (
+            <input
+              type="number" min="0" max={l.creditableQuantity}
+              value={quantity}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => onQuantity(e.target.value)}
+              disabled={l.creditableQuantity <= 0}
+              placeholder={unitLabel(l.unit)}
+              className="w-28 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
+            />
+          )
+        )}
+
+        {/* The unit list appears only while picking. Under "All" it is not a
+            choice any more, and leaving it visible invites someone to click a
+            box that will be overridden. */}
+        {isIndividual && mode === MODE.PICK && (
+          l.units.length === 0 ? (
+            <p className="px-1 py-3 text-sm text-slate-400">No units recorded for this line.</p>
+          ) : (
+            <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
+              {visible.map((u) => {
+                const blocked = !!u.blockReason;
+                const on = picked?.has(String(u._id));
+                return (
+                  <label
+                    key={u._id}
+                    className={`flex flex-wrap items-center gap-3 px-3 py-2 text-sm ${
+                      blocked ? "cursor-not-allowed bg-slate-50 text-slate-400" : "cursor-pointer hover:bg-indigo-50/40"
+                    }`}
+                  >
+                    <input
+                      type="checkbox" disabled={blocked} checked={!!on}
+                      onChange={() => onToggleUnit(String(u._id))}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-40"
+                    />
+                    {l.fields.map((f) => (
+                      <span key={f.code} className="min-w-0">
+                        <span className="text-xs text-slate-400">{f.label}: </span>
+                        <span className={blocked ? "" : "text-slate-800"}>
+                          {u.fieldValues?.[f.code] ?? "—"}
+                        </span>
+                      </span>
+                    ))}
+                    {u.isFoc && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">FOC</span>
+                    )}
+                    {blocked && (
+                      <span className="ml-auto rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        {u.blockReason}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+              {visible.length === 0 && (
+                <p className="px-3 py-4 text-sm text-slate-400">No unit matches that search.</p>
+              )}
+            </div>
+          )
+        )}
+
+        {isIndividual && mode === MODE.PICK && (picked?.size || 0) > 0 && (
+          <p className="px-1 text-xs text-slate-500">
+            {picked.size} of {l.units.filter((u) => !u.blockReason).length} selectable units picked
+          </p>
+        )}
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Modal, money } from "@/modules/stock/shared/StockSharedUI";
 import { paymentTermLabel } from "@/modules/stock/shared/paymentTerms";
+import VendorInvoicesTab from "./VendorInvoicesTab";
 
 /* ============================================================= */
 /* One vendor, twelve months, balance carried forward.            */
@@ -35,6 +36,27 @@ const num = (n, cls = "text-slate-700") =>
   a NEW component type on every render, so React unmounts and remounts its
   whole subtree each time — losing scroll position and any local state with it.
 */
+/*
+  Which invoice an event row belongs to.
+
+  invoiceNumber on its own identified nothing: nothing in the system makes it
+  unique, so two invoices can carry the same number and their rows read as one
+  invoice listed twice — which is exactly what looked like the latest invoice
+  overwriting the earlier one. The PO number and the invoice's own date are
+  what tell them apart.
+*/
+const InvoiceRef = ({ row }) => (
+  <span className="min-w-0">
+    <span className="font-medium text-slate-800">{row.invoiceNumber}</span>
+    {row.poNumber && <span className="ml-1.5 text-[11px] text-slate-400">{row.poNumber}</span>}
+    {row.invoiceDate && (
+      <span className="ml-1.5 text-[11px] text-slate-400">
+        billed {fmtDate(row.invoiceDate)}
+      </span>
+    )}
+  </span>
+);
+
 const Section = ({ title, rows, render, tone }) =>
   rows.length === 0 ? null : (
     <div className="mb-4">
@@ -103,8 +125,8 @@ const MonthDetailPopup = ({ vendor, year, month, onClose }) => {
             title="Credit notes" tone="text-rose-700" rows={data.credits}
             render={(r, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50/40 px-3 py-2 text-sm">
-                <span className="font-medium text-slate-800">{r.invoiceNumber}</span>
-                <span className="text-xs text-slate-500">{fmtDate(r.date)}</span>
+                <InvoiceRef row={r} />
+                <span className="text-xs text-slate-500">raised {fmtDate(r.date)}</span>
                 <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{r.reason}</span>
                 <span className="text-xs text-slate-500">
                   {money(r.basicAmount)} + GST {money(r.gstAmount)}
@@ -117,8 +139,8 @@ const MonthDetailPopup = ({ vendor, year, month, onClose }) => {
             title="Misc charges" tone="text-sky-700" rows={data.miscs}
             render={(r, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50/40 px-3 py-2 text-sm">
-                <span className="font-medium text-slate-800">{r.invoiceNumber}</span>
-                <span className="text-xs text-slate-500">{fmtDate(r.date)}</span>
+                <InvoiceRef row={r} />
+                <span className="text-xs text-slate-500">raised {fmtDate(r.date)}</span>
                 <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{r.reason}</span>
                 <span className="w-28 text-right font-semibold tabular-nums text-sky-700">+{money(r.amount)}</span>
               </div>
@@ -128,17 +150,33 @@ const MonthDetailPopup = ({ vendor, year, month, onClose }) => {
             title="Payments" tone="text-emerald-700" rows={data.payments}
             render={(r, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-2 text-sm">
-                <span className="font-medium text-slate-800">{r.invoiceNumber}</span>
-                <span className="text-xs text-slate-500">{fmtDate(r.date)}</span>
+                <InvoiceRef row={r} />
+                <span className="text-xs text-slate-500">paid {fmtDate(r.date)}</span>
                 <span className="text-xs text-slate-500">{r.mode}</span>
                 {r.refNo && <span className="text-xs text-slate-400">{r.refNo}</span>}
                 <span className="ml-auto w-28 text-right font-semibold tabular-nums text-emerald-700">{money(r.amount)}</span>
               </div>
             )}
           />
+          {/* Its own section, not folded into Payments: no money left the
+              building. It reduces the balance because the debt was dropped,
+              and reading it as a payment would make a bank statement
+              impossible to reconcile against this. */}
+          <Section
+            title="Written off" tone="text-slate-600" rows={data.writeOffs || []}
+            render={(r, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-300 bg-slate-100/60 px-3 py-2 text-sm">
+                <InvoiceRef row={r} />
+                <span className="text-xs text-slate-500">closed {fmtDate(r.date)}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-slate-500">{r.reason}</span>
+                <span className="w-28 text-right font-semibold tabular-nums text-slate-600">−{money(r.amount)}</span>
+              </div>
+            )}
+          />
 
           {data.billing.length === 0 && data.credits.length === 0 &&
-           data.miscs.length === 0 && data.payments.length === 0 && (
+           data.miscs.length === 0 && data.payments.length === 0 &&
+           (data.writeOffs || []).length === 0 && (
             <p className="py-8 text-center text-sm text-slate-400">Nothing happened in this month.</p>
           )}
         </>
@@ -155,6 +193,15 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [openMonth, setOpenMonth] = useState(null);
+  /*
+    Two levels of the same vendor, side by side.
+
+    Months answers "what happened when" and needs the carry-forward. Invoices
+    answers "which invoice is this and what is happening to it", which the
+    month view cannot: one invoice's payments can land across several months,
+    so it appears in each of them and nowhere as itself.
+  */
+  const [tab, setTab] = useState("months");
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -238,6 +285,29 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
         </div>
       )}
 
+      <div className="mb-4 flex gap-2">
+        {[
+          { key: "months", label: "Months", hint: "Twelve months with the balance carried forward" },
+          { key: "invoices", label: "Invoices", hint: "One row per invoice, with where its payment stands" },
+        ].map((x) => (
+          <button
+            key={x.key} type="button" onClick={() => setTab(x.key)} title={x.hint}
+            className={`rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition ${
+              tab === x.key
+                ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+            }`}
+            aria-pressed={tab === x.key}
+          >
+            {x.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "invoices" ? (
+        <VendorInvoicesTab vendorId={vendorId} year={year} />
+      ) : (
+      <>
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full">
           <thead className="bg-slate-50/80">
@@ -253,6 +323,7 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
               <th className={thRight}>Credit Notes</th>
               <th className={thRight}>Net Payable</th>
               <th className={thRight}>Paid</th>
+              <th className={thRight}>Written Off</th>
               <th className={thRight}>Closing</th>
             </tr>
           </thead>
@@ -260,17 +331,18 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
             {/* The opening line is the whole point of a ledger: this year did
                 not start from zero unless it actually did. */}
             <tr className="bg-slate-50/60">
-              <td className={td + " font-semibold text-slate-600"} colSpan={11}>
+              <td className={td + " font-semibold text-slate-600"} colSpan={12}>
                 Opening balance carried forward
               </td>
               <td className={tdRight + " font-bold text-slate-900"}>{money(data?.opening || 0)}</td>
             </tr>
 
             {loading ? (
-              <tr><td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={13} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : (
               rows.map((r) => {
-                const quiet = r.invoiceCount === 0 && !r.paid && !r.creditNotes && !r.misc;
+                const quiet =
+                  r.invoiceCount === 0 && !r.paid && !r.creditNotes && !r.misc && !r.writtenOff;
                 return (
                   <tr
                     key={r.month}
@@ -290,6 +362,11 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
                     <td className={tdRight}>{r.creditNotes ? <span className="text-rose-700">−{money(r.creditNotes)}</span> : <span className="text-slate-300">—</span>}</td>
                     <td className={tdRight}>{num(r.netPayable, "font-semibold text-slate-900")}</td>
                     <td className={tdRight}>{num(r.paid, "font-medium text-emerald-700")}</td>
+                    <td className={tdRight}>
+                      {r.writtenOff
+                        ? <span className="text-slate-500" title="Invoices closed for less than their payable">−{money(r.writtenOff)}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
                     <td className={tdRight + " font-bold text-slate-900"}>{money(r.closing)}</td>
                   </tr>
                 );
@@ -309,6 +386,7 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
               <td className={tdRight + " font-bold text-rose-700"}>{t.creditNotes ? `−${money(t.creditNotes)}` : money(0)}</td>
               <td className={tdRight + " font-bold text-slate-900"}>{money(t.netPayable || 0)}</td>
               <td className={tdRight + " font-bold text-emerald-700"}>{money(t.paid || 0)}</td>
+              <td className={tdRight + " font-bold text-slate-500"}>{t.writtenOff ? `−${money(t.writtenOff)}` : money(0)}</td>
               <td className={tdRight + " font-bold text-slate-900"}>{money(data?.closing || 0)}</td>
             </tr>
           </tfoot>
@@ -317,8 +395,11 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
 
       <p className="mt-3 text-xs text-slate-400">
         Billing sits in the month of the invoice date, credit notes and misc in the month they were accepted,
-        payments in the month they were paid. Click any month to see the documents behind it.
+        payments in the month they were paid. Written off is an invoice closed for less than its payable — it
+        reduces the balance without any money leaving. Click any month to see the documents behind it.
       </p>
+      </>
+      )}
 
       {openMonth && (
         <MonthDetailPopup

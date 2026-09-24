@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import {
-  RotateCcw, Send, Wallet, FileMinus, PlusCircle, Layers, Paperclip, X,
+  RotateCcw, Send, Wallet, FileMinus, PlusCircle, Layers,
   LayoutGrid, Clock, CheckCircle2, XCircle, CreditCard, PieChart, CalendarClock,
   Pencil, Trash2, AlertTriangle,
 } from "lucide-react";
@@ -12,10 +12,11 @@ import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared
 import { paymentTermShort } from "@/modules/stock/shared/paymentTerms";
 import {
   APPROVAL_STATUS, approvalMeta, PAYMENT_STATE, paymentStateMeta,
-  PAYABLE_FILTER, PAYABLE_OPTIONS, PAYMENT_MODES, PAYMENT_MODE_LABEL,
+  PAYABLE_FILTER, PAYABLE_OPTIONS,
 } from "@/modules/stock/shared/paymentStatus";
 import { usePermissions } from "@/context/PermissionContext";
 import CreditNoteView from "@/modules/stock/invoiceList/CreditNoteView";
+import RecordPaymentView from "@/modules/stock/payments/RecordPaymentView";
 import { MiscChargePopup, AdjustmentCard, ADJUSTMENT_META } from "@/modules/stock/invoiceList/AdjustmentPopups";
 
 /* ============================================================= */
@@ -35,7 +36,6 @@ const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
-const todayStr = () => new Date().toISOString().slice(0, 10);
 
 const th = "px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500";
 const thRight = th + " text-right";
@@ -327,48 +327,45 @@ const FixAndResendPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChang
   );
 };
 
-/* ── Record a payment ──────────────────────────────────────────── */
-/* An instalment, not a settlement: the balance is what limits the  */
-/* amount, and the rows already recorded are shown so nobody pays   */
-/* the same thing twice.                                            */
-const RecordPaymentPopup = ({ invoice, onClose, onDone }) => {
-  const [amount, setAmount] = useState(String(invoice.balance ?? ""));
-  const [mode, setMode] = useState("NEFT");
-  const [paidOn, setPaidOn] = useState(todayStr());
-  const [refNo, setRefNo] = useState("");
-  const [remarks, setRemarks] = useState("");
-  const [files, setFiles] = useState([]);
+/* ── The last look before it goes to the approval team ────────── */
+/* Sending was a one-click button, and that was wrong: what the    */
+/* approval team is asked to release is the payable AFTER every    */
+/* credit note and misc charge, and the person sending it has no   */
+/* other place on this screen where those add up in front of them. */
+/*                                                                 */
+/* So the popup is the figure, itemised, with the send button      */
+/* underneath it — the same content the approval team will see,    */
+/* shown to the sender first.                                      */
+const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
+  const [rows, setRows] = useState(null);
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const value = Number(amount) || 0;
-  const overBalance = value > (invoice.balance || 0);
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/adjustments`, { credentials: "include" });
+      const json = await res.json();
+      setRows(res.ok && json.success ? json.data || [] : []);
+    } catch {
+      // Non-fatal: the totals below still come off the row itself, so a failed
+      // load costs the itemisation, not the figure being approved.
+      setRows([]);
+    }
+  }, [invoice._id]);
 
-  const pickFiles = (e) => {
-    const picked = [...(e.target.files || [])];
-    e.target.value = "";
-    // Mirrors the server cap so the sixth file is refused here rather than
-    // silently dropped by multer.
-    setFiles((prev) => [...prev, ...picked].slice(0, 5));
-  };
+  useEffect(() => { load(); }, [load]);
 
-  const submit = async () => {
+  const send = async () => {
     setBusy(true); setError(null);
     try {
-      const fd = new FormData();
-      fd.append("amount", String(value));
-      fd.append("mode", mode);
-      fd.append("paidOn", paidOn);
-      fd.append("refNo", refNo);
-      fd.append("remarks", remarks);
-      files.forEach((f) => fd.append("proofs", f));
-
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/record`, {
-        method: "POST", credentials: "include", body: fd,
+      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/send-for-approval`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ reason: note.trim() }),
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to record payment");
-      onDone();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
+      onSent();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -376,125 +373,134 @@ const RecordPaymentPopup = ({ invoice, onClose, onDone }) => {
     }
   };
 
-  const history = invoice.payments || [];
+  const credits = (rows || []).filter((a) => a.type === "CREDIT_NOTE");
+  const miscs = (rows || []).filter((a) => a.type === "MISC");
+  const creditTotal = credits.reduce((s, a) => s + (a.amount || 0), 0);
+  const miscTotal = miscs.reduce((s, a) => s + (a.amount || 0), 0);
 
   return (
-    <Modal onClose={onClose} title={`Payment · Invoice ${invoice.invoiceNumber}`}>
+    <Modal onClose={onClose} title={`Send for approval · Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
       {error && (
         <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>
       )}
 
-      <div className="mb-4 grid grid-cols-3 gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl bg-slate-50 px-4 py-3 text-sm sm:grid-cols-3">
         <div>
-          <p className="text-xs text-slate-500">Payable</p>
-          <p className="font-semibold tabular-nums text-slate-900">{money(invoice.payable)}</p>
+          <p className="text-xs text-slate-500">Vendor</p>
+          <p className="font-medium text-slate-900">{invoice.vendorName || "—"}</p>
         </div>
         <div>
-          <p className="text-xs text-slate-500">Paid so far</p>
-          <p className="font-semibold tabular-nums text-slate-900">{money(invoice.paidTotal)}</p>
+          <p className="text-xs text-slate-500">PO number</p>
+          <p className="font-medium text-slate-900">{invoice.poNumber || "—"}</p>
         </div>
         <div>
-          <p className="text-xs text-slate-500">Balance</p>
-          <p className="font-semibold tabular-nums text-indigo-700">{money(invoice.balance)}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div>
-          <label htmlFor="pay-amount" className="mb-1.5 block text-xs font-semibold text-slate-700">
-            Amount <span className="text-rose-500">*</span>
-          </label>
-          <input
-            id="pay-amount" type="number" min="0" value={amount}
-            onChange={(e) => setAmount(e.target.value)} className={inputCls}
-          />
+          <p className="text-xs text-slate-500">Invoice date</p>
+          <p className="font-medium text-slate-900">{fmtDate(invoice.invoiceDate)}</p>
         </div>
         <div>
-          <label htmlFor="pay-date" className="mb-1.5 block text-xs font-semibold text-slate-700">
-            Payment date <span className="text-rose-500">*</span>
-          </label>
-          <input
-            id="pay-date" type="date" value={paidOn} max={todayStr()}
-            onChange={(e) => setPaidOn(e.target.value)} className={inputCls}
-          />
+          <p className="text-xs text-slate-500">Terms</p>
+          <p className="font-medium text-slate-900">{paymentTermShort(invoice.paymentTerms)}</p>
         </div>
         <div>
-          <label htmlFor="pay-mode" className="mb-1.5 block text-xs font-semibold text-slate-700">
-            Mode <span className="text-rose-500">*</span>
-          </label>
-          <select id="pay-mode" value={mode} onChange={(e) => setMode(e.target.value)} className={inputCls}>
-            {PAYMENT_MODES.map((m) => (
-              <option key={m} value={m}>{PAYMENT_MODE_LABEL[m]}</option>
-            ))}
-          </select>
+          <p className="text-xs text-slate-500">Due on</p>
+          <p className="font-medium text-slate-900">{fmtDate(invoice.dueDate)}</p>
         </div>
         <div>
-          <label htmlFor="pay-ref" className="mb-1.5 block text-xs font-semibold text-slate-700">
-            Reference no.
-          </label>
-          <input
-            id="pay-ref" type="text" value={refNo} onChange={(e) => setRefNo(e.target.value)}
-            placeholder="UTR / cheque no." className={inputCls}
-          />
+          <p className="text-xs text-slate-500">Payable on</p>
+          <p className="font-medium text-slate-900">{fmtDate(invoice.scheduledOn)}</p>
+          {/* Said out loud when the two differ, because a rescheduled invoice
+              arriving early is the one thing an approver would otherwise read
+              as a mistake. */}
+          {invoice.rescheduled && (
+            <p className={`text-[11px] font-semibold ${invoice.scheduleOffset < 0 ? "text-amber-600" : "text-violet-600"}`}>
+              {invoice.scheduleOffset < 0 ? "brought forward" : "deferred"} by {Math.abs(invoice.scheduleOffset)} days
+            </p>
+          )}
         </div>
       </div>
 
-      <label htmlFor="pay-remarks" className="mb-1.5 mt-3 block text-xs font-semibold text-slate-700">
-        Remarks
-      </label>
-      <textarea
-        id="pay-remarks" rows={2} value={remarks} onChange={(e) => setRemarks(e.target.value)}
-        placeholder="Optional" className={inputCls}
-      />
+      {/* ── What is being asked for, itemised ─────────────────── */}
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">What is being approved</p>
 
-      <div className="mt-3">
-        <label htmlFor="pay-proofs" className="mb-1.5 block text-xs font-semibold text-slate-700">
-          Receipt / proof <span className="font-normal text-slate-400">(up to 5, JPG PNG WEBP or PDF)</span>
-        </label>
-        <input
-          id="pay-proofs" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf"
-          onChange={pickFiles}
-          className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100"
-        />
-        {files.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-2">
-            {files.map((f, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
-                <Paperclip className="h-3 w-3" />
-                <span className="max-w-[160px] truncate">{f.name}</span>
-                <button type="button" onClick={() => setFiles((p) => p.filter((_, k) => k !== i))} className="text-slate-400 hover:text-rose-600">
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
+        {rows === null ? (
+          <div className="h-16 animate-pulse rounded-xl bg-slate-100" />
+        ) : (
+          <div className="space-y-1.5 rounded-xl border border-slate-200 p-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-600">Invoice total</span>
+              <span className="tabular-nums text-slate-900">{money(invoice.grossAmount)}</span>
+            </div>
+
+            {credits.map((a) => (
+              <div key={a._id} className="flex justify-between">
+                <span className="min-w-0 text-rose-700">
+                  Credit note
+                  <span className="ml-1.5 text-xs text-slate-400">{a.reason || "—"}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-rose-700">&minus;{money(a.amount)}</span>
+              </div>
             ))}
+
+            {miscs.map((a) => (
+              <div key={a._id} className="flex justify-between">
+                <span className="min-w-0 text-sky-700">
+                  Misc charge
+                  <span className="ml-1.5 text-xs text-slate-400">{a.reason || "—"}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-sky-700">+{money(a.amount)}</span>
+              </div>
+            ))}
+
+            {rows.length === 0 && (
+              <p className="py-1 text-xs text-slate-400">No credit notes or misc charges on this invoice.</p>
+            )}
+
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 text-base">
+              <span className="font-semibold text-slate-900">Payable</span>
+              <span className="font-bold tabular-nums text-slate-900">{money(invoice.payable)}</span>
+            </div>
+
+            {invoice.paidTotal > 0 && (
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Already paid</span>
+                <span className="tabular-nums">{money(invoice.paidTotal)} · balance {money(invoice.balance)}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {overBalance && (
-        <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-inset ring-rose-100">
-          That is more than the outstanding balance ({money(invoice.balance)}).
-        </p>
+      {/* The full cards underneath, because a one-line reason is enough to
+          recognise a credit note but not enough to check one — the units it
+          claimed are what somebody would query. */}
+      {rows !== null && rows.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-semibold text-indigo-600">
+            Show the {rows.length === 1 ? "adjustment" : `${rows.length} adjustments`} in full
+            <span className="ml-1.5 font-normal text-slate-400">
+              ({credits.length} credit {credits.length === 1 ? "note" : "notes"} &minus;{money(creditTotal)},
+              {" "}{miscs.length} misc +{money(miscTotal)})
+            </span>
+          </summary>
+          <div className="mt-2 space-y-3">
+            {rows.map((a) => <AdjustmentCard key={a._id} adjustment={a} />)}
+          </div>
+        </details>
       )}
 
-      {history.length > 0 && (
-        <div className="mt-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Already recorded ({history.length})
-          </p>
-          <div className="max-h-40 space-y-1.5 overflow-y-auto">
-            {history.map((p, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs">
-                <span className="font-semibold tabular-nums text-slate-900">{money(p.amount)}</span>
-                <span className="text-slate-500">{PAYMENT_MODE_LABEL[p.mode] || p.mode}</span>
-                <span className="text-slate-500">{fmtDate(p.paidOn)}</span>
-                {p.refNo && <span className="text-slate-400">{p.refNo}</span>}
-                <span className="ml-auto text-slate-400">{p.byName || "—"}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <label htmlFor="send-note" className="mb-1.5 mt-4 block text-xs font-semibold text-slate-700">
+        Note for the approval team
+      </label>
+      <textarea
+        id="send-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+        placeholder="Optional — anything the approver should know" className={inputCls}
+      />
+
+      <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
+        Once sent, the credit notes, misc charges and the payable date are locked until the
+        approval team decides.
+      </p>
 
       <div className="mt-5 flex justify-end gap-2">
         <button
@@ -504,10 +510,10 @@ const RecordPaymentPopup = ({ invoice, onClose, onDone }) => {
           Cancel
         </button>
         <button
-          type="button" onClick={submit} disabled={busy || value <= 0 || overBalance || !paidOn}
-          className="rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+          type="button" onClick={send} disabled={busy || rows === null}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {busy ? "Saving…" : "Save payment"}
+          <Send className="h-4 w-4" /> {busy ? "Sending…" : `Send ${money(invoice.payable)} for approval`}
         </button>
       </div>
     </Modal>
@@ -550,7 +556,6 @@ const PaymentsComp = () => {
   const [vendors, setVendors] = useState([]);
   const [view, setView] = useState({ mode: "list" });
   const [popup, setPopup] = useState(null);
-  const [sendingId, setSendingId] = useState(null);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 400);
@@ -611,29 +616,28 @@ const PaymentsComp = () => {
     setPayable(PAYABLE_FILTER.ALL); setPage(1);
   };
 
-  const sendForApproval = async (row) => {
-    setSendingId(String(row._id)); setActionError(null);
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${row._id}/send-for-approval`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({}),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
-      loadList();
-    } catch (e) {
-      setActionError(e.message);
-    } finally {
-      setSendingId(null);
-    }
-  };
+  /*
+    Both of these replace the list rather than opening over it, for the same
+    reason: each is a form with a list inside it, and a popup holding a
+    scrollable list inside another scrollable list is unusable.
 
-  // The credit note is a full page — picking units out of a 40-piece delivery
-  // needs the room — so it replaces the list rather than opening over it.
+    Credit note — picking units out of a 40-piece delivery needs the room.
+    Payment   — one settlement can be five bank entries, each with its own
+                reference and its own receipt files.
+  */
   if (view.mode === "creditNote") {
     return (
       <CreditNoteView
         invoice={view.row} adjustment={view.adjustment || null}
+        onBack={() => setView({ mode: "list" })} onDone={refresh}
+      />
+    );
+  }
+
+  if (view.mode === "payment") {
+    return (
+      <RecordPaymentView
+        invoice={view.row}
         onBack={() => setView({ mode: "list" })} onDone={refresh}
       />
     );
@@ -769,7 +773,6 @@ const PaymentsComp = () => {
               rows.map((r) => {
                 const am = approvalMeta(r.approvalStatus);
                 const pm = paymentStateMeta(r.paymentState);
-                const busy = sendingId === String(r._id);
                 return (
                   <tr key={r._id} className="transition hover:bg-slate-50/60">
                     <td className={td}>
@@ -817,6 +820,21 @@ const PaymentsComp = () => {
                       <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${pm.chip}`}>
                         {pm.label}
                       </span>
+                      {/* A status that disagrees with the amounts has to say
+                          so, or the row looks like an arithmetic error. */}
+                      {r.stateOverridden && (
+                        <span
+                          className="mt-0.5 block text-[11px] font-semibold text-amber-600"
+                          title={r.paymentOverrideReason || ""}
+                        >
+                          set by hand
+                        </span>
+                      )}
+                      {r.writtenOff > 0 && (
+                        <span className="mt-0.5 block text-[11px] text-slate-400">
+                          {money(r.writtenOff)} written off
+                        </span>
+                      )}
                     </td>
                     <td className={tdRight}>
                       <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -849,17 +867,21 @@ const PaymentsComp = () => {
                             </button>
                           </>
                         )}
+                        {/* Opens the figure being approved rather than sending
+                            straight away — the payable after every credit note
+                            and misc charge is what the approver acts on, and
+                            this is the sender's only chance to see it. */}
                         {canRequest && r.canSendForApproval && r.approvalStatus !== APPROVAL_STATUS.REJECTED && (
                           <button
-                            type="button" disabled={busy} onClick={() => sendForApproval(r)}
-                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-60"
+                            type="button" onClick={() => setPopup({ type: "send", row: r })}
+                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500"
                           >
-                            <Send className="h-3.5 w-3.5" /> {busy ? "Sending…" : "Send for approval"}
+                            <Send className="h-3.5 w-3.5" /> Send for approval
                           </button>
                         )}
                         {canPay && r.canEnterPayment && (
                           <button
-                            type="button" onClick={() => setPopup({ type: "pay", row: r })}
+                            type="button" onClick={() => setView({ mode: "payment", row: r })}
                             className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500"
                           >
                             <Wallet className="h-3.5 w-3.5" /> {r.paidTotal > 0 ? "Add payment" : "Enter payment"}
@@ -928,8 +950,10 @@ const PaymentsComp = () => {
           onClose={() => setPopup(null)} onDone={refresh}
         />
       )}
-      {popup?.type === "pay" && (
-        <RecordPaymentPopup invoice={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
+      {popup?.type === "send" && (
+        <SendForApprovalPopup
+          invoice={popup.row} onClose={() => setPopup(null)} onSent={refresh}
+        />
       )}
     </div>
   );
