@@ -313,7 +313,7 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
           <thead className="bg-slate-50/80">
             <tr>
               <th className={th}>Month</th>
-              <th className={thRight}>Inv</th>
+              <th className={thRight}>Inv </th>
               <th className={thRight}>Basic</th>
               <th className={thRight}>CGST</th>
               <th className={thRight}>SGST</th>

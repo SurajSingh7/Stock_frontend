@@ -272,7 +272,7 @@ const VendorLedgerComp = () => {
           <thead className="bg-slate-50/60">
             <tr>
               <th className={th}>Vendor</th>
-              <th className={thRight}>Inv</th>
+              <th className={thRight}>Inv COUNT</th>
               <th className={thRight}>Billing</th>
               <th className={thRight}>Credit Notes</th>
               <th className={thRight}>Misc</th>

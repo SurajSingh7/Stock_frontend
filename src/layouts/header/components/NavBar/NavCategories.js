@@ -113,6 +113,74 @@ export const navCategories = [
         moduleKey: "payments",
         action: ["VIEW_MENU"],
       },
+    ],
+  },
+
+  /*
+    Reports — read-only views of the vendor money side.
+
+    Vendor Ledger moved in here from the Invoice list group. It belongs with
+    these rather than beside the action pages: Billing and Outstanding are
+    literally its own summary read with different columns, so having it in a
+    separate menu group made one number look like it lived in two places.
+
+    Each page carries its own moduleKey so access can be granted per report —
+    "show them Outstanding but not the unit prices in Invoice Breakup" is a
+    real request. One shared key would make all five appear or vanish
+    together.
+  */
+  {
+    category: "Reports",
+    items: [
+      {
+        name: "Billing",
+        path: "/stock/reports/billing",
+        moduleKey: "billing-report",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Outstanding",
+        path: "/stock/reports/outstanding",
+        moduleKey: "outstanding-report",
+        action: ["VIEW_MENU"],
+      },
+      /*
+        The third of the vendor-money set: Billing asks what was billed,
+        Outstanding what is still owed, Paid what actually left. Reading as one
+        set in the menu is the point — those are the three questions.
+
+        Not "Payments": that name belongs to the Account group, where accounts
+        RECORD a payment. This one only reports what they recorded.
+      */
+      {
+        name: "Paid",
+        path: "/stock/reports/paid",
+        moduleKey: "paid-report",
+        action: ["VIEW_MENU"],
+      },
+      /*
+        Payments, credit notes and misc charges on one page with tabs. They are
+        the same kind of row — a dated event with an amount that changed what
+        we owe — and split across three menu entries nobody could ever see the
+        order things happened in.
+
+        Not "Payment Report": Payments elsewhere is where accounts RECORD a
+        payment, and two menu entries a word apart read as the same screen.
+      */
+      {
+        name: "Transaction Register",
+        path: "/stock/reports/transactions",
+        moduleKey: "transaction-register",
+        action: ["VIEW_MENU"],
+      },
+      // Named after the invoice, not "Billing Breakup": the three above are
+      // per-vendor aggregates, this one is per invoice and per line.
+      {
+        name: "Invoice Breakup",
+        path: "/stock/reports/invoice-breakup",
+        moduleKey: "invoice-breakup",
+        action: ["VIEW_MENU"],
+      },
       {
         name: "Vendor Ledger",
         path: "/stock/vendor-ledger",
