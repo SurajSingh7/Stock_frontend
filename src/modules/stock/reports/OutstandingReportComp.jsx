@@ -10,7 +10,8 @@ import {
 } from "@/modules/stock/shared/ledgerStages";
 import VendorInvoicesView, { MODE } from "./VendorInvoicesView";
 import {
-  th, thRight, td, tdRight, num, ReportHeader, Tile, ErrorBanner, FootNote,
+  th, thRight, thSticky, td, tdRight, tdSticky,
+  num, ReportHeader, Tile, ErrorBanner, FootNote,
 } from "./reportUi";
 
 /* ============================================================= */
@@ -22,10 +23,14 @@ import {
 /* A period selector here would let somebody filter a debt out of  */
 /* existence, which is the one thing this page must never do.      */
 /*                                                                */
-/* Ageing buckets answer HOW OLD. The stage columns answer WHY it  */
-/* has not moved — the two are different questions and a rejected  */
-/* approval needs the second one to be visible, or the row looks   */
-/* identical to one about to be paid.                              */
+/* Two different questions, and both stay answerable:              */
+/*   Overdue  HOW OLD — one column, not five buckets. The buckets  */
+/*            only ever showed one non-empty cell at a time and    */
+/*            cost four columns to do it; bucket analysis lives on */
+/*            the Ageing filter, which is still here.              */
+/*   Stage    WHY it has not moved. A rejected approval is still   */
+/*            owed, so without this a rejected row reads exactly   */
+/*            like one about to be paid.                            */
 /* ============================================================= */
 
 const AGEING_OPTIONS = [
@@ -63,7 +68,7 @@ const StageStrip = ({ outstandingBy, stageCount }) => {
 const OutstandingReportComp = () => {
   const [rows, setRows] = useState([]);
   const [totals, setTotals] = useState({});
-  const [buckets, setBuckets] = useState([]);
+
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -72,6 +77,7 @@ const OutstandingReportComp = () => {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [branchId, setBranchId] = useState("");
   const [ageing, setAgeing] = useState("");
+  const [stage, setStage] = useState("");
   const [movement, setMovement] = useState(MOVEMENT_FILTER.ALL);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -105,6 +111,7 @@ const OutstandingReportComp = () => {
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (branchId) params.set("branchId", branchId);
       if (ageing) params.set("ageing", ageing);
+      if (stage) params.set("stage", stage);
       if (movement !== MOVEMENT_FILTER.ALL) params.set("movement", movement);
       /*
         No from/to is sent, on purpose. The endpoint would honour it — it is
@@ -117,7 +124,7 @@ const OutstandingReportComp = () => {
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load outstanding report");
       setRows(json.data?.rows || []);
       setTotals(json.data?.totals || {});
-      setBuckets(json.data?.buckets || []);
+
       setTotal(json.pagination?.total || 0);
     } catch (e) {
       setError(e.message);
@@ -125,14 +132,15 @@ const OutstandingReportComp = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debouncedSearch, branchId, ageing, movement]);
+  }, [page, limit, debouncedSearch, branchId, ageing, stage, movement]);
 
   useEffect(() => { load(); }, [load]);
 
   const branchOptions = useMemo(() => branches.map((b) => ({ value: b._id, label: b.name })), [branches]);
-  const hasFilters = !!search || !!branchId || !!ageing || movement !== MOVEMENT_FILTER.ALL;
+  const hasFilters =
+    !!search || !!branchId || !!ageing || !!stage || movement !== MOVEMENT_FILTER.ALL;
   const stageTotals = totals.outstandingBy || {};
-  const colCount = 5 + buckets.length + 1;
+  const colCount = 8;
 
   if (view.mode === "invoices") {
     return (
@@ -163,34 +171,8 @@ const OutstandingReportComp = () => {
 
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
 
-      {/* The same outstanding, split by why it has not moved. A rejected
-          payment approval still counts as owed — the vendor billed us either
-          way — so this strip is what stops a rejected invoice looking like an
-          arithmetic error. */}
-      {(totals.outstanding || 0) > 0 && (
-        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <span className="mr-1 text-xs font-bold uppercase tracking-wider text-slate-500">
-            Outstanding is sitting at
-          </span>
-          {STAGE_ORDER.map((k) => {
-            const m = stageMeta(k);
-            const amount = stageTotals[k] || 0;
-            return (
-              <span
-                key={k} title={m.hint}
-                className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold ${
-                  amount > 0 ? m.tile : "border-slate-200 bg-slate-50 text-slate-300"
-                }`}
-              >
-                {m.label} <span className="tabular-nums">{money(amount)}</span>
-              </span>
-            );
-          })}
-        </div>
-      )}
-
       <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
           <input
             type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Search vendor..." className={inputCls}
@@ -211,12 +193,31 @@ const OutstandingReportComp = () => {
           >
             {MOVEMENT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
+          {/*
+            The approval stage, as a filter AND as the totals.
+
+            This replaced a strip of chips above the table. A plain dropdown
+            would have lost what that strip was for — how much is sitting at
+            each stage — so each option carries its own amount. One control,
+            both answers, and four columns of screen saved.
+          */}
+          <select
+            value={stage} onChange={(e) => { setStage(e.target.value); setPage(1); }}
+            className={inputCls} aria-label="Approval stage"
+          >
+            <option value="">All stages · {money(totals.outstanding || 0)}</option>
+            {STAGE_ORDER.map((k) => (
+              <option key={k} value={k}>
+                {stageMeta(k).label} · {money(stageTotals[k] || 0)}
+              </option>
+            ))}
+          </select>
         </div>
         {hasFilters && (
           <button
             type="button"
             onClick={() => {
-              setSearch(""); setBranchId(""); setAgeing("");
+              setSearch(""); setBranchId(""); setAgeing(""); setStage("");
               setMovement(MOVEMENT_FILTER.ALL); setPage(1);
             }}
             className="mt-3 inline-flex items-center gap-1 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-1.5 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100"
@@ -230,15 +231,14 @@ const OutstandingReportComp = () => {
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50/60">
             <tr>
-              <th className={th}>Vendor</th>
+              <th className={thSticky}>Vendor</th>
               <th className={thRight}>Invoices</th>
+              <th className={thRight}>Billing</th>
               <th className={thRight}>Net Payable</th>
               <th className={thRight}>Paid</th>
               <th className={thRight}>Outstanding</th>
-              {/* Bucket labels come from the server, so the columns and the
-                  arithmetic behind them can never drift apart. */}
-              {buckets.map((b) => <th key={b.key} className={thRight}>{b.label}</th>)}
-              <th className={th}>Where it&apos;s stuck</th>
+              <th className={thRight}>Overdue</th>
+              <th className={th}>Stage</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -250,14 +250,12 @@ const OutstandingReportComp = () => {
               </td></tr>
             ) : (
               rows.map((r) => (
-                <tr key={String(r.vendorId)} className="transition hover:bg-slate-50/60">
-                  <td className={td + " font-semibold text-slate-900"}>
+                <tr key={String(r.vendorId)} className="group transition hover:bg-slate-50/60">
+                  {/* Sticky, because the money columns scroll sideways and a
+                      number whose vendor has scrolled off the screen is not
+                      worth reading. */}
+                  <td className={tdSticky + " font-semibold text-slate-900"}>
                     {r.vendorName}
-                    {r.overdueCount > 0 && (
-                      <span className="mt-0.5 block text-[11px] font-semibold text-rose-600">
-                        {r.overdueCount} overdue · {money(r.overdueAmount)}
-                      </span>
-                    )}
                   </td>
                   <td className={tdRight}>
                     <span className="inline-flex items-center justify-end gap-1.5">
@@ -274,6 +272,9 @@ const OutstandingReportComp = () => {
                       )}
                     </span>
                   </td>
+                  {/* Billing before Net Payable, in the order the arithmetic
+                      runs: billed, then less credit notes and plus misc. */}
+                  <td className={tdRight}>{num(r.billing, "text-blue-700")}</td>
                   <td className={tdRight}>{num(r.netPayable)}</td>
                   <td className={tdRight}>{num(r.paid, "text-emerald-700")}</td>
                   <td className={tdRight + " font-bold text-slate-900"}>
@@ -287,11 +288,22 @@ const OutstandingReportComp = () => {
                       </span>
                     )}
                   </td>
-                  {buckets.map((b) => (
-                    <td key={b.key} className={tdRight}>
-                      {num(r.ageing?.[b.key], b.key === "D90_PLUS" ? "font-semibold text-rose-700" : "text-slate-700")}
-                    </td>
-                  ))}
+                  {/* Money the terms said should already have gone. Counted
+                      from the CONTRACTUAL due date, never from a rescheduled
+                      one — the vendor counts from the terms, and this ledger
+                      has to reconcile against their books, not our intentions. */}
+                  <td className={tdRight}>
+                    {r.overdueAmount > 0 ? (
+                      <>
+                        <span className="font-semibold text-rose-700">{money(r.overdueAmount)}</span>
+                        <span className="mt-0.5 block text-[10px] font-normal text-rose-500">
+                          {r.overdueCount} {r.overdueCount === 1 ? "invoice" : "invoices"}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
                   <td className={td}>
                     <StageStrip outstandingBy={r.outstandingBy} stageCount={r.stageCount} />
                   </td>
@@ -302,12 +314,16 @@ const OutstandingReportComp = () => {
           {rows.length > 0 && (
             <tfoot className="border-t-2 border-slate-200 bg-slate-50">
               <tr>
-                <td className={td + " font-bold text-slate-900"}>TOTAL</td>
+                <td className={tdSticky + " font-bold text-slate-900"}>TOTAL</td>
                 <td className={tdRight + " font-bold"}>{totals.invoiceCount || 0}</td>
+                <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
                 <td className={tdRight + " font-semibold"}>{money(totals.netPayable || 0)}</td>
                 <td className={tdRight + " font-bold text-emerald-700"}>{money(totals.paid || 0)}</td>
                 <td className={tdRight + " font-bold text-slate-900"}>{money(totals.outstanding || 0)}</td>
-                <td colSpan={buckets.length + 1} />
+                <td className={tdRight + " font-bold text-rose-700"}>
+                  {totals.overdueAmount > 0 ? money(totals.overdueAmount) : <span className="font-normal text-slate-300">—</span>}
+                </td>
+                <td />
               </tr>
             </tfoot>
           )}
@@ -322,9 +338,11 @@ const OutstandingReportComp = () => {
       <FootNote>
         Click the info icon on any invoice count to see which invoices make up that outstanding.
         No period selector here on purpose — an unpaid March invoice is still outstanding in September,
-        and a date filter would let it disappear. Ageing counts from the contractual due date (invoice
-        date + terms), not from when we scheduled the payment. Money settled short is written off rather
-        than left outstanding for ever.
+        and a date filter would let it disappear. <strong>Overdue</strong> is what the payment terms said
+        should already have gone: invoice date + terms against today. It counts from that contractual due
+        date, never from a date we rescheduled the payment to — the vendor counts from the terms, and this
+        has to reconcile against their books. Use the Ageing filter to split it by how old it is. Money
+        settled short is written off rather than left outstanding for ever.
       </FootNote>
     </div>
   );

@@ -19,17 +19,29 @@ export const APPROVAL_STATUS = {
 };
 
 export const APPROVAL_STATUS_META = {
+/*
+  These name the state of the REQUEST, never the team holding it.
+
+  An earlier draft said "waiting on the approval team". That is wrong for the
+  same reason a status called "Stock Team" would be: the moment that work is
+  reassigned the words lie, and nothing in the data says which department does
+  what. A status describes the thing, not the room it is sitting in.
+
+  Kept in step with STAGE_META in shared/ledgerStages.js on purpose — the
+  reports and the action screens describe one concept, so they use one
+  vocabulary. Two words for one state is how a reader starts doubting both.
+*/
   PENDING: {
     label: "Pending",
     chip: "bg-amber-50 text-amber-700 ring-amber-200",
     dot: "bg-amber-500",
-    hint: "Waiting on the approval team",
+    hint: "Requested, and waiting on a decision",
   },
   APPROVED: {
     label: "Approved",
     chip: "bg-emerald-50 text-emerald-700 ring-emerald-200",
     dot: "bg-emerald-500",
-    hint: "Cleared to pay",
+    hint: "Cleared to pay — the money has not gone out yet",
   },
   REJECTED: {
     label: "Rejected",
@@ -42,10 +54,10 @@ export const APPROVAL_STATUS_META = {
 // Null is a real state and needs a word: nothing has been asked for yet.
 export const approvalMeta = (status) =>
   APPROVAL_STATUS_META[status] || {
-    label: "Not sent",
+    label: "Not Requested",
     chip: "bg-slate-50 text-slate-500 ring-slate-200",
     dot: "bg-slate-300",
-    hint: "No payment approval has been requested",
+    hint: "No payment approval has been requested for this invoice yet",
   };
 
 export const PAYMENT_STATE = {

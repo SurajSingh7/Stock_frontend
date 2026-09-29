@@ -285,7 +285,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
   }
 
   const openCalculation = (r) => { setDetail(null); setCalc(r); };
-  const colCount = isBilling ? 12 : 11;
+  const colCount = isBilling ? 12 : 14;
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -340,21 +340,27 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                   <th className={thRight}>CGST</th>
                   <th className={thRight}>SGST</th>
                   <th className={thRight}>IGST</th>
-                  <th className={thRight}>GST</th>
                   <th className={thRight}>Billing</th>
                   <th className={thRight}>Credit Notes</th>
                   <th className={thRight}>Misc</th>
+                  <th className={thRight}>Payable</th>
                 </>
               ) : (
                 <>
                   <th className={th}>Due</th>
+                  {/* Basic, Extra and GST live here: on the main page Billing
+                      is one lump, and this is where somebody comes to find out
+                      what that lump was made of. */}
+                  <th className={thRight}>Basic</th>
+                  <th className={thRight}>+Extra</th>
+                  <th className={thRight}>GST</th>
                   <th className={thRight}>Billing</th>
                   <th className={thRight}>Credit Notes</th>
                   <th className={thRight}>Misc</th>
                   <th className={thRight}>Payable</th>
                   <th className={thRight}>Paid</th>
                   <th className={thRight}>Outstanding</th>
-                  <th className={th}>Where it&apos;s stuck</th>
+                  <th className={th}>Stage</th>
                 </>
               )}
               <th className={thRight}>&nbsp;</th>
@@ -401,7 +407,6 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                         <td className={tdRight}>{num(r.totals.cgstAmount)}</td>
                         <td className={tdRight}>{num(r.totals.sgstAmount)}</td>
                         <td className={tdRight}>{num(r.totals.igstAmount)}</td>
-                        <td className={tdRight}>{num(r.totals.gstAmount, "text-violet-700")}</td>
                         <td className={tdRight}>{num(r.totals.grandTotal, "font-medium text-blue-700")}</td>
                         <td className={tdRight}>
                           {r.creditTotal ? <span className="text-rose-700">−{money(r.creditTotal)}</span> : <span className="text-slate-300">—</span>}
@@ -409,6 +414,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                         <td className={tdRight}>
                           {r.miscTotal ? <span className="text-sky-700">+{money(r.miscTotal)}</span> : <span className="text-slate-300">—</span>}
                         </td>
+                        <td className={tdRight + " font-semibold text-slate-900"}>{money(r.payable)}</td>
                       </>
                     ) : (
                       <>
@@ -420,6 +426,11 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                             </span>
                           )}
                         </td>
+                        {/* What the one Billing figure on the main page was
+                            made of — the thing that could not be seen there. */}
+                        <td className={tdRight}>{num(r.totals.basicAmount)}</td>
+                        <td className={tdRight}>{num(r.totals.extraChargesTotal, "text-slate-600")}</td>
+                        <td className={tdRight}>{num(r.totals.gstAmount, "text-violet-700")}</td>
                         <td className={tdRight}>{num(r.totals.grandTotal, "text-blue-700")}</td>
                         <td className={tdRight}>
                           {r.creditTotal ? <span className="text-rose-700">−{money(r.creditTotal)}</span> : <span className="text-slate-300">—</span>}
@@ -486,15 +497,23 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                   <>
                     <td className={tdRight + " font-semibold"}>{money(totals.basic || 0)}</td>
                     <td className={tdRight + " font-semibold"}>{money(totals.extraCharges || 0)}</td>
-                    <td colSpan={3} />
-                    <td className={tdRight + " font-bold text-violet-700"}>{money(totals.gst || 0)}</td>
+                    {/* The per-tax split is not totalled: the endpoint returns
+                        one combined GST figure, and inventing a CGST/SGST split
+                        for the footer would be a number nothing computed. */}
+                    <td colSpan={3} className={tdRight + " font-semibold text-violet-700"}>
+                      GST {money(totals.gst || 0)}
+                    </td>
                     <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
                     <td className={tdRight + " font-bold text-rose-700"}>{totals.creditNotes ? `−${money(totals.creditNotes)}` : money(0)}</td>
                     <td className={tdRight + " font-bold text-sky-700"}>{totals.misc ? `+${money(totals.misc)}` : money(0)}</td>
+                    <td className={tdRight + " font-bold text-slate-900"}>{money(totals.payable || 0)}</td>
                   </>
                 ) : (
                   <>
                     <td />
+                    <td className={tdRight + " font-semibold"}>{money(totals.basic || 0)}</td>
+                    <td className={tdRight + " font-semibold"}>{money(totals.extraCharges || 0)}</td>
+                    <td className={tdRight + " font-bold text-violet-700"}>{money(totals.gst || 0)}</td>
                     <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
                     <td className={tdRight + " font-bold text-rose-700"}>{totals.creditNotes ? `−${money(totals.creditNotes)}` : money(0)}</td>
                     <td className={tdRight + " font-bold text-sky-700"}>{totals.misc ? `+${money(totals.misc)}` : money(0)}</td>
@@ -519,7 +538,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
       <FootNote>
         {isBilling
           ? "Billing is (Basic + Extra) + GST, as the vendor billed it. Extra charges are freight, handling and anything else the invoice carried outside the item lines — they are not taxed with the items, which is why they sit in their own column. The info icon beside an invoice number opens its item lines; Calculation opens the full working. The TOTAL row covers every page, not just this one."
-          : "As on today, whatever period the report behind this was showing — an unpaid invoice does not stop being owed because a month ended. Ageing counts from the contractual due date, and money settled short is written off rather than left outstanding. The info icon beside an invoice number opens its item lines; Calculation opens the full working."}
+          : "As on today, whatever period the report behind this was showing — an unpaid invoice does not stop being owed because a month ended. Basic, Extra and GST are what the one Billing figure on the report behind this was made of. Days overdue count from the contractual due date, and money settled short is written off rather than left outstanding. The info icon beside an invoice number opens its item lines; Calculation opens the full working."}
       </FootNote>
 
       {detail && (

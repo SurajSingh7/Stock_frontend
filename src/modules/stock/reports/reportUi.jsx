@@ -20,6 +20,19 @@ export const thCenter = th + " text-center";
 export const td = "px-3 py-2.5 text-sm text-slate-700 align-top";
 export const tdRight = td + " text-right tabular-nums";
 
+/*
+  The first column, pinned while the rest scrolls sideways.
+
+  A number whose vendor has scrolled off the screen is not worth reading. The
+  background is explicit because a sticky cell paints over what passes beneath
+  it, and `group-hover` carries the row highlight across the seam — without it
+  the pinned cell stays white while its row lights up.
+*/
+export const thSticky =
+  th + " sticky left-0 z-20 bg-slate-50/60 backdrop-blur-[2px]";
+export const tdSticky =
+  td + " sticky left-0 z-10 bg-white transition group-hover:bg-slate-50";
+
 export const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 

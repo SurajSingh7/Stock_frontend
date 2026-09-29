@@ -28,18 +28,29 @@ export const STAGE_ORDER = [
   OUTSTANDING_STAGE.CLEARED,
 ];
 
+/*
+  The labels name the state of the REQUEST, never the team holding it.
+
+  An earlier draft read "Stock Team" and "Approval Team", which was wrong: the
+  moment that work is reassigned the label lies, and nothing in the data says
+  which department does what. A status describes the thing, not the room it is
+  sitting in.
+
+  Only the labels changed — the keys below and in the service are untouched, so
+  nothing stored has to move.
+*/
 export const STAGE_META = {
   NOT_SENT: {
-    label: "Not sent",
-    short: "not sent",
-    hint: "No payment approval has been requested yet",
+    label: "Not Requested",
+    short: "not requested",
+    hint: "No payment approval has been requested for this invoice yet",
     chip: "bg-slate-100 text-slate-600 ring-slate-200",
     tile: "border-slate-200 bg-white text-slate-700",
   },
   IN_APPROVAL: {
-    label: "In approval",
-    short: "in approval",
-    hint: "Waiting on the approval team",
+    label: "Awaiting Approval",
+    short: "awaiting",
+    hint: "Requested, and waiting on a decision",
     chip: "bg-amber-50 text-amber-700 ring-amber-200",
     tile: "border-amber-200 bg-amber-50 text-amber-800",
   },
@@ -50,8 +61,13 @@ export const STAGE_META = {
     chip: "bg-rose-50 text-rose-700 ring-rose-200",
     tile: "border-rose-300 bg-rose-50 text-rose-800",
   },
+  /*
+    "Cleared to Pay", not "Approved": an invoice has its own APPROVED status
+    for the goods it covers, and one word meaning two things on one screen is
+    how a reader stops trusting either.
+  */
   CLEARED: {
-    label: "Cleared to pay",
+    label: "Cleared to Pay",
     short: "to pay",
     hint: "Approved — the money has not gone out yet",
     chip: "bg-emerald-50 text-emerald-700 ring-emerald-200",

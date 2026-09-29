@@ -290,35 +290,8 @@ const TransactionRegisterComp = () => {
         )}
       </div>
 
-      {/* Mode-wise totals, because a bank reconciliation is done one channel at
-          a time — the NEFT statement does not contain the UPI rows. */}
-      {showMode && (totals.paid || 0) > 0 && (
-        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <span className="mr-1 text-xs font-bold uppercase tracking-wider text-slate-500">By mode</span>
-          {modes.map((m) => {
-            const amount = byMode[m] || 0;
-            return (
-              <button
-                key={m} type="button"
-                onClick={() => { setMode(mode === m ? "" : m); setPage(1); }}
-                className={`rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
-                  mode === m
-                    ? "border-indigo-400 bg-indigo-50 text-indigo-700"
-                    : amount > 0
-                      ? "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      : "border-slate-200 bg-slate-50 text-slate-300"
-                }`}
-                aria-pressed={mode === m}
-              >
-                {PAYMENT_MODE_LABEL[m] || m} <span className="tabular-nums">{money(amount)}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-5">
           <input
             type="text" value={search} onChange={(e) => setSearch(e.target.value)}
             placeholder="Search vendor, invoice, PO, UTR or reason..." className={inputCls}
@@ -331,6 +304,31 @@ const TransactionRegisterComp = () => {
             value={branchId} onChange={(v) => { setBranchId(v); setPage(1); }}
             options={branchOptions} placeholder="All branches"
           />
+          {/*
+            The payment mode, as a filter AND as the totals.
+
+            This replaced a strip of chips above the table. A plain dropdown
+            would have lost what that strip was for — a bank reconciliation is
+            done one channel at a time, and the NEFT statement does not contain
+            the UPI rows — so each option carries its own amount.
+
+            Only on the tabs where it means anything. A credit note was not
+            paid by NEFT, so offering the filter on those tabs would only let
+            somebody empty the page for a reason the screen could not explain.
+          */}
+          {showMode && (
+            <select
+              value={mode} onChange={(e) => { setMode(e.target.value); setPage(1); }}
+              className={inputCls} aria-label="Payment mode"
+            >
+              <option value="">All modes · {money(totals.paid || 0)}</option>
+              {modes.map((m) => (
+                <option key={m} value={m}>
+                  {PAYMENT_MODE_LABEL[m] || m} · {money(byMode[m] || 0)}
+                </option>
+              ))}
+            </select>
+          )}
           {hasFilters && (
             <button
               type="button" onClick={clearAll}

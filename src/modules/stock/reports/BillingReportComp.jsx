@@ -8,7 +8,8 @@ import { SearchableSelect, inputCls, money } from "@/modules/stock/shared/StockS
 import PeriodPicker, { defaultPeriod } from "@/modules/stock/vendorLedger/PeriodPicker";
 import VendorInvoicesView, { MODE } from "./VendorInvoicesView";
 import {
-  th, thRight, td, tdRight, num, ReportHeader, Tile, ErrorBanner, FootNote,
+  th, thRight, thSticky, td, tdRight, tdSticky,
+  num, ReportHeader, Tile, ErrorBanner, FootNote,
 } from "./reportUi";
 
 /* ============================================================= */
@@ -165,7 +166,7 @@ const BillingReportComp = () => {
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50/60">
             <tr>
-              <th className={th}>Vendor</th>
+              <th className={thSticky}>Vendor</th>
               {/* "Invoices", matching the tile above it — one thing with two
                   names on one screen is how a reader starts doubting both. */}
               <th className={thRight}>Invoices</th>
@@ -195,8 +196,11 @@ const BillingReportComp = () => {
               rows.map((r) => {
                 const gst = (r.cgst || 0) + (r.sgst || 0) + (r.igst || 0);
                 return (
-                  <tr key={String(r.vendorId)} className="transition hover:bg-slate-50/60">
-                    <td className={td + " font-semibold text-slate-900"}>{r.vendorName}</td>
+                  <tr key={String(r.vendorId)} className="group transition hover:bg-slate-50/60">
+                    {/* Sticky, because the money columns scroll sideways and a
+                        number whose vendor has scrolled off is not worth
+                        reading. */}
+                    <td className={tdSticky + " font-semibold text-slate-900"}>{r.vendorName}</td>
                     <td className={tdRight}>
                       <span className="inline-flex items-center justify-end gap-1.5">
                         {r.invoiceCount || <span className="text-slate-300">—</span>}
@@ -237,7 +241,7 @@ const BillingReportComp = () => {
           {rows.length > 0 && (
             <tfoot className="border-t-2 border-slate-200 bg-slate-50">
               <tr>
-                <td className={td + " font-bold text-slate-900"}>TOTAL</td>
+                <td className={tdSticky + " font-bold text-slate-900"}>TOTAL</td>
                 <td className={tdRight + " font-bold"}>{totals.invoiceCount || 0}</td>
                 <td className={tdRight + " font-semibold"}>{money(totals.basic || 0)}</td>
                 <td className={tdRight + " font-semibold"}>{money(totals.extraCharges || 0)}</td>
