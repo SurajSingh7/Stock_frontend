@@ -5,7 +5,7 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import {
   RotateCcw, Send, Wallet, FileMinus, PlusCircle, Layers,
-  LayoutGrid, Clock, CheckCircle2, XCircle, CreditCard, PieChart, CalendarClock,
+  LayoutGrid, Clock, CheckCircle2, XCircle, CalendarClock,
   Pencil, Trash2, AlertTriangle,
 } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
@@ -42,16 +42,83 @@ const thRight = th + " text-right";
 const td = "px-4 py-3 text-sm text-slate-700 align-middle";
 const tdRight = td + " text-right tabular-nums";
 
+/*
+  Each approval state carries its colour whether or not it is selected.
+
+  These used to be grey until clicked, which meant the one thing the row is
+  scanned for — is anything sitting in Rejected — took reading three labels to
+  find out. The colour IS the information; selection is shown by weight and a
+  ring on top of it, not by turning the colour on.
+*/
 const APPROVAL_CHIPS = [
-  { key: APPROVAL_STATUS.PENDING, label: "Pending", icon: Clock, on: "border-amber-300 bg-amber-50 text-amber-700", count: "PENDING" },
-  { key: APPROVAL_STATUS.APPROVED, label: "Approved", icon: CheckCircle2, on: "border-emerald-300 bg-emerald-50 text-emerald-700", count: "APPROVED" },
-  { key: APPROVAL_STATUS.REJECTED, label: "Rejected", icon: XCircle, on: "border-rose-300 bg-rose-50 text-rose-700", count: "REJECTED" },
+  {
+    key: APPROVAL_STATUS.PENDING, label: "Pending", icon: Clock, count: "PENDING",
+    off: "border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-50",
+    on: "border-amber-400 bg-amber-100 text-amber-900 ring-2 ring-amber-200",
+    badge: "bg-amber-100 text-amber-800",
+    badgeOn: "bg-white/70 text-amber-900",
+  },
+  {
+    key: APPROVAL_STATUS.APPROVED, label: "Approved", icon: CheckCircle2, count: "APPROVED",
+    off: "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-50",
+    on: "border-emerald-400 bg-emerald-100 text-emerald-900 ring-2 ring-emerald-200",
+    badge: "bg-emerald-100 text-emerald-800",
+    badgeOn: "bg-white/70 text-emerald-900",
+  },
+  {
+    key: APPROVAL_STATUS.REJECTED, label: "Rejected", icon: XCircle, count: "REJECTED",
+    off: "border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-50",
+    on: "border-rose-400 bg-rose-100 text-rose-900 ring-2 ring-rose-200",
+    badge: "bg-rose-100 text-rose-800",
+    badgeOn: "bg-white/70 text-rose-900",
+  },
 ];
 
-const STATE_CHIPS = [
-  { key: PAYMENT_STATE.UNPAID, label: "Unpaid", icon: CreditCard, on: "border-slate-300 bg-slate-50 text-slate-700", count: "UNPAID" },
-  { key: PAYMENT_STATE.PARTIAL, label: "Partial Paid", icon: PieChart, on: "border-blue-300 bg-blue-50 text-blue-700", count: "PARTIAL" },
-  { key: PAYMENT_STATE.PAID, label: "Paid", icon: CheckCircle2, on: "border-emerald-300 bg-emerald-50 text-emerald-700", count: "PAID" },
+/*
+  Module scope, not declared inside the page.
+
+  It was inside, which made it a brand-new component type on every render —
+  React tears the chip down and rebuilds it each time the list reloads. counts
+  and onPick come in as props for that reason.
+*/
+const Chip = ({ chip, group, value, onPick, counts }) => {
+  const active = value === chip.key;
+  const Icon = chip.icon;
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(active ? "" : chip.key)}
+      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
+        active ? chip.on : chip.off
+      }`}
+      aria-pressed={active}
+      aria-label={`${group} ${chip.label}`}
+    >
+      <Icon className="h-4 w-4" />
+      {chip.label}
+      <span className={`rounded-full px-1.5 text-xs tabular-nums ${active ? chip.badgeOn : chip.badge}`}>
+        {counts[chip.count] ?? 0}
+      </span>
+    </button>
+  );
+};
+
+/*
+  The payment side, as a dropdown rather than chips.
+
+  A dropdown that only filtered would have lost what the chips were for — how
+  many sit in each state — so every option carries its own count, the same way
+  the report pages do it. One control, both answers, and the row no longer
+  wraps on a laptop.
+
+  Kept as its own group from the approval chips beside it on purpose: "was
+  this cleared to pay" and "how much of it has gone" are two questions, which
+  is the whole reason they are two fields.
+*/
+const STATE_OPTIONS = [
+  { key: PAYMENT_STATE.UNPAID, label: "Unpaid", count: "UNPAID" },
+  { key: PAYMENT_STATE.PARTIAL, label: "Partial Paid", count: "PARTIAL" },
+  { key: PAYMENT_STATE.PAID, label: "Paid", count: "PAID" },
 ];
 
 /* ── Everything raised on one invoice, with the buttons to change it ── */
@@ -643,27 +710,6 @@ const PaymentsComp = () => {
     );
   }
 
-  const Chip = ({ chip, group, value, setValue }) => {
-    const active = value === chip.key;
-    const Icon = chip.icon;
-    return (
-      <button
-        type="button"
-        onClick={() => { setValue(active ? "" : chip.key); setPage(1); }}
-        className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
-          active ? chip.on : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-        }`}
-        aria-pressed={active}
-        aria-label={`${group} ${chip.label}`}
-      >
-        <Icon className="h-4 w-4" />
-        {chip.label}
-        <span className={`rounded-full px-1.5 text-xs tabular-nums ${active ? "bg-white/60" : "bg-slate-100 text-slate-500"}`}>
-          {counts[chip.count] ?? 0}
-        </span>
-      </button>
-    );
-  };
 
   const anyFilter = !!approvalStatus || !!paymentState || payable !== PAYABLE_FILTER.ALL;
 
@@ -683,45 +729,11 @@ const PaymentsComp = () => {
         </div>
       )}
 
-      {/* Two independent groups. Picking one from each is the filter accounts
-          actually want — "approved but still unpaid". */}
-      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-        <button
-          type="button" onClick={clearChips}
-          className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
-            anyFilter ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50" : "border-slate-300 bg-slate-100 text-slate-800"
-          }`}
-        >
-          <LayoutGrid className="h-4 w-4" /> All
-          <span className="rounded-full bg-slate-200 px-1.5 text-xs tabular-nums text-slate-600">{counts.ALL ?? 0}</span>
-        </button>
+      {/* Search first, then the status bar.
 
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
-          <span className="mr-1 text-sm font-semibold text-slate-600">Payment Approval</span>
-          {APPROVAL_CHIPS.map((c) => (
-            <Chip key={c.key} chip={c} group="Payment approval" value={approvalStatus} setValue={setApprovalStatus} />
-          ))}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
-          <span className="mr-1 text-sm font-semibold text-slate-600">Payment Status</span>
-          {STATE_CHIPS.map((c) => (
-            <Chip key={c.key} chip={c} group="Payment status" value={paymentState} setValue={setPaymentState} />
-          ))}
-        </div>
-
-        <div className="ml-auto flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
-          <CalendarClock className="h-4 w-4 text-slate-400" />
-          <select
-            value={payable} onChange={(e) => { setPayable(e.target.value); setPage(1); }}
-            className="rounded-lg border-0 bg-transparent py-0.5 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-0"
-            aria-label="Payable timing"
-          >
-            {PAYABLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-      </div>
-
+          The bar is where the eye lands and stays — it is the thing being
+          clicked all day — so it sits directly above the table it filters
+          rather than with a search box wedged between them. */}
       <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
           <div className="lg:col-span-2">
@@ -743,6 +755,68 @@ const PaymentsComp = () => {
               <RotateCcw className="h-4 w-4" /> Clear Filter
             </button>
           )}
+        </div>
+      </div>
+
+      {/* Two independent groups. Picking one from each is the filter accounts
+          actually want — "approved but still unpaid". */}
+      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <button
+          type="button" onClick={clearChips}
+          className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
+            anyFilter ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50" : "border-slate-300 bg-slate-100 text-slate-800"
+          }`}
+        >
+          <LayoutGrid className="h-4 w-4" /> All
+          <span className="rounded-full bg-slate-200 px-1.5 text-xs tabular-nums text-slate-600">{counts.ALL ?? 0}</span>
+        </button>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
+          <span className="mr-1 text-sm font-semibold text-slate-600">Payment Approval</span>
+          {APPROVAL_CHIPS.map((c) => (
+            <Chip
+              key={c.key} chip={c} group="Payment approval"
+              value={approvalStatus} counts={counts}
+              onPick={(v) => { setApprovalStatus(v); setPage(1); }}
+            />
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
+          <span className="mr-1 text-sm font-semibold text-slate-600">Payment Status</span>
+          <select
+            value={paymentState}
+            onChange={(e) => { setPaymentState(e.target.value); setPage(1); }}
+            className="rounded-lg border-0 bg-transparent py-0.5 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-0"
+            aria-label="Payment status"
+          >
+            {/*
+              "All" is the three states added up, not counts.ALL — that one is
+              worked out without the approval filter applied, so it would
+              overcount here the moment an approval chip is on. Every row has
+              exactly one payment state, so the three sum to precisely what
+              clearing this dropdown would return.
+            */}
+            <option value="">
+              All · {(counts.UNPAID ?? 0) + (counts.PARTIAL ?? 0) + (counts.PAID ?? 0)}
+            </option>
+            {STATE_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label} · {counts[o.count] ?? 0}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="ml-auto flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
+          <CalendarClock className="h-4 w-4 text-slate-400" />
+          <select
+            value={payable} onChange={(e) => { setPayable(e.target.value); setPage(1); }}
+            className="rounded-lg border-0 bg-transparent py-0.5 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-0"
+            aria-label="Payable timing"
+          >
+            {PAYABLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
         </div>
       </div>
 

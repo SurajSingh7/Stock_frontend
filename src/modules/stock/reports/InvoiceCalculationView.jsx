@@ -217,7 +217,7 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
               </p>
             )}
 
-            {(r.extraCharges || []).map((c, i) => (
+            {(r.extraCharges || []).filter((c) => c.includeInBilling !== false).map((c, i) => (
               <Step key={i} label={`+ ${c.note || "Extra charge"}`} amount={money(c.amount)} tone="text-slate-600" />
             ))}
 
@@ -267,6 +267,18 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
 
             {(credits.length > 0 || miscs.length > 0) && <Rule />}
             <Step label="PAYABLE" amount={money(r.payable)} strong tone="text-slate-900" />
+
+            {/* Recorded on the invoice but deliberately left out of the bill —
+                shown so the breakup accounts for every charge, outside the sum. */}
+            {(r.extraCharges || []).some((c) => c.includeInBilling === false) && (
+              <>
+                <Rule />
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Not billed · note only</p>
+                {r.extraCharges.filter((c) => c.includeInBilling === false).map((c, i) => (
+                  <Step key={i} label={c.note || "Extra charge"} amount={money(c.amount)} tone="text-slate-400" />
+                ))}
+              </>
+            )}
 
             {(r.payments || []).map((p, i) => (
               <Step

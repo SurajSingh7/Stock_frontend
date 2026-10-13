@@ -40,6 +40,8 @@ const DetailRow = ({ label, children }) => (
   </div>
 );
 
+const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
 const NO_BRANCH_MESSAGE =
   "You do not have access to any branch. Ask an administrator to assign you a branch before receiving stock.";
 
@@ -533,6 +535,7 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
   const [existingFile, setExistingFile] = useState("");
   const [branchId, setBranchId] = useState("");
   const [extraCharges, setExtraCharges] = useState([]);
+  const [notes, setNotes] = useState("");
   const [lines, setLines] = useState({}); // quotationItemId -> lineState
   const [activeTabId, setActiveTabId] = useState(null);
   const [ratingPopupFor, setRatingPopupFor] = useState(null);
@@ -630,7 +633,11 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           setBranchId(
             inScope(invoice.branchId) ? String(invoice.branchId) : branchAccess.defaultBranchId
           );
-          setExtraCharges(invoice.extraCharges || []);
+          // A charge saved before the billing flag existed was always billed.
+          setExtraCharges(
+            (invoice.extraCharges || []).map((c) => ({ ...c, includeInBilling: c.includeInBilling !== false }))
+          );
+          setNotes(invoice.notes || "");
         } else {
           setBranchId(branchAccess.defaultBranchId);
         }
@@ -656,10 +663,20 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
     setLines((prev) => ({ ...prev, [String(quotationItemId)]: next }));
   };
 
-  const addExtraCharge = () => setExtraCharges((prev) => [...prev, { amount: "", note: "" }]);
+  const addExtraCharge = () =>
+    setExtraCharges((prev) => [...prev, { amount: "", note: "", includeInBilling: true }]);
   const updateExtraCharge = (idx, field, value) =>
     setExtraCharges((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c)));
   const removeExtraCharge = (idx) => setExtraCharges((prev) => prev.filter((_, i) => i !== idx));
+  const chargeTotals = extraCharges.reduce(
+    (t, c) => {
+      const amt = Number(c.amount) || 0;
+      if (c.includeInBilling === false) t.noteOnly += amt;
+      else t.billed += amt;
+      return t;
+    },
+    { billed: 0, noteOnly: 0 }
+  );
 
   const handleFilePick = (e) => {
     const picked = e.target.files?.[0];
@@ -714,6 +731,11 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
     }
     if (builtLines.length === 0) return setError("Receive at least one item before submitting");
 
+    const badCharge = extraCharges.findIndex((c) => !(Number(c.amount) > 0));
+    if (badCharge !== -1) {
+      return setError(`Extra charge ${badCharge + 1}: enter an amount greater than 0, or remove the row`);
+    }
+
     for (const it of poItems) {
       const key = String(it.quotationItemId);
       const built = builtLines.find((l) => String(l.quotationItemId) === key);
@@ -760,9 +782,12 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
         invoiceDate,
         branchId: branchId || null,
         receivedByName: receivedByName || undefined,
-        extraCharges: extraCharges
-          .filter((c) => c.amount !== "" && c.amount != null)
-          .map((c) => ({ amount: Number(c.amount) || 0, note: c.note || "" })),
+        notes: notes.trim(),
+        extraCharges: extraCharges.map((c) => ({
+          amount: Number(c.amount),
+          note: c.note || "",
+          includeInBilling: c.includeInBilling !== false,
+        })),
         lines: builtLines,
       };
 
@@ -856,6 +881,12 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
             <DetailRow label="Received By">
               <p className="text-sm font-medium text-slate-900">{receivedByName || "—"}</p>
             </DetailRow>
+            <DetailRow label="Notes">
+              <textarea
+                rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
+                className={inputCls} placeholder="Any remarks about this delivery or invoice (optional)"
+              />
+            </DetailRow>
           </div>
         </section>
 
@@ -879,13 +910,14 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-50/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
                         <th className="px-3 py-2">Description</th>
-                        <th className="px-3 py-2 w-32 text-right">Amount</th>
+                        <th className="px-3 py-2 w-28 text-right">Amount</th>
+                        <th className="px-3 py-2 w-36">Billing</th>
                         <th className="px-3 py-2 w-10" />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {extraCharges.map((c, idx) => (
-                        <tr key={idx}>
+                        <tr key={idx} className={c.includeInBilling === false ? "bg-slate-50/80 opacity-75" : ""}>
                           <td className="px-3 py-2">
                             <input
                               type="text" placeholder="e.g. Transport" value={c.note}
@@ -901,6 +933,25 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
                             />
                           </td>
                           <td className="px-3 py-2">
+                            {/* "Note" keeps the charge on record without adding it to the bill. */}
+                            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold">
+                              {[
+                                { value: true, label: "In bill", on: "bg-blue-600 text-white" },
+                                { value: false, label: "Note", on: "bg-slate-600 text-white" },
+                              ].map((opt) => (
+                                <button
+                                  key={opt.label} type="button"
+                                  onClick={() => updateExtraCharge(idx, "includeInBilling", opt.value)}
+                                  className={`rounded-md px-2.5 py-1 transition ${
+                                    (c.includeInBilling !== false) === opt.value ? opt.on : "text-slate-500 hover:bg-slate-100"
+                                  }`}
+                                >
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
                             <button type="button" onClick={() => removeExtraCharge(idx)} className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600">
                               <IconX />
                             </button>
@@ -909,6 +960,16 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
                       ))}
                     </tbody>
                   </table>
+                  <div className="space-y-1 border-t border-slate-200 bg-slate-50/60 px-3 py-2.5 text-xs">
+                    <div className="flex justify-between text-slate-700">
+                      <span>Added to bill</span>
+                      <span className="font-semibold tabular-nums">{rupees(chargeTotals.billed)}</span>
+                    </div>
+                    <div className="flex justify-between text-slate-500">
+                      <span>Note only (not billed)</span>
+                      <span className="tabular-nums">{rupees(chargeTotals.noteOnly)}</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

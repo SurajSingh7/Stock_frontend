@@ -184,8 +184,11 @@ const InvoiceDetailPopup = ({ row: r, onClose, onCalculation }) => {
           <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-wider text-slate-700">Extra charges</p>
           <div className="space-y-1">
             {r.extraCharges.map((c, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <div key={i} className={`flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm ${c.includeInBilling === false ? "opacity-60" : ""}`}>
                 <span className="text-slate-700">{c.note || "—"}</span>
+                {c.includeInBilling === false && (
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Not billed</span>
+                )}
                 <span className="ml-auto font-semibold tabular-nums text-slate-900">{money(c.amount)}</span>
               </div>
             ))}

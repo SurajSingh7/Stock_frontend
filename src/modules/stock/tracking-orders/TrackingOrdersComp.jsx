@@ -587,9 +587,23 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
           <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Extra Charges</p>
           <ul className="space-y-1 text-sm text-slate-700">
             {invoice.extraCharges.map((c, i) => (
-              <li key={i} className="flex justify-between"><span>{c.note || "—"}</span><span className="tabular-nums">{money(c.amount)}</span></li>
+              <li key={i} className={`flex items-center justify-between gap-2 ${c.includeInBilling === false ? "text-slate-400" : ""}`}>
+                <span>
+                  {c.note || "—"}
+                  {c.includeInBilling === false && (
+                    <span className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Not billed</span>
+                  )}
+                </span>
+                <span className="tabular-nums">{money(c.amount)}</span>
+              </li>
             ))}
           </ul>
+        </div>
+      )}
+      {invoice.notes && (
+        <div className="mt-4">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Notes</p>
+          <p className="whitespace-pre-wrap text-sm text-slate-700">{invoice.notes}</p>
         </div>
       )}
     </Modal>
