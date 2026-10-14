@@ -39,8 +39,9 @@ const unitPriceBreakdown = (unitPrice, gstRate, taxType) => {
   return { basic, cgst, sgst, igst, total: round2(basic + cgst + sgst + igst) };
 };
 
-async function fetchInvoiceDetail(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${id}`, { credentials: "include" });
+async function fetchInvoiceDetail(id, entryId) {
+  const qs = entryId ? `?entryId=${entryId}` : "";
+  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${id}${qs}`, { credentials: "include" });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoice");
   return json.data;
@@ -51,6 +52,58 @@ async function fetchProductDefinition(id) {
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product");
   return json.data;
 }
+
+/*
+  The numbers the approver decides on, per product: ordered on the PO, on
+  this invoice, already received on earlier approved invoices, entered now,
+  and what is still pending on the PO after this one.
+*/
+const ComparisonTable = ({ lines }) => {
+  const th = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
+  const thR = `${th} text-right`;
+  const tdR = "px-3 py-2.5 text-right text-sm tabular-nums text-slate-700";
+  return (
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <p className="border-b border-slate-100 bg-slate-50/60 px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-700">
+        PO · Invoice · Received
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-full border-collapse">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className={th}>Product</th>
+              <th className={thR}>PO qty</th>
+              <th className={thR}>Received earlier</th>
+              <th className={thR}>Invoice qty</th>
+              <th className={`${thR} bg-indigo-50/60 text-indigo-700`}>Entered</th>
+              <th className={thR}>Pending on PO after this</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {lines.map((l) => {
+              const left = Math.max(0, (l.orderedQuantity || 0) - (l.earlierReceivedQuantity || 0) - (l.receivedQuantity || 0));
+              const matches = (l.receivedQuantity || 0) === (l.invoiceQuantity || 0);
+              return (
+                <tr key={l._id || l.quotationItemId}>
+                  <td className="px-3 py-2.5 text-sm font-medium text-slate-900">
+                    {l.productName} <span className="text-xs font-normal text-slate-400">{unitLabel(l.unit)}</span>
+                  </td>
+                  <td className={tdR}>{l.orderedQuantity ?? "—"}</td>
+                  <td className={`${tdR} text-emerald-700`}>{l.earlierReceivedQuantity || 0}</td>
+                  <td className={tdR}>{l.invoiceQuantity ?? "—"}</td>
+                  <td className={`${tdR} bg-indigo-50/40 font-bold ${matches ? "text-indigo-700" : "text-rose-600"}`}>
+                    {l.receivedQuantity || 0}{l.focQuantity ? <span className="font-normal text-amber-600"> + {l.focQuantity} FOC</span> : null}
+                  </td>
+                  <td className={`${tdR} font-semibold`}>{left}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
 
 const DetailField = ({ label, value }) => (
   <div>
@@ -241,7 +294,12 @@ const LineCard = ({ line, taxType }) => {
 /* Main                                                            */
 /* ============================================================= */
 
-const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
+// entryId: reviewing one entry of a partial-submit invoice.
+const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
+  const decisionUrl = (action) =>
+    entryId
+      ? `${API_BACKEND_URL}/stock/invoices/${invoiceId}/entries/${entryId}/${action}`
+      : `${API_BACKEND_URL}/stock/invoices/${invoiceId}/${action}`;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [invoice, setInvoice] = useState(null);
@@ -256,7 +314,7 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
       setLoading(true);
       setError(null);
       try {
-        const detail = await fetchInvoiceDetail(invoiceId);
+        const detail = await fetchInvoiceDetail(invoiceId, entryId);
         setInvoice(detail);
 
         const ids = [...new Set((detail.lines || []).map((l) => String(l.productDefinitionId)))];
@@ -277,7 +335,7 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
         setLoading(false);
       }
     })();
-  }, [invoiceId]);
+  }, [invoiceId, entryId]);
 
   const lines = useMemo(
     () => (invoice?.lines || []).map((l) => ({ ...l, productDef: productDefs[String(l.productDefinitionId)] })),
@@ -287,7 +345,7 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
   const approve = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${invoiceId}/approve`, { method: "PATCH", credentials: "include" });
+      const res = await fetch(decisionUrl("approve"), { method: "PATCH", credentials: "include" });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to approve");
       onDone();
@@ -302,7 +360,7 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
     if (!reason.trim()) { setError("A reason is required to reject"); return; }
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${invoiceId}/reject`, {
+      const res = await fetch(decisionUrl("reject"), {
         method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ reason: reason.trim() }),
       });
@@ -339,7 +397,10 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
           <ArrowLeft className="h-4 w-4" /> Back
         </button>
         <div className="min-w-0">
-          <h1 className="text-lg font-bold tracking-tight text-slate-900">Review Invoice {invoice?.invoiceNumber}</h1>
+          <h1 className="text-lg font-bold tracking-tight text-slate-900">
+            Review Invoice {invoice?.invoiceNumber}
+            {invoice?.entry && <span className="text-slate-500"> · Entry {invoice.entry.entryNumber}</span>}
+          </h1>
           <p className="truncate text-sm text-slate-500">PO {invoice?.poNumber || "—"} · {invoice?.vendorName || "—"}</p>
         </div>
         <span className="ml-auto"><StatusBadge status={invoice?.status} /></span>
@@ -399,6 +460,8 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
         </div>
       )}
 
+      <ComparisonTable lines={lines} />
+
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <p className="border-b border-slate-100 bg-slate-50/60 px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-700">
           Invoice Details
@@ -406,6 +469,7 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
         <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-4">
           <DetailField label="Invoice Date" value={fmt(invoice?.invoiceDate)} />
           <DetailField label="Received By" value={invoice?.receivedByName || invoice?.createdByName} />
+          <DetailField label="Amount on invoice" value={money(invoice?.invoiceAmount)} />
           <DetailField label="Basic Amount" value={money(invoice?.basicAmount)} />
           <DetailField
             label="Attachment"
@@ -444,6 +508,24 @@ const InvoiceReviewView = ({ invoiceId, onBack, onDone }) => {
           <p className="text-base font-bold tabular-nums text-slate-900">{money(invoice?.grandTotal)}</p>
         </div>
       </div>
+
+      {(invoice?.entryLog || []).length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">Entry history</p>
+          <ul className="space-y-1 text-sm text-slate-700">
+            {invoice.entryLog.slice().reverse().map((e, i) => (
+              <li key={i}>
+                <span className="font-semibold text-slate-900">{e.byName || "—"}</span>
+                <span className="text-slate-400"> · {e.at ? new Date(e.at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"} · </span>
+                {(e.items || []).map((it) => `${it.productName} ${it.quantity >= 0 ? "+" : ""}${it.quantity}`).join(", ") || "—"}
+                <span className={`ml-1 text-xs font-semibold ${e.action === "SUBMIT" ? "text-indigo-600" : "text-slate-400"}`}>
+                  · {e.action === "SUBMIT" ? "Submitted" : "Draft saved"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="space-y-4">
         {lines.map((line) => (

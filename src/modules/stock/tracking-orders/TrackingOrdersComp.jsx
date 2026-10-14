@@ -8,6 +8,7 @@ import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
 import StatusTracker, { stageIndexForStatus } from "./StatusTracker";
 import InvoiceReceiveView from "./InvoiceReceiveView";
+import AddInvoicePopup from "./AddInvoicePopup";
 import { usePermissions } from "@/context/PermissionContext";
 import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck } from "lucide-react";
 
@@ -92,9 +93,9 @@ const SHORT_CLOSABLE_STATUSES = new Set(["PARTIAL"]);
   most people never see them, so here the check has to happen before render.
   Admins bypass every permission server-side, so they bypass it here too.
 */
-const canDo = (permissions, isAdmin, action) => {
+const canDo = (permissions, isAdmin, action, moduleKey = "tracking-orders") => {
   if (isAdmin) return true;
-  const mod = (permissions || []).find((m) => m.moduleKey === "tracking-orders");
+  const mod = (permissions || []).find((m) => m.moduleKey === moduleKey);
   return (mod?.actions || []).map((a) => String(a).toUpperCase()).includes(action);
 };
 
@@ -515,7 +516,17 @@ const OverallSummaryPopup = ({ row, invoices, onClose }) => {
 };
 
 const INVOICE_STATUS_META = {
-  PENDING: { label: "Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
+  ADDED: { label: "Added", badge: "bg-slate-50 text-slate-700 ring-slate-200", dot: "bg-slate-400" },
+  DRAFT: { label: "Draft", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500" },
+  PENDING: { label: "Pending approval", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
+  APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
+  REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
+  IN_PROGRESS: { label: "In progress", badge: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500" },
+};
+// An entry of a partial-submit invoice.
+const ENTRY_STATUS_META = {
+  DRAFT: { label: "Draft", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500" },
+  PENDING: { label: "Pending approval", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
   APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
   REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
 };
@@ -523,7 +534,7 @@ const INVOICE_STATUS_META = {
 const InvoiceStatusBadge = ({ status }) => {
   const m = INVOICE_STATUS_META[status] || {};
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${m.dot || "bg-slate-400"}`} />
       {m.label || status}
     </span>
@@ -535,6 +546,8 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
   const itemThRight = `${itemTh} text-right`;
   const itemTd = "px-3 py-2 text-sm text-slate-700";
   const itemTdRight = `${itemTd} text-right tabular-nums`;
+  const entries = (invoice.entryLog || []).slice().reverse();
+  const edits = (invoice.editHistory || []).slice().reverse();
   return (
     <Modal onClose={onClose} title={`Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
       <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -543,8 +556,8 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
           <p className="mt-1 text-sm font-medium text-slate-900">{fmt(invoice.invoiceDate)}</p>
         </div>
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Amount</p>
-          <p className="mt-1 text-sm font-medium text-slate-900">{money(invoice.amount)}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Amount on invoice</p>
+          <p className="mt-1 text-sm font-medium text-slate-900">{money(invoice.invoiceAmount)}</p>
         </div>
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
@@ -561,7 +574,7 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
       </div>
       {invoice.status === "REJECTED" && invoice.rejectedReason && (
         <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          Rejected: {invoice.rejectedReason}
+          Rejected{invoice.reviewedByName ? ` by ${invoice.reviewedByName}` : ""}: {invoice.rejectedReason}
         </div>
       )}
       <div className="overflow-x-auto rounded-xl border border-slate-100">
@@ -569,14 +582,18 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
           <thead className="bg-slate-50">
             <tr>
               <th className={itemTh}>Product</th>
-              <th className={itemThRight}>Qty Received</th>
+              <th className={itemThRight}>Invoice qty</th>
+              <th className={itemThRight}>Entered</th>
+              <th className={itemThRight}>FOC</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {(invoice.lines || []).map((l, i) => (
               <tr key={i}>
                 <td className={`${itemTd} font-medium text-slate-900`}>{l.productName}</td>
-                <td className={itemTdRight}>{l.receivedQuantity}</td>
+                <td className={itemTdRight}>{l.invoiceQuantity}</td>
+                <td className={`${itemTdRight} ${l.receivedQuantity === l.invoiceQuantity ? "text-emerald-700" : "text-amber-700"}`}>{l.receivedQuantity || 0}</td>
+                <td className={itemTdRight}>{l.focQuantity || 0}</td>
               </tr>
             ))}
           </tbody>
@@ -606,38 +623,200 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
           <p className="whitespace-pre-wrap text-sm text-slate-700">{invoice.notes}</p>
         </div>
       )}
+      {entries.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Entry history</p>
+          <ul className="space-y-1 text-sm text-slate-700">
+            {entries.map((e, i) => (
+              <li key={i}>
+                <span className="font-semibold text-slate-900">{e.byName || "—"}</span>
+                <span className="text-slate-400"> · {fmtTime(e.at)} · </span>
+                {(e.items || []).map((it) => `${it.productName} ${it.quantity >= 0 ? "+" : ""}${it.quantity}`).join(", ") || "—"}
+                <span className={`ml-1 text-xs font-semibold ${e.action === "SUBMIT" ? "text-indigo-600" : "text-slate-400"}`}>
+                  · {e.entryNumber ? `Entry ${e.entryNumber} ` : ""}{e.action === "SUBMIT" ? "submitted" : "draft saved"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {edits.length > 0 && (
+        <div className="mt-4">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Edit history</p>
+          <ul className="space-y-2">
+            {edits.map((h, i) => (
+              <li key={i} className="rounded-lg border border-violet-100 bg-violet-50/40 px-3 py-2 text-xs text-slate-700">
+                <p className="font-semibold text-slate-800">{h.byName || "—"} · {fmtTime(h.at)}</p>
+                {(h.changes || []).map((c, j) => (
+                  <p key={j}>
+                    {c.field}: <span className="text-slate-400 line-through">{String(c.from ?? "") || "—"}</span> → <span className="font-medium">{String(c.to ?? "") || "—"}</span>
+                  </p>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+/*
+  Total (PO rates) ⓘ — how the total is made up, at what has been entered and
+  at the invoice's full quantities, against the amount written on the invoice.
+*/
+const PriceBreakupPopup = ({ invoice, onClose }) => {
+  const now = invoice.atEntered || invoice;
+  const full = invoice;
+  const diff = Math.round(((invoice.invoiceAmount || 0) - (full.grandTotal || 0)) * 100) / 100;
+  const complete = (invoice.qtyReceived || 0) === (invoice.qtyInvoiced || 0);
+  const rows = [
+    ["Basic Price", "basicAmount"],
+    ["CGST", "cgstAmount"],
+    ["SGST", "sgstAmount"],
+    ["IGST", "igstAmount"],
+    ["Extra charges", "extraChargesTotal"],
+  ];
+  const cell = (v) => (v ? money(v) : "—");
+  return (
+    <Modal onClose={onClose} title={`${invoice.invoiceNumber} · Price breakup (PO rates)`} maxWidth="max-w-md">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <th className="py-1.5 text-left" />
+            {!complete && <th className="py-1.5 text-right">Entered ({invoice.qtyReceived || 0})</th>}
+            <th className="py-1.5 text-right">Invoice qty ({invoice.qtyInvoiced || 0})</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map(([label, key]) => (
+            <tr key={key}>
+              <td className="py-1.5 text-slate-600">{label}</td>
+              {!complete && <td className="py-1.5 text-right tabular-nums text-slate-500">{cell(now[key])}</td>}
+              <td className="py-1.5 text-right tabular-nums text-slate-800">{cell(full[key])}</td>
+            </tr>
+          ))}
+          <tr className="border-t-2 border-slate-200 font-semibold">
+            <td className="py-2 text-slate-900">Total (PO rates)</td>
+            {!complete && <td className="py-2 text-right tabular-nums text-slate-600">{money(now.grandTotal)}</td>}
+            <td className="py-2 text-right tabular-nums text-slate-900">{money(full.grandTotal)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="mt-3 space-y-1 rounded-lg bg-slate-50 px-3 py-2.5 text-sm">
+        <div className="flex justify-between"><span className="text-slate-600">Amount on invoice</span><span className="tabular-nums font-medium">{money(invoice.invoiceAmount)}</span></div>
+        <div className={`flex justify-between font-semibold ${Math.abs(diff) > 1 ? "text-rose-600" : "text-emerald-700"}`}>
+          <span>Difference</span>
+          <span className="tabular-nums">{Math.abs(diff) > 1 ? `${diff > 0 ? "+" : "−"}${money(Math.abs(diff))}` : "₹0 ✓"}</span>
+        </div>
+      </div>
+      {!complete && (
+        <p className="mt-2 text-[11px] text-slate-400">The table&apos;s Total column follows the entered quantity; the invoice-qty column is what the full invoice should add up to.</p>
+      )}
+    </Modal>
+  );
+};
+
+/*
+  "Partial · N entries" → every entry of a partial-submit invoice: who
+  entered what, how much, and where it stands. Draft / rejected entries can
+  be continued or fixed from here.
+*/
+const EntriesPopup = ({ invoice, onClose, onAddItems }) => {
+  const th = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
+  const thR = `${th} text-right`;
+  const td = "px-3 py-2.5 text-sm text-slate-700";
+  const tdR = `${td} text-right tabular-nums`;
+  const entries = invoice.entries || [];
+  return (
+    <Modal onClose={onClose} title={`${invoice.invoiceNumber} · Entries`} maxWidth="max-w-4xl">
+      <p className="mb-3 text-xs text-slate-500">
+        Invoice qty {invoice.qtyInvoiced || 0} · approved {invoice.qtyApproved || 0} · awaiting approval {invoice.qtyPendingApproval || 0}
+        {invoice.qtyDraft ? ` · in draft ${invoice.qtyDraft}` : ""} · left to enter {invoice.qtyLeftToEnter ?? 0}
+      </p>
+      <div className="overflow-x-auto rounded-xl border border-slate-100">
+        <table className="w-full min-w-full border-collapse">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className={th}>Entry</th>
+              <th className={th}>Date</th>
+              <th className={th}>Items</th>
+              <th className={th}>Entered by</th>
+              <th className={thR}>Qty Entered</th>
+              <th className={thR}>FOC</th>
+              <th className={th}>Status</th>
+              <th className={thR}>Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {entries.length === 0 ? (
+              <tr><td colSpan={8} className="px-3 py-6 text-center text-sm text-slate-400">No entries yet.</td></tr>
+            ) : (
+              entries.map((e) => {
+                const m = ENTRY_STATUS_META[e.status] || {};
+                return (
+                  <tr key={e._id}>
+                    <td className={`${td} font-semibold text-slate-900`}>Entry {e.entryNumber}</td>
+                    <td className={td}>{fmt(e.submittedAt || e.updatedAt)}</td>
+                    <td className={td}>
+                      {e.items || "—"}
+                      {e.status === "REJECTED" && e.rejectedReason && (
+                        <span className="block text-[11px] text-rose-600">Rejected: “{e.rejectedReason}”</span>
+                      )}
+                    </td>
+                    <td className={td}>{e.submittedByName || "—"}</td>
+                    <td className={`${tdR} font-semibold text-slate-900`}>{e.qty || 0}</td>
+                    <td className={tdR}>{e.focQty || 0}</td>
+                    <td className={td}>
+                      <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${m.dot || "bg-slate-400"}`} />
+                        {m.label || e.status}
+                      </span>
+                    </td>
+                    <td className={tdR}>
+                      {e.status === "DRAFT" && (
+                        <button type="button" onClick={() => onAddItems(invoice)} className="rounded-md bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-sky-500">
+                          Continue
+                        </button>
+                      )}
+                      {e.status === "REJECTED" && (
+                        <button type="button" onClick={() => onAddItems(invoice, e._id)} className="rounded-md border border-orange-200 bg-white px-2.5 py-1 text-xs font-semibold text-orange-600 hover:bg-orange-50">
+                          Fix entry
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+          {entries.length > 0 && (
+            <tfoot className="bg-slate-50">
+              <tr>
+                <td className={`${td} font-semibold text-slate-900`} colSpan={4}>Total</td>
+                <td className={`${tdR} font-semibold text-slate-900`}>{entries.reduce((t, e) => t + (e.qty || 0), 0)}</td>
+                <td className={`${tdR} font-semibold text-slate-900`}>{entries.reduce((t, e) => t + (e.focQty || 0), 0)}</td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
     </Modal>
   );
 };
 
 /* Embedded (non-modal) invoice table — rendered directly inside the         */
-/* Tracking Order card so approval status/qty is visible without a click.    */
+/* Tracking Order card so each invoice's state is visible without a click.   */
 const invTh = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
 const invThRight = `${invTh} text-right`;
 const invTd = "px-3 py-2.5 text-sm text-slate-700";
 const invTdRight = `${invTd} text-right tabular-nums`;
 
-// Dot + plain-text approval indicator (no pill background) — used inline in
-// the invoice table, matching the approved reference look.
-const APPROVAL_DOT_META = {
-  PENDING: { label: "Pending", dot: "bg-amber-500", text: "text-slate-700" },
-  APPROVED: { label: "Approved", dot: "bg-emerald-500", text: "text-slate-700" },
-  REJECTED: { label: "Rejected", dot: "bg-rose-500", text: "text-slate-700" },
-};
-const ApprovalDot = ({ status }) => {
-  const m = APPROVAL_DOT_META[status] || {};
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${m.text || "text-slate-700"}`}>
-      <span className={`h-2 w-2 rounded-full ${m.dot || "bg-slate-400"}`} />
-      {m.label || status}
-    </span>
-  );
-};
-
-// Items cell — "Product (qty), Product (qty)" plus a small "N Items" tag.
+// Items cell — "Product (invoice qty), …" plus a small "N Items" tag.
 const ItemsCell = ({ lines }) => {
   const list = lines || [];
-  const summary = list.map((l) => `${l.productName} (${l.receivedQuantity})`).join(", ");
+  const summary = list.map((l) => `${l.productName} (${l.invoiceQuantity})`).join(", ");
   return (
     <div className="max-w-[240px]">
       <p className="truncate text-sm text-slate-700">{summary || "—"}</p>
@@ -648,49 +827,119 @@ const ItemsCell = ({ lines }) => {
   );
 };
 
-// Small icon-button row menu: Eye = View (direct), kebab = More (Edit when rejected).
-const RowActionMenu = ({ invoice, onView, onEdit }) => {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+// The one thing to do next on an invoice, by its status.
+const NEXT_ACTION = {
+  ADDED: { label: "+ Add Items", cls: "bg-blue-600 text-white hover:bg-blue-500" },
+  DRAFT: { label: "Continue", cls: "bg-sky-600 text-white hover:bg-sky-500" },
+  REJECTED: { label: "Fix items", cls: "border border-orange-200 bg-white text-orange-600 hover:bg-orange-50" },
+};
+
+/*
+  Row actions: the next step for the invoice's status, View, and a ⋮ menu
+  for Edit invoice / Delete — shown only to whoever holds EDIT_INVOICE, and
+  each refused by the server outside its rules too.
+*/
+const RowActionMenu = ({ invoice, canEditInvoice, canPartial, onView, onAddItems, onEditInvoice, onDelete, onTogglePartial }) => {
+  // The menu is drawn in a portal at the button's screen position: inside the
+  // table it was clipped by the table's horizontal scroll container.
+  const [menuPos, setMenuPos] = useState(null); // { top, right } when open
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const open = !!menuPos;
+  const toggle = () => {
+    if (open) return setMenuPos(null);
+    const r = btnRef.current.getBoundingClientRect();
+    setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+  };
   useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
+    if (!open) return undefined;
+    const close = (e) => {
+      if (menuRef.current?.contains(e.target) || btnRef.current?.contains(e.target)) return;
+      setMenuPos(null);
+    };
+    const hide = () => setMenuPos(null);
+    document.addEventListener("mousedown", close);
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", hide, true);
+      window.removeEventListener("resize", hide);
+    };
+  }, [open]);
+
+  const next = invoice.partialSubmit
+    ? invoice.status === "APPROVED"
+      ? null
+      : invoice.hasDraftEntry
+        ? NEXT_ACTION.DRAFT
+        : (invoice.qtyLeftToEnter || 0) > 0
+          ? NEXT_ACTION.ADDED
+          : null
+    : NEXT_ACTION[invoice.status];
+  const menu = [
+    ...(canEditInvoice ? [{ label: "Edit invoice", tone: "text-indigo-600 hover:bg-indigo-50", onClick: () => onEditInvoice(invoice) }] : []),
+    // Shown while it can still be switched — the server checks the same.
+    ...(canPartial && invoice.status !== "APPROVED"
+      ? [{
+          label: `Partial submit: ${invoice.partialSubmit ? "ON → OFF" : "OFF → ON"}`,
+          tone: "text-violet-700 hover:bg-violet-50",
+          onClick: () => onTogglePartial(invoice),
+        }]
+      : []),
+    ...(canEditInvoice && invoice.status !== "APPROVED" && !invoice.inLedger
+      ? [{ label: "Delete", tone: "text-rose-600 hover:bg-rose-50", onClick: () => onDelete(invoice) }]
+      : []),
+  ];
 
   return (
     <div className="flex items-center justify-end gap-1">
+      {next && (
+        <button
+          type="button" onClick={() => onAddItems(invoice)}
+          className={`whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold shadow-sm transition ${next.cls}`}
+        >
+          {next.label}
+        </button>
+      )}
       <button
         type="button" onClick={() => onView(invoice)} title="View"
         className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600"
       >
         <Eye className="h-3.5 w-3.5" />
       </button>
-      {invoice.status === "REJECTED" && (
-        <div className="relative" ref={ref}>
+      {menu.length > 0 && (
+        <>
           <button
-            type="button" onClick={() => setOpen((o) => !o)} title="More"
+            ref={btnRef} type="button" onClick={toggle} title="More"
             className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
           >
             <MoreVertical className="h-3.5 w-3.5" />
           </button>
-          {open && (
-            <div className="absolute right-0 z-20 mt-1 w-32 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-              <button
-                type="button" onClick={() => { setOpen(false); onEdit(invoice); }}
-                className="block w-full px-3 py-1.5 text-left text-xs font-medium text-orange-600 hover:bg-orange-50"
-              >
-                Edit
-              </button>
-            </div>
+          {open && createPortal(
+            <div
+              ref={menuRef}
+              style={{ position: "fixed", top: menuPos.top, right: menuPos.right }}
+              className="z-[9999] w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-left shadow-lg"
+            >
+              {menu.map((m) => (
+                <button
+                  key={m.label} type="button" onClick={() => { setMenuPos(null); m.onClick(); }}
+                  className={`block w-full px-3 py-1.5 text-left text-xs font-medium ${m.tone}`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>,
+            document.body
           )}
-        </div>
+        </>
       )}
     </div>
   );
 };
 
-const InvoiceTableBlock = ({ invoices, loading, orderedQty, onView, onEdit }) => {
+const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, canPartial, onView, onAddItems, onEditInvoice, onDelete, onPriceInfo, onTogglePartial, onEntries }) => {
   if (loading) {
     return <div className="h-16 animate-pulse rounded-xl bg-slate-100" />;
   }
@@ -702,10 +951,10 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, onView, onEdit }) =>
         <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-blue-100">
           <ClipboardList className="h-5 w-5 text-blue-600" />
         </span>
-        <p className="mt-3 text-sm font-semibold text-slate-800">No invoice received yet</p>
+        <p className="mt-3 text-sm font-semibold text-slate-800">No invoice added yet</p>
         <p className="mt-1 text-xs text-slate-500">
           All {orderedQty ?? 0} ordered {orderedQty === 1 ? "unit is" : "units are"} still pending.
-          Invoices appear here as goods arrive.
+          Use “Add Invoice” when the vendor&apos;s invoice arrives.
         </p>
       </div>
     );
@@ -718,37 +967,59 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, onView, onEdit }) =>
             <th className={invTh}>Invoice No</th>
             <th className={invTh}>Invoice Date</th>
             <th className={invTh}>Items</th>
-            <th className={invThRight}>Qty</th>
+            <th className={invThRight}>Qty Entered</th>
             <th className={invThRight}>FOC</th>
-            <th className={invThRight}>Basic Price</th>
-            <th className={invThRight}>CGST</th>
-            <th className={invThRight}>SGST</th>
-            <th className={invThRight}>IGST</th>
-            <th className={invThRight}>Extra</th>
-            <th className={invThRight}>Total</th>
+            <th className={invThRight}>Amount on invoice</th>
+            <th className={invThRight}>Total (PO rates)</th>
             <th className={invTh}>Status</th>
             <th className={invThRight}>Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100">
           {invoices.map((inv) => {
-            const pct = orderedQty > 0 ? Math.round(((inv.qtyReceived || 0) / orderedQty) * 100) : 0;
+            const complete = (inv.qtyReceived || 0) === (inv.qtyInvoiced || 0);
+            const entries = inv.partialSubmit ? inv.entries || [] : [];
             return (
               <tr key={inv._id} className="transition hover:bg-slate-50/60">
-                <td className={`${invTd} font-semibold text-indigo-600`}>{inv.invoiceNumber}</td>
+                <td className={`${invTd} font-semibold text-indigo-600`}>
+                  {inv.invoiceNumber}
+                  {inv.partialSubmit && (
+                    <button
+                      type="button" onClick={() => onEntries(inv)} title="Show entries"
+                      className="mt-0.5 block w-fit rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200 transition hover:bg-violet-100"
+                    >
+                      Partial · {entries.length} entr{entries.length === 1 ? "y" : "ies"} ›
+                    </button>
+                  )}
+                </td>
                 <td className={invTd}>{fmt(inv.invoiceDate)}</td>
                 <td className={invTd}><ItemsCell lines={inv.lines} /></td>
-                <td className={invTdRight}>{inv.qtyReceived} </td>
+                <td className={`${invTdRight} ${complete ? "text-emerald-700" : "text-amber-700"}`}>
+                  {inv.qtyReceived || 0} / {inv.qtyInvoiced || 0}
+                  {inv.partialSubmit && (
+                    <span className="block text-[11px] font-normal text-slate-500">{inv.qtyApproved || 0} approved</span>
+                  )}
+                </td>
                 <td className={invTdRight}>{inv.focQtyReceived || 0}</td>
-                <td className={invTdRight}>{money(inv.basicAmount)}</td>
-                <td className={invTdRight}>{money(inv.cgstAmount)}</td>
-                <td className={invTdRight}>{money(inv.sgstAmount)}</td>
-                <td className={invTdRight}>{money(inv.igstAmount)}</td>
-                <td className={invTdRight}>{money(inv.extraChargesTotal)}</td>
-                <td className={`${invTdRight} font-semibold text-slate-900`}>{money(inv.grandTotal)}</td>
-                <td className={invTd}><ApprovalDot status={inv.status} /></td>
+                <td className={invTdRight}>{money(inv.invoiceAmount)}</td>
+                <td className={`${invTdRight} font-semibold text-slate-900`}>
+                  <span className="inline-flex items-center justify-end gap-1">
+                    {money(inv.grandTotal)}
+                    <button
+                      type="button" onClick={() => onPriceInfo(inv)} title="Price breakup"
+                      className="rounded p-0.5 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                </td>
+                <td className={invTd}><InvoiceStatusBadge status={inv.status} /></td>
                 <td className={invTdRight}>
-                  <RowActionMenu invoice={inv} onView={onView} onEdit={onEdit} />
+                  <RowActionMenu
+                    invoice={inv} canEditInvoice={canEditInvoice} canPartial={canPartial}
+                    onView={onView} onAddItems={onAddItems} onEditInvoice={onEditInvoice} onDelete={onDelete}
+                    onTogglePartial={onTogglePartial}
+                  />
                 </td>
               </tr>
             );
@@ -1058,7 +1329,7 @@ const ClosureDecisionPopup = ({ row, mode, onClose, onDone }) => {
   );
 };
 
-const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onHistory, onAddItems, onEditInvoice, onViewPoDoc, onHoverStage, onShortClose, onReopen, canShortClose, canReopen }) => {
+const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onHistory, onAddItems, onInvoiceForm, onChanged, onViewPoDoc, onHoverStage, onShortClose, onReopen, canShortClose, canReopen, canEditInvoice, canPartial }) => {
   const m = STATUS_META[row.status] || {};
   const isReceivingFlow = RECEIVING_FLOW_STATUSES.has(row.status);
   const hasPo = !!row.poNumber;
@@ -1069,7 +1340,8 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
   // An order cannot be closed while someone is still deciding on an invoice —
   // approving it afterwards would change a total that was already declared
   // final. The server refuses it too; this only puts the reason on screen.
-  const pendingInvoices = invoices.filter((inv) => inv.status === "PENDING").length;
+  // Added / Draft count too: those goods have arrived, just not been entered.
+  const pendingInvoices = invoices.filter((inv) => ["ADDED", "DRAFT", "PENDING", "IN_PROGRESS"].includes(inv.status)).length;
 
   // How many approved products were dropped, and how many there were to begin
   // with. items[] already excludes them, so the original total is the two added
@@ -1089,7 +1361,44 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
   const [pickedTab, setPickedTab] = useState(null);
   const tab = pickedTab ?? (hasInvoices ? "invoice" : "products");
   const setTab = setPickedTab;
-  const [popup, setPopup] = useState(null); // { type: "overallSummary" | "viewInvoice" | "mailInfo", ... }
+  const [popup, setPopup] = useState(null); // { type: "overallSummary" | "viewInvoice" | "mailInfo" | "priceInfo", ... }
+  const [cardError, setCardError] = useState(null);
+
+  // ⋮ → Partial submit ON/OFF. The server refuses it once entries are submitted.
+  const togglePartial = async (inv) => {
+    const turnOn = !inv.partialSubmit;
+    const msg = turnOn
+      ? `Turn ON partial submit for ${inv.invoiceNumber}? Items can then be submitted a part at a time, each part approved on its own.`
+      : `Turn OFF partial submit for ${inv.invoiceNumber}? The whole invoice will then be submitted once, complete.`;
+    if (!window.confirm(msg)) return;
+    setCardError(null);
+    try {
+      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${inv._id}/partial`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on: turnOn }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to change partial submit");
+      onChanged();
+    } catch (e) {
+      setCardError(e.message);
+    }
+  };
+
+  // An invoice added by mistake — the server refuses an approved one.
+  const deleteInvoice = async (inv) => {
+    if (!window.confirm(`Delete invoice ${inv.invoiceNumber}? This cannot be undone.`)) return;
+    setCardError(null);
+    try {
+      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${inv._id}`, { method: "DELETE", credentials: "include" });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to delete invoice");
+      onChanged();
+    } catch (e) {
+      setCardError(e.message);
+    }
+  };
 
   const loadInvoices = useCallback(async () => {
     if (!isReceivingFlow) return;
@@ -1197,7 +1506,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               onClick={() => onShortClose(row)}
               title={
                 pendingInvoices > 0
-                  ? `${pendingInvoices} invoice${pendingInvoices > 1 ? "s are" : " is"} awaiting approval — decide ${pendingInvoices > 1 ? "them" : "it"} first`
+                  ? `${pendingInvoices} invoice${pendingInvoices > 1 ? "s are" : " is"} still being entered or awaiting approval — finish ${pendingInvoices > 1 ? "them" : "it"} first`
                   : "Close this order with less than was ordered"
               }
               className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 shadow-sm transition hover:border-amber-400 hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
@@ -1216,10 +1525,10 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
           )}
           {RECEIVABLE_STATUSES.has(row.status) && (
             <button
-              type="button" onClick={() => onAddItems(row)}
+              type="button" onClick={() => onInvoiceForm(row, null)}
               className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500"
             >
-              <PlusCircle className="h-3.5 w-3.5" /> Add Items
+              <PlusCircle className="h-3.5 w-3.5" /> Add Invoice
             </button>
           )}
           {/* Kept on screen, disabled, so the order plainly still HAS a
@@ -1231,7 +1540,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               title="This order is short closed — reopen it to receive more"
               className="inline-flex cursor-not-allowed items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400 shadow-sm"
             >
-              <PlusCircle className="h-3.5 w-3.5" /> Add Items
+              <PlusCircle className="h-3.5 w-3.5" /> Add Invoice
             </button>
           )}
         </div>
@@ -1361,19 +1670,42 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
 
       <div className="border-t border-slate-100 px-5 py-4">
         {tab === "invoice" ? (
-          <InvoiceTableBlock
-            invoices={invoices}
-            loading={invLoading}
-            orderedQty={row.totalQuantity}
-            onView={(inv) => setPopup({ type: "viewInvoice", invoice: inv })}
-            onEdit={(inv) => onEditInvoice(row, inv)}
-          />
+          <>
+            {cardError && (
+              <div className="mb-3 flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                <span>{cardError}</span>
+                <button type="button" onClick={() => setCardError(null)} className="font-bold">&times;</button>
+              </div>
+            )}
+            <InvoiceTableBlock
+              invoices={invoices}
+              loading={invLoading}
+              orderedQty={row.totalQuantity}
+              canEditInvoice={canEditInvoice}
+              canPartial={canPartial}
+              onTogglePartial={togglePartial}
+              onView={(inv) => setPopup({ type: "viewInvoice", invoice: inv })}
+              onAddItems={(inv, entryId) => onAddItems(row, inv, entryId)}
+              onEditInvoice={(inv) => onInvoiceForm(row, inv)}
+              onDelete={deleteInvoice}
+              onPriceInfo={(inv) => setPopup({ type: "priceInfo", invoice: inv })}
+              onEntries={(inv) => setPopup({ type: "entries", invoice: inv })}
+            />
+          </>
         ) : (
           <ApprovedProductTable items={row.items} />
         )}
       </div>
       {popup?.type === "overallSummary" && <OverallSummaryPopup row={row} invoices={invoices} onClose={() => setPopup(null)} />}
       {popup?.type === "viewInvoice" && <InvoiceDetailPopup invoice={popup.invoice} onClose={() => setPopup(null)} />}
+      {popup?.type === "priceInfo" && <PriceBreakupPopup invoice={popup.invoice} onClose={() => setPopup(null)} />}
+      {popup?.type === "entries" && (
+        <EntriesPopup
+          invoice={popup.invoice}
+          onClose={() => setPopup(null)}
+          onAddItems={(inv, entryId) => { setPopup(null); onAddItems(row, inv, entryId); }}
+        />
+      )}
       {popup?.type === "mailInfo" && <MailInfoPopup row={row} onClose={() => setPopup(null)} />}
     </div>
   );
@@ -1388,6 +1720,8 @@ const TrackingOrdersComp = () => {
   const { permissions, isAdmin } = usePermissions();
   const canShortClose = canDo(permissions, isAdmin, "SHORT_CLOSE");
   const canReopen = canDo(permissions, isAdmin, "REOPEN");
+  const canEditInvoice = canDo(permissions, isAdmin, "EDIT_INVOICE", "invoices");
+  const canPartial = canDo(permissions, isAdmin, "PARTIAL_SUBMIT", "invoices");
 
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
@@ -1445,22 +1779,24 @@ const TrackingOrdersComp = () => {
 
   const backToBoard = () => { setView({ mode: "board" }); loadBoard(); setBoardVersion((v) => v + 1); };
 
-  if (view.mode === "receiveInvoice") {
+  if (view.mode === "invoiceForm") {
     return (
-      <InvoiceReceiveView
-        mode="create"
+      <AddInvoicePopup
+        layout="page"
+        mode={view.invoice ? "edit" : "create"}
         trackingOrderId={view.row.trackingOrderId}
-        onBack={backToBoard}
+        invoice={view.invoice}
+        onClose={backToBoard}
         onDone={backToBoard}
       />
     );
   }
-  if (view.mode === "editInvoice") {
+  if (view.mode === "addItems") {
     return (
       <InvoiceReceiveView
-        mode="edit"
         trackingOrderId={view.row.trackingOrderId}
-        invoice={view.invoice}
+        invoiceId={view.invoice._id}
+        entryId={view.entryId}
         onBack={backToBoard}
         onDone={backToBoard}
       />
@@ -1559,8 +1895,11 @@ const TrackingOrdersComp = () => {
                 canShortClose={canShortClose}
                 canReopen={canReopen}
                 onHistory={(r) => setPopup({ type: "resetHistory", row: r })}
-                onAddItems={(r) => setView({ mode: "receiveInvoice", row: r })}
-                onEditInvoice={(r, invoice) => setView({ mode: "editInvoice", row: r, invoice })}
+                onAddItems={(r, invoice, entryId) => setView({ mode: "addItems", row: r, invoice, entryId })}
+                onInvoiceForm={(r, invoice) => setView({ mode: "invoiceForm", row: r, invoice })}
+                onChanged={refresh}
+                canEditInvoice={canEditInvoice}
+                canPartial={canPartial}
                 onViewPoDoc={(r) => setView({ mode: "viewPoDoc", poId: r.poId, poNumber: r.poNumber })}
                 onHoverStage={setHoveredStage}
               />

@@ -179,7 +179,9 @@ const InvoiceApprovalList = () => {
   const loadList = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      // view=approval: whole invoices, plus each submitted entry of a
+      // partial-submit invoice as its own row.
+      const params = new URLSearchParams({ page: String(page), limit: String(limit), view: "approval" });
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (status) params.set("status", status);
       if (categoryId) params.set("categoryId", categoryId);
@@ -222,16 +224,16 @@ const InvoiceApprovalList = () => {
   if (view.mode === "editInvoice") {
     return (
       <InvoiceReceiveView
-        mode="edit"
         trackingOrderId={view.invoice.trackingOrderId}
-        invoice={view.invoice}
+        invoiceId={view.invoice._id}
+        entryId={view.invoice.entryId}
         onBack={backToList}
         onDone={backToList}
       />
     );
   }
   if (view.mode === "review") {
-    return <InvoiceReviewView invoiceId={view.invoiceId} onBack={backToList} onDone={backToList} />;
+    return <InvoiceReviewView invoiceId={view.invoiceId} entryId={view.entryId} onBack={backToList} onDone={backToList} />;
   }
 
   return (
@@ -345,8 +347,15 @@ const InvoiceApprovalList = () => {
               rows.map((inv) => {
                 const pct = inv.orderedQty > 0 ? Math.round(((inv.qtyReceived || 0) / inv.orderedQty) * 100) : 0;
                 return (
-                  <tr key={inv._id} className="transition hover:bg-slate-50/60">
-                    <td className="px-4 py-3 text-sm font-semibold text-indigo-600">{inv.invoiceNumber}</td>
+                  <tr key={inv.entryId || inv._id} className="transition hover:bg-slate-50/60">
+                    <td className="px-4 py-3 text-sm font-semibold text-indigo-600">
+                      {inv.invoiceNumber}
+                      {inv.entryNumber && (
+                        <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                          Entry {inv.entryNumber}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-sm text-slate-500 tabular-nums">{fmtDateTime(inv.invoiceDate)}</td>
                     <td className="px-4 py-3"><ItemsCell lines={inv.lines} /></td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">
@@ -364,7 +373,7 @@ const InvoiceApprovalList = () => {
                       {inv.status === STATUS.PENDING ? (
                         <div className="flex items-center justify-end">
                           <button
-                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id })}
+                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: inv.entryId })}
                             className="inline-flex items-center justify-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500"
                           >
                             <ClipboardCheck className="h-3.5 w-3.5" /> Review

@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { usePermissions } from "@/context/PermissionContext";
 import { pathLabel } from "@/shared/category/categoryPath";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
@@ -31,51 +30,20 @@ const IconTrash = () => (
   </svg>
 );
 
-// Key-value row for the Invoice Details table — label on the left, editable
-// (or read-only) value on the right, matching the approved layout.
-const DetailRow = ({ label, children }) => (
-  <div className="grid grid-cols-1 gap-1 px-5 py-3 sm:grid-cols-3 sm:items-center sm:gap-4">
-    <span className="text-sm font-medium text-slate-500">{label}</span>
-    <div className="sm:col-span-2">{children}</div>
-  </div>
-);
-
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
-const NO_BRANCH_MESSAGE =
-  "You do not have access to any branch. Ask an administrator to assign you a branch before receiving stock.";
-
 const ADD_ROW_COUNTS = [1, 3, 5, 10];
-const ACCEPTED_UPLOAD_TYPES = ["image/jpeg", "image/png", "image/webp", "image/jpg", "application/pdf"];
-const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
-
-const todayStr = () => {
-  const d = new Date();
-  const p = (x) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
-
 async function fetchTrackingDetail(trackingOrderId) {
   const res = await fetch(`${API_BACKEND_URL}/stock/tracking-orders/${trackingOrderId}`, { credentials: "include" });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load tracking order");
   return json.data;
 }
-// Branches this user may receive goods into — their own HRMS branch, or a
-// wider set if an admin gave them one. ?module=invoices is what makes this
-// answer the receiving question specifically: the permission checked and the
-// branch scope applied are both the invoices module's, so receiving staff
-// don't need the Master > Branch permission to fill this field. An empty list
-// means "no branch assigned", not a failure.
-async function fetchReceivingBranches() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=invoices`, { credentials: "include" });
+async function fetchInvoice(id) {
+  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${id}`, { credentials: "include" });
   const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
-  return {
-    branches: json.data?.branches || [],
-    defaultBranchId: json.data?.defaultBranchId ? String(json.data.defaultBranchId) : "",
-    ownBranchId: json.data?.ownBranchId ? String(json.data.ownBranchId) : "",
-  };
+  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoice");
+  return json.data;
 }
 async function fetchProductDefinition(id) {
   const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { credentials: "include" });
@@ -83,22 +51,6 @@ async function fetchProductDefinition(id) {
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product");
   return json.data;
 }
-async function fetchInvoicesForTracking(trackingOrderId) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/board?trackingOrderId=${trackingOrderId}&limit=200`, {
-    credentials: "include",
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoices");
-  return json.data?.rows || [];
-}
-
-function buildInvoiceFormData(payload, file) {
-  const formData = new FormData();
-  formData.append("data", JSON.stringify(payload));
-  if (file) formData.append("invoiceFile", file);
-  return formData;
-}
-
 // selectedFields in display order, keeping each one's isRequired flag. Both
 // tracking methods draw from the same list — Individual renders one set of
 // these per unit row, Group renders one set per batch.
@@ -353,7 +305,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
           {isIndividual ? "Received units" : "Received quantity"} ({unit})
         </p>
         <p className={`text-xs font-semibold tabular-nums ${overLimit ? "text-rose-600" : "text-slate-500"}`}>
-          Ordered {orderedQty} {unit} · Already in other invoices {usedByOthers} · Remaining {remaining}
+          Invoice qty {orderedQty} {unit}{usedByOthers > 0 ? ` · On other entries ${usedByOthers}` : ""} · Entering {receivedNow} · Left {remaining}
         </p>
       </div>
 
@@ -378,7 +330,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
 
       {overLimit && (
         <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
-          This exceeds the ordered quantity — reduce rows/quantity before submitting.
+          This is more than the invoice says — reduce rows/quantity.
         </div>
       )}
 
@@ -506,36 +458,36 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
 /* Main                                                            */
 /* ============================================================= */
 
-const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack, onDone }) => {
-  const isEdit = mode === "edit";
+const STATUS_PILL = {
+  ADDED: { label: "Added", cls: "border-slate-200 bg-slate-50 text-slate-700" },
+  DRAFT: { label: "Draft", cls: "border-sky-200 bg-sky-50 text-sky-700" },
+  REJECTED: { label: "Rejected · fix and resubmit", cls: "border-rose-200 bg-rose-50 text-rose-700" },
+};
 
-  // "Received By" is the signed-in user, not a free-text claim — whoever books
-  // the stock in is who the audit trail should name. Sent as undefined while
-  // the identity context is still loading: the backend resolves the session
-  // user's name itself, so an empty value here can never blank the field.
-  const { userData } = usePermissions();
-  const receivedByName = [userData?.firstName, userData?.lastName].filter(Boolean).join(" ");
+const fmtDateTime = (d) =>
+  d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 
+/*
+  Add Items — entering the units an invoice says arrived. Anyone receiving
+  can carry it forward draft by draft (the entry history records who entered
+  what); Submit only unlocks once every product has exactly the invoice's
+  quantity. The invoice's own details are read-only here — they are changed
+  from the invoice row's ⋮ → Edit invoice, by whoever holds that permission.
+*/
+/*
+  Partial submit (turned on per invoice): the screen fills ONE entry — the
+  open draft, or a rejected entry being corrected (`entryId`). It may hold
+  any part of what is still free on the invoice and is submitted on its own.
+*/
+const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDone }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(null); // "draft" | "submit" | null
 
-  const [tracking, setTracking] = useState(null);
   const [po, setPo] = useState(null);
   const [vendor, setVendor] = useState(null);
-  const [branches, setBranches] = useState([]);
-  const [ownBranchId, setOwnBranchId] = useState("");
-  const [branchNotice, setBranchNotice] = useState("");
+  const [invoice, setInvoice] = useState(null);
   const [productDefs, setProductDefs] = useState({}); // productDefinitionId -> def
-  const [alreadyReceivedByLine, setAlreadyReceivedByLine] = useState({}); // quotationItemId -> qty
-
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(todayStr());
-  const [invoiceFile, setInvoiceFile] = useState(null);
-  const [existingFile, setExistingFile] = useState("");
-  const [branchId, setBranchId] = useState("");
-  const [extraCharges, setExtraCharges] = useState([]);
-  const [notes, setNotes] = useState("");
   const [lines, setLines] = useState({}); // quotationItemId -> lineState
   const [activeTabId, setActiveTabId] = useState(null);
   const [ratingPopupFor, setRatingPopupFor] = useState(null);
@@ -545,220 +497,144 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
       setLoading(true);
       setError(null);
       try {
-        const detail = await fetchTrackingDetail(trackingOrderId);
-        setTracking(detail.tracking);
+        const [detail, inv] = await Promise.all([fetchTrackingDetail(trackingOrderId), fetchInvoice(invoiceId)]);
         setPo(detail.po);
         setVendor(detail.vendor);
-
-        // Fail-soft on purpose: a branch-access problem belongs in the
-        // branch field, not in a page-wide banner that hides the rest of a
-        // form the user can otherwise fill in.
-        const [branchAccess, invoicesForTracking] = await Promise.all([
-          fetchReceivingBranches().catch((err) => ({
-            branches: [],
-            defaultBranchId: "",
-            ownBranchId: "",
-            error: err.message,
-          })),
-          fetchInvoicesForTracking(trackingOrderId),
-        ]);
-        setBranches(branchAccess.branches);
-        setOwnBranchId(branchAccess.ownBranchId || "");
-        setBranchNotice(branchAccess.error || "");
-
-        const received = {};
-        invoicesForTracking.forEach((inv) => {
-          if (inv.status === "REJECTED") return;
-          if (isEdit && String(inv._id) === String(invoice._id)) return;
-          (inv.lines || []).forEach((l) => {
-            const key = String(l.quotationItemId);
-            received[key] = (received[key] || 0) + (l.receivedQuantity || 0);
-          });
-        });
-        setAlreadyReceivedByLine(received);
+        setInvoice(inv);
 
         const defs = {};
         await Promise.all(
-          (detail.po?.items || []).map(async (it) => {
-            if (defs[it.productDefinitionId]) return;
+          (inv.lines || []).map(async (l) => {
+            if (defs[l.productDefinitionId]) return;
             try {
-              defs[it.productDefinitionId] = await fetchProductDefinition(it.productDefinitionId);
+              defs[l.productDefinitionId] = await fetchProductDefinition(l.productDefinitionId);
             } catch {
-              defs[it.productDefinitionId] = null;
+              defs[l.productDefinitionId] = null;
             }
           })
         );
         setProductDefs(defs);
 
-        const initialLines = {};
-        (detail.po?.items || []).forEach((it) => {
-          const key = String(it.quotationItemId);
-          if (isEdit) {
-            const existing = (invoice.lines || []).find((l) => String(l.quotationItemId) === key);
-            const existingRows = (existing?.rows || []).map((r) => ({ fieldValues: r.fieldValues || {}, isFoc: !!r.isFoc }));
-            const focQty = existing?.focQuantity || 0;
-            initialLines[key] = existing
-              ? {
-                  rows: existingRows,
-                  // Individual derives its quantity from the rows themselves;
-                  // Group carries both rows AND a quantity, so the saved
-                  // quantity must be restored explicitly.
-                  quantity:
-                    defs[it.productDefinitionId]?.trackingMethod === "individual"
-                      ? ""
-                      : String(existing.receivedQuantity ?? ""),
-                  focEnabled: true,
-                  focQuantity: focQty ? String(focQty) : "",
-                  rating: existing.rating || { rating: null, notes: "" },
-                }
-              : emptyLineState();
-          } else {
-            initialLines[key] = emptyLineState();
-          }
+        // Whatever was entered earlier (a draft, or a rejected submission)
+        // opens filled in. With partial submit that is the entry being filled.
+        const target = inv.partialSubmit
+          ? (inv.entries || []).find((e) => (entryId ? String(e._id) === String(entryId) : e.status === "DRAFT"))
+          : null;
+        const sourceByKey = new Map(
+          (inv.partialSubmit ? target?.lines || [] : inv.lines || []).map((l) => [String(l.quotationItemId), l])
+        );
+        const initial = {};
+        (inv.lines || []).forEach((l) => {
+          const src = sourceByKey.get(String(l.quotationItemId)) || {};
+          const isIndividual = defs[l.productDefinitionId]?.trackingMethod === "individual";
+          initial[String(l.quotationItemId)] = {
+            rows: (src.rows || []).map((r) => ({ fieldValues: r.fieldValues || {}, isFoc: !!r.isFoc })),
+            // Individual derives its quantity from the rows; Group carries one.
+            quantity: isIndividual || !src.receivedQuantity ? "" : String(src.receivedQuantity),
+            focEnabled: true,
+            focQuantity: src.focQuantity ? String(src.focQuantity) : "",
+            rating: l.rating || { rating: null, notes: "" },
+          };
         });
-        setLines(initialLines);
-        setActiveTabId(detail.po?.items?.[0] ? String(detail.po.items[0].quotationItemId) : null);
-
-        // The branch is the receiver's own branch, not a free pick — the
-        // backend resolves the default, so the field is prefilled rather than
-        // guessed from whichever branch happened to sort first. An invoice
-        // being re-submitted keeps its original branch, but only while that
-        // one is still inside the editor's scope.
-        const inScope = (id) =>
-          !!id && branchAccess.branches.some((w) => String(w._id) === String(id));
-        if (isEdit) {
-          setInvoiceNumber(invoice.invoiceNumber || "");
-          setInvoiceDate(invoice.invoiceDate ? invoice.invoiceDate.slice(0, 10) : todayStr());
-          setExistingFile(invoice.invoiceFile || "");
-          setBranchId(
-            inScope(invoice.branchId) ? String(invoice.branchId) : branchAccess.defaultBranchId
-          );
-          // A charge saved before the billing flag existed was always billed.
-          setExtraCharges(
-            (invoice.extraCharges || []).map((c) => ({ ...c, includeInBilling: c.includeInBilling !== false }))
-          );
-          setNotes(invoice.notes || "");
-        } else {
-          setBranchId(branchAccess.defaultBranchId);
-        }
+        setLines(initial);
+        setActiveTabId(inv.lines?.[0] ? String(inv.lines[0].quotationItemId) : null);
       } catch (err) {
         setError(err.message);
       } finally {
         setLoading(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackingOrderId]);
+  }, [trackingOrderId, invoiceId, entryId]);
 
-  // A single option is the norm: the user's own branch. Nothing to choose, so
-  // the field reads as a statement of fact rather than an open dropdown.
-  const hasBranchAccess = branches.length > 0;
-  const isSingleBranch = branches.length === 1;
-
-  const poItems = useMemo(() => po?.items || [], [po]);
-  const activeItem = poItems.find((it) => String(it.quotationItemId) === activeTabId);
+  const invoiceLines = useMemo(() => invoice?.lines || [], [invoice]);
+  const partial = !!invoice?.partialSubmit;
+  const targetEntry = partial
+    ? (invoice.entries || []).find((e) => (entryId ? String(e._id) === String(entryId) : e.status === "DRAFT"))
+    : null;
+  // Partial submit: what OTHER entries already hold per product (submitted,
+  // approved, or another open draft) — this entry can take only the rest.
+  const othersByKey = useMemo(() => {
+    const m = {};
+    if (!partial) return m;
+    (invoice.entries || [])
+      .filter((e) => e.status !== "REJECTED" && String(e._id) !== String(targetEntry?._id))
+      .forEach((e) => (e.lines || []).forEach((l) => {
+        const k = String(l.quotationItemId);
+        m[k] = (m[k] || 0) + (l.receivedQuantity || 0);
+      }));
+    return m;
+  }, [partial, invoice, targetEntry]);
+  // The product tab works off a PO line; its "ordered" quantity here is what
+  // the INVOICE says, so every cap and count on the tab is against the invoice.
+  const tabLineFor = (l) => {
+    const poLine = (po?.items || []).find((it) => String(it.quotationItemId) === String(l.quotationItemId)) || {};
+    return { ...poLine, ...l, unitPrice: l.unitPrice ?? poLine.unitPrice, quantity: l.invoiceQuantity };
+  };
+  const activeLine = invoiceLines.find((l) => String(l.quotationItemId) === activeTabId);
   const activeLineState = activeTabId ? lines[activeTabId] || emptyLineState() : emptyLineState();
-
-  const setLineState = (quotationItemId, next) => {
-    setLines((prev) => ({ ...prev, [String(quotationItemId)]: next }));
-  };
-
-  const addExtraCharge = () =>
-    setExtraCharges((prev) => [...prev, { amount: "", note: "", includeInBilling: true }]);
-  const updateExtraCharge = (idx, field, value) =>
-    setExtraCharges((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c)));
-  const removeExtraCharge = (idx) => setExtraCharges((prev) => prev.filter((_, i) => i !== idx));
-  const chargeTotals = extraCharges.reduce(
-    (t, c) => {
-      const amt = Number(c.amount) || 0;
-      if (c.includeInBilling === false) t.noteOnly += amt;
-      else t.billed += amt;
-      return t;
-    },
-    { billed: 0, noteOnly: 0 }
-  );
-
-  const handleFilePick = (e) => {
-    const picked = e.target.files?.[0];
-    e.target.value = "";
-    if (!picked) return;
-    if (!ACCEPTED_UPLOAD_TYPES.includes(picked.type)) {
-      setError("Only JPG, PNG, WEBP or PDF files are allowed for the invoice attachment");
-      return;
-    }
-    if (picked.size > MAX_UPLOAD_BYTES) {
-      setError("Invoice file is too large. Maximum is 5MB.");
-      return;
-    }
-    setInvoiceFile(picked);
-  };
+  const setLineState = (key, next) => setLines((prev) => ({ ...prev, [String(key)]: next }));
 
   const isRowFilled = (r) => Object.values(r.fieldValues || {}).some((v) => v !== "" && v != null);
 
+  // What has been entered, per invoice line, as the backend wants it.
   const builtLines = useMemo(() => {
-    return poItems
-      .map((it) => {
-        const key = String(it.quotationItemId);
-        const ls = lines[key] || emptyLineState();
-        const isIndividual = productDefs[it.productDefinitionId]?.trackingMethod === "individual";
-        const filledRows = isIndividual ? ls.rows.filter(isRowFilled) : [];
-        const receivedQuantity = isIndividual ? filledRows.filter((r) => !r.isFoc).length : Number(ls.quantity || 0);
-        const focQuantity = isIndividual ? filledRows.filter((r) => r.isFoc).length : Math.max(0, Number(ls.focQuantity) || 0);
-        // Group sends a single row describing the whole receipt — the paid and
-        // FOC units are one lot and share these values. An empty fieldValues
-        // still goes up so the backend can reject a missing required field
-        // rather than silently storing a blank batch.
-        const rows = isIndividual
-          ? filledRows
-          : receivedQuantity > 0 || focQuantity > 0
-            ? [{ fieldValues: groupBatchValues(ls), isFoc: false }]
-            : [];
-        return { quotationItemId: it.quotationItemId, receivedQuantity, focQuantity, rows, rating: ls.rating?.rating ? ls.rating : null };
-      })
-      .filter((l) => l.receivedQuantity > 0 || l.focQuantity > 0);
-  }, [poItems, lines, productDefs]);
+    return invoiceLines.map((l) => {
+      const key = String(l.quotationItemId);
+      const ls = lines[key] || emptyLineState();
+      const isIndividual = productDefs[l.productDefinitionId]?.trackingMethod === "individual";
+      const filledRows = isIndividual ? ls.rows.filter(isRowFilled) : [];
+      const receivedQuantity = isIndividual ? filledRows.filter((r) => !r.isFoc).length : Number(ls.quantity || 0);
+      const focQuantity = isIndividual ? filledRows.filter((r) => r.isFoc).length : Math.max(0, Number(ls.focQuantity) || 0);
+      // Group sends a single row for the whole lot — paid and FOC share it.
+      const rows = isIndividual
+        ? filledRows
+        : receivedQuantity > 0 || focQuantity > 0
+          ? [{ fieldValues: groupBatchValues(ls), isFoc: false }]
+          : [];
+      return {
+        quotationItemId: l.quotationItemId,
+        productName: l.productName,
+        invoiceQuantity: l.invoiceQuantity,
+        cap: (l.invoiceQuantity || 0) - (othersByKey[key] || 0),
+        receivedQuantity,
+        focQuantity,
+        rows,
+        rating: ls.rating?.rating ? ls.rating : null,
+      };
+    });
+  }, [invoiceLines, lines, productDefs, othersByKey]);
 
-  const submit = async () => {
-    setError(null);
-    if (!invoiceNumber.trim()) return setError("Invoice number is required");
-    if (!invoiceDate) return setError("Invoice date is required");
-    if (!branchId) {
-      return setError(
-        hasBranchAccess
-          ? "Select the branch where these items were received"
-          : branchNotice || NO_BRANCH_MESSAGE
-      );
-    }
-    if (builtLines.length === 0) return setError("Receive at least one item before submitting");
+  const enteredTotal = builtLines.reduce((s, l) => s + l.receivedQuantity, 0);
+  const invoiceTotal = builtLines.reduce((s, l) => s + (l.invoiceQuantity || 0), 0);
+  const allEntered = builtLines.length > 0 && builtLines.every((l) => l.receivedQuantity === l.invoiceQuantity);
+  // Partial: anything within what is still free; otherwise everything.
+  const canSubmit = partial
+    ? builtLines.some((l) => l.receivedQuantity > 0 || l.focQuantity > 0) && builtLines.every((l) => l.receivedQuantity <= l.cap)
+    : allEntered;
 
-    const badCharge = extraCharges.findIndex((c) => !(Number(c.amount) > 0));
-    if (badCharge !== -1) {
-      return setError(`Extra charge ${badCharge + 1}: enter an amount greater than 0, or remove the row`);
-    }
-
-    for (const it of poItems) {
-      const key = String(it.quotationItemId);
-      const built = builtLines.find((l) => String(l.quotationItemId) === key);
-      const receivedQuantity = built?.receivedQuantity || 0;
-      const used = alreadyReceivedByLine[key] || 0;
-      if (used + receivedQuantity > it.quantity) {
-        return setError(`${it.productName}: received quantity exceeds the ordered quantity`);
+  const validate = (submit) => {
+    for (const l of builtLines) {
+      if (l.receivedQuantity > l.cap) {
+        return partial
+          ? `${l.productName}: only ${Math.max(0, l.cap)} left to enter on this invoice`
+          : `${l.productName}: ${l.receivedQuantity} entered but the invoice says ${l.invoiceQuantity}`;
       }
+    }
+    if (!submit) return null;
+    if (!canSubmit) return partial ? "Enter at least one item on this entry" : "Enter every item on the invoice before submitting";
 
-      const isIndividual = productDefs[it.productDefinitionId]?.trackingMethod === "individual";
-      if (isIndividual) {
-        const ls = lines[key] || emptyLineState();
+    for (const l of invoiceLines) {
+      const key = String(l.quotationItemId);
+      const ls = lines[key] || emptyLineState();
+      const def = productDefs[l.productDefinitionId];
+      if (def?.trackingMethod === "individual") {
         const targetFoc = Math.max(0, Number(ls.focQuantity) || 0);
         const filledFoc = ls.rows.filter((r) => r.isFoc && isRowFilled(r)).length;
-        if (targetFoc > 0 && filledFoc < targetFoc) {
-          return setError(`${it.productName}: fill all ${targetFoc} FOC row(s) before submitting`);
-        }
+        if (targetFoc > 0 && filledFoc < targetFoc) return `${l.productName}: fill all ${targetFoc} FOC row(s) before submitting`;
       } else {
-        // Group: the same required-field rule the backend enforces, checked
-        // here so it reads as a form error instead of a save failure. One
-        // check for the line — paid and FOC share the one set of values.
-        const ls = lines[key] || emptyLineState();
-        const required = orderedFields(productDefs[it.productDefinitionId]).filter((fd) => fd.isRequired);
+        // Group: the backend's required-field rule, checked here so it reads
+        // as a form error instead of a save failure.
+        const required = orderedFields(def).filter((fd) => fd.isRequired);
         const lineQty = Number(ls.quantity || 0) + Math.max(0, Number(ls.focQuantity) || 0);
         if (required.length && lineQty > 0) {
           const values = groupBatchValues(ls);
@@ -766,47 +642,43 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
             const v = values[fd.def.code];
             return v === undefined || v === null || v === "";
           });
-          if (missing.length) {
-            return setError(
-              `${it.productName}: fill ${missing.map((fd) => fd.def.label).join(", ")} for this batch`
-            );
-          }
+          if (missing.length) return `${l.productName}: fill ${missing.map((fd) => fd.def.label).join(", ")} for this batch`;
         }
       }
     }
+    return null;
+  };
 
-    setSaving(true);
+  const save = async (submit) => {
+    setError(null);
+    const problem = validate(submit);
+    if (problem) {
+      setError(problem);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    setSaving(submit ? "submit" : "draft");
     try {
-      const payload = {
-        invoiceNumber: invoiceNumber.trim(),
-        invoiceDate,
-        branchId: branchId || null,
-        receivedByName: receivedByName || undefined,
-        notes: notes.trim(),
-        extraCharges: extraCharges.map((c) => ({
-          amount: Number(c.amount),
-          note: c.note || "",
-          includeInBilling: c.includeInBilling !== false,
-        })),
-        lines: builtLines,
-      };
-
-      const url = isEdit
-        ? `${API_BACKEND_URL}/stock/invoices/${invoice._id}`
-        : `${API_BACKEND_URL}/stock/tracking-orders/${trackingOrderId}/invoices`;
-      const res = await fetch(url, {
-        method: isEdit ? "PUT" : "POST",
+      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${invoiceId}/items`, {
+        method: "PUT",
         credentials: "include",
-        body: buildInvoiceFormData(payload, invoiceFile),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          submit,
+          ...(partial && entryId ? { entryId } : {}),
+          lines: builtLines.map(({ quotationItemId, receivedQuantity, focQuantity, rows, rating }) => ({
+            quotationItemId, receivedQuantity, focQuantity, rows, rating,
+          })),
+        }),
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save invoice");
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save");
       onDone();
     } catch (err) {
       setError(err.message);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } finally {
-      setSaving(false);
+      setSaving(null);
     }
   };
 
@@ -820,6 +692,15 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
     );
   }
 
+  const pill = partial
+    ? {
+        label: `Partial submit · Entry ${targetEntry?.entryNumber || (invoice.entries || []).length + 1}${targetEntry?.status === "REJECTED" ? " · rejected" : ""}`,
+        cls: "border-violet-200 bg-violet-50 text-violet-700",
+      }
+    : STATUS_PILL[invoice?.status];
+  const fileUrl = invoice?.invoiceFile ? `${API_BACKEND_URL.replace(/\/api\/v1$/, "")}${invoice.invoiceFile}` : "";
+  const log = (invoice?.entryLog || []).slice().reverse();
+
   return (
     <div className="mx-auto max-w-4xl p-6 pb-12">
       <div className="mb-6 flex flex-wrap items-center gap-3">
@@ -830,17 +711,13 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           <IconArrowLeft /> Back
         </button>
         <div className="min-w-0">
-          <h1 className="text-lg font-bold tracking-tight text-slate-900">
-            {isEdit ? "Edit received invoice" : "Add Items · Receive invoice"}
-          </h1>
+          <h1 className="text-lg font-bold tracking-tight text-slate-900">Add Items · {invoice?.invoiceNumber}</h1>
           <p className="truncate text-sm text-slate-500">
             PO {po?.poNumber || "—"} · {vendor?.name || po?.vendorName || "—"}
           </p>
         </div>
-        {isEdit && (
-          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-rose-500" /> Rejected · editing
-          </span>
+        {pill && (
+          <span className={`ml-auto inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${pill.cls}`}>{pill.label}</span>
         )}
       </div>
 
@@ -852,170 +729,84 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
           </button>
         </div>
       )}
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start">
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <p className="border-b border-slate-100 bg-slate-50/60 px-5 py-3 text-xs font-bold uppercase tracking-wider text-slate-700">
-            Invoice Details
-          </p>
-          <div className="divide-y divide-slate-100">
-            <DetailRow label="PO Number"><p className="text-sm font-medium text-slate-900">{po?.poNumber || "—"}</p></DetailRow>
-            <DetailRow label="Vendor"><p className="text-sm font-medium text-slate-900">{vendor?.name || po?.vendorName || "—"}</p></DetailRow>
-            <DetailRow label="Invoice Number">
-              <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className={inputCls} placeholder="e.g. INV-1042" />
-            </DetailRow>
-            <DetailRow label="Invoice Date">
-              <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={inputCls} />
-            </DetailRow>
-            <DetailRow label="Invoice PDF / Image">
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">
-                  {invoiceFile || existingFile ? "Replace File" : "Upload File"}
-                  <input type="file" accept={ACCEPTED_UPLOAD_TYPES.join(",")} onChange={handleFilePick} className="hidden" />
-                </label>
-                {(invoiceFile || existingFile) && (
-                  <span className="text-xs text-slate-500">{invoiceFile ? invoiceFile.name : existingFile.split("/").pop()}</span>
-                )}
-              </div>
-            </DetailRow>
-            <DetailRow label="Received By">
-              <p className="text-sm font-medium text-slate-900">{receivedByName || "—"}</p>
-            </DetailRow>
-            <DetailRow label="Notes">
-              <textarea
-                rows={3} value={notes} onChange={(e) => setNotes(e.target.value)}
-                className={inputCls} placeholder="Any remarks about this delivery or invoice (optional)"
-              />
-            </DetailRow>
-          </div>
-        </section>
-
-        <div className="space-y-5">
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Extra Charges</p>
-              <button
-                type="button" onClick={addExtraCharge}
-                className="inline-flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-600 shadow-sm transition hover:bg-blue-50"
-              >
-                + Add Charge
-              </button>
-            </div>
-            <div className="p-5">
-              {extraCharges.length === 0 ? (
-                <p className="text-sm text-slate-400">No extra charges added.</p>
-              ) : (
-                <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <table className="w-full min-w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200 bg-slate-50/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        <th className="px-3 py-2">Description</th>
-                        <th className="px-3 py-2 w-28 text-right">Amount</th>
-                        <th className="px-3 py-2 w-36">Billing</th>
-                        <th className="px-3 py-2 w-10" />
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {extraCharges.map((c, idx) => (
-                        <tr key={idx} className={c.includeInBilling === false ? "bg-slate-50/80 opacity-75" : ""}>
-                          <td className="px-3 py-2">
-                            <input
-                              type="text" placeholder="e.g. Transport" value={c.note}
-                              onChange={(e) => updateExtraCharge(idx, "note", e.target.value)}
-                              className={inputCls}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input
-                              type="number" placeholder="Amount" value={c.amount}
-                              onChange={(e) => updateExtraCharge(idx, "amount", e.target.value)}
-                              className={`${inputCls} text-right`}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            {/* "Note" keeps the charge on record without adding it to the bill. */}
-                            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold">
-                              {[
-                                { value: true, label: "In bill", on: "bg-blue-600 text-white" },
-                                { value: false, label: "Note", on: "bg-slate-600 text-white" },
-                              ].map((opt) => (
-                                <button
-                                  key={opt.label} type="button"
-                                  onClick={() => updateExtraCharge(idx, "includeInBilling", opt.value)}
-                                  className={`rounded-md px-2.5 py-1 transition ${
-                                    (c.includeInBilling !== false) === opt.value ? opt.on : "text-slate-500 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2">
-                            <button type="button" onClick={() => removeExtraCharge(idx)} className="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600">
-                              <IconX />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="space-y-1 border-t border-slate-200 bg-slate-50/60 px-3 py-2.5 text-xs">
-                    <div className="flex justify-between text-slate-700">
-                      <span>Added to bill</span>
-                      <span className="font-semibold tabular-nums">{rupees(chargeTotals.billed)}</span>
-                    </div>
-                    <div className="flex justify-between text-slate-500">
-                      <span>Note only (not billed)</span>
-                      <span className="tabular-nums">{rupees(chargeTotals.noteOnly)}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <label className={labelCls}>Branch</label>
-            {!hasBranchAccess ? (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-                {branchNotice || NO_BRANCH_MESSAGE}
-              </p>
-            ) : (
-              <>
-                <select
-                  value={branchId}
-                  onChange={(e) => setBranchId(e.target.value)}
-                  disabled={isSingleBranch}
-                  className={inputCls}
-                >
-                  {!branchId && <option value="">Select a branch</option>}
-                  {branches.map((w) => (
-                    <option key={w._id} value={w._id}>
-                      {w.name} ({w.code}){String(w._id) === ownBranchId ? " — your branch" : ""}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-1.5 text-xs text-slate-500">
-                  {isSingleBranch
-                    ? "Your assigned branch — received stock is booked in here."
-                    : "Defaults to your branch. Change it only when receiving for another branch you have access to."}
-                </p>
-              </>
-            )}
-          </section>
+      {partial && targetEntry?.status === "REJECTED" && targetEntry.rejectedReason && (
+        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <span className="font-semibold">Entry {targetEntry.entryNumber} rejected{targetEntry.reviewedByName ? ` by ${targetEntry.reviewedByName}` : ""}:</span> {targetEntry.rejectedReason}
         </div>
-      </div>
+      )}
+      {!partial && invoice?.status === "REJECTED" && invoice?.rejectedReason && (
+        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <span className="font-semibold">Rejected{invoice.reviewedByName ? ` by ${invoice.reviewedByName}` : ""}:</span> {invoice.rejectedReason}
+        </div>
+      )}
 
-      <p className="mb-3 mt-6 text-xs font-bold uppercase tracking-wider text-slate-700">Product Tabs</p>
+      {/* The invoice as added — read-only here. */}
+      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Invoice 🔒</p>
+          <p className="text-[11px] text-slate-400">Changed from ⋮ → Edit invoice</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoice No</p>
+            <p className="mt-1 text-sm font-medium text-slate-900">{invoice?.invoiceNumber}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date</p>
+            <p className="mt-1 text-sm font-medium text-slate-900">{invoice?.invoiceDate ? String(invoice.invoiceDate).slice(0, 10) : "—"}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Amount on invoice</p>
+            <p className="mt-1 text-sm font-medium text-slate-900">{rupees(invoice?.invoiceAmount)}</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">File</p>
+            {fileUrl ? (
+              <a href={fileUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-medium text-indigo-600 hover:underline">View invoice</a>
+            ) : (
+              <p className="mt-1 text-sm text-slate-400">—</p>
+            )}
+          </div>
+        </div>
+        {(invoice?.extraCharges?.length > 0 || invoice?.notes) && (
+          <div className="grid gap-4 border-t border-slate-100 px-5 py-4 sm:grid-cols-2">
+            {invoice?.extraCharges?.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Extra Charges</p>
+                <ul className="space-y-1 text-sm text-slate-700">
+                  {invoice.extraCharges.map((c, i) => (
+                    <li key={i} className={`flex items-center justify-between gap-2 ${c.includeInBilling === false ? "text-slate-400" : ""}`}>
+                      <span>
+                        {c.note || "—"}
+                        {c.includeInBilling === false && (
+                          <span className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Not billed</span>
+                        )}
+                      </span>
+                      <span className="tabular-nums">{rupees(c.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {invoice?.notes && (
+              <div>
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Notes</p>
+                <p className="whitespace-pre-wrap text-sm text-slate-700">{invoice.notes}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
+      <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Products</p>
       <div className="mb-4 flex flex-wrap gap-3">
-        {poItems.map((it) => {
-          const def = productDefs[it.productDefinitionId];
-          const key = String(it.quotationItemId);
+        {invoiceLines.map((l) => {
+          const key = String(l.quotationItemId);
+          const def = productDefs[l.productDefinitionId];
           const isActive = activeTabId === key;
-          const received = lines[key]
-            ? (def?.trackingMethod === "individual" ? lines[key].rows.filter((r) => !r.isFoc).length : Number(lines[key].quantity || 0))
-            : 0;
+          const built = builtLines.find((b) => String(b.quotationItemId) === key);
+          const others = othersByKey[key] || 0;
+          const done = partial ? others + (built?.receivedQuantity || 0) >= l.invoiceQuantity : built?.receivedQuantity === l.invoiceQuantity;
           return (
             <button
               key={key} type="button" onClick={() => setActiveTabId(key)}
@@ -1023,41 +814,80 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
                 isActive ? "border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200" : "border-slate-200 bg-white hover:border-slate-300"
               }`}
             >
-              <span className={`block text-sm font-semibold ${isActive ? "text-indigo-700" : "text-slate-900"}`}>
-                {it.productName}{received > 0 && <span className="ml-1.5 text-xs font-semibold text-emerald-600">({received})</span>}
+              <span className={`block text-sm font-semibold ${isActive ? "text-indigo-700" : "text-slate-900"}`}>{l.productName}</span>
+              <span className={`block text-xs font-semibold tabular-nums ${done ? "text-emerald-600" : "text-amber-600"}`}>
+                {partial
+                  ? `${others} done + ${built?.receivedQuantity || 0} now / ${l.invoiceQuantity}`
+                  : `${built?.receivedQuantity || 0} / ${l.invoiceQuantity} entered`}
+                {done ? " ✓" : ""}
               </span>
-              <span className="block text-xs font-normal text-slate-400">{pathLabel(def) || it.categoryName}</span>
+              <span className="block text-xs font-normal text-slate-400">{pathLabel(def) || l.categoryName}</span>
             </button>
           );
         })}
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        {activeItem && (
+        {activeLine && (
           <ProductTab
-            poLine={activeItem}
-            productDef={productDefs[activeItem.productDefinitionId]}
+            poLine={tabLineFor(activeLine)}
+            productDef={productDefs[activeLine.productDefinitionId]}
             taxType={po?.taxType}
             lineState={activeLineState}
             onLineChange={(next) => setLineState(activeTabId, next)}
-            alreadyReceived={alreadyReceivedByLine[activeTabId]}
+            alreadyReceived={othersByKey[activeTabId] || 0}
             onOpenRating={() => setRatingPopupFor(activeTabId)}
           />
         )}
       </section>
 
-      <div className="mt-6 flex items-center justify-end gap-2.5 border-t border-slate-200 pt-5">
+      {log.length > 0 && (
+        <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">Entry history</p>
+          <ul className="space-y-1 text-sm text-slate-700">
+            {log.map((e, i) => (
+              <li key={i} className="flex flex-wrap gap-x-2">
+                <span className="font-semibold text-slate-900">{e.byName || "—"}</span>
+                <span className="text-slate-400">· {fmtDateTime(e.at)} ·</span>
+                <span>{(e.items || []).map((it) => `${it.productName} ${it.quantity >= 0 ? "+" : ""}${it.quantity}`).join(", ") || "—"}</span>
+                <span className={`text-xs font-semibold ${e.action === "SUBMIT" ? "text-indigo-600" : "text-slate-400"}`}>
+                  · {e.entryNumber ? `Entry ${e.entryNumber} ` : ""}{e.action === "SUBMIT" ? "submitted" : "draft saved"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-200 pt-5">
+        {!partial && !allEntered && (
+          <span className="mr-auto text-xs font-medium text-amber-700">
+            {enteredTotal} / {invoiceTotal} entered — enter everything on the invoice to submit
+          </span>
+        )}
+        {partial && (
+          <span className="mr-auto text-xs font-medium text-violet-700">
+            Partial submit is on — this entry goes for approval with what it holds ({enteredTotal}).
+          </span>
+        )}
         <button
           type="button" onClick={onBack}
           className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
         >
           Cancel
         </button>
+        {!(partial && targetEntry?.status === "REJECTED") && <button
+          type="button" onClick={() => save(false)} disabled={!!saving}
+          className="rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving === "draft" ? "Saving…" : "Save as Draft"}
+        </button>}
         <button
-          type="button" onClick={submit} disabled={saving || !hasBranchAccess}
+          type="button" onClick={() => save(true)} disabled={!!saving || !canSubmit}
+          title={canSubmit ? "" : partial ? "Enter at least one item" : "Enter every item on the invoice first"}
           className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? "Saving…" : "Submit Invoice"}
+          {saving === "submit" ? "Submitting…" : partial ? "Submit this entry" : "Submit for approval"}
         </button>
       </div>
 
@@ -1065,7 +895,7 @@ const InvoiceReceiveView = ({ mode = "create", trackingOrderId, invoice, onBack,
         <RatingPopup
           initial={lines[ratingPopupFor]?.rating}
           vendorName={vendor?.name || po?.vendorName || ""}
-          productName={poItems.find((it) => String(it.quotationItemId) === ratingPopupFor)?.productName || ""}
+          productName={invoiceLines.find((l) => String(l.quotationItemId) === ratingPopupFor)?.productName || ""}
           onClose={() => setRatingPopupFor(null)}
           onSave={(rating) => setLineState(ratingPopupFor, { ...(lines[ratingPopupFor] || emptyLineState()), rating })}
         />

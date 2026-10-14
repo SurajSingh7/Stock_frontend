@@ -8,7 +8,12 @@ module.exports = {
       name: 'stock-frontend',
       script: './node_modules/next/dist/bin/next',
       args: 'dev',
-      watch: false, // next dev already watches files itself
+      // pm2 restarts the whole dev server when a watched file changes (on top
+      // of next dev's own hot reload). Next writes into .next constantly, so it
+      // MUST stay ignored — watching it restarts the server in a loop.
+      watch: true,
+      ignore_watch: ['node_modules', '.next', '.git', 'public/uploads'],
+      watch_delay: 1500,
       env: {
         NODE_ENV: 'development',
       },
