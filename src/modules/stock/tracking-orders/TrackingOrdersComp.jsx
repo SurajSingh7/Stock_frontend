@@ -9,6 +9,7 @@ import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHis
 import StatusTracker, { stageIndexForStatus } from "./StatusTracker";
 import InvoiceReceiveView from "./InvoiceReceiveView";
 import AddInvoicePopup from "./AddInvoicePopup";
+import { EntriesContent } from "./InvoiceEntries";
 import { usePermissions } from "@/context/PermissionContext";
 import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck } from "lucide-react";
 
@@ -523,13 +524,6 @@ const INVOICE_STATUS_META = {
   REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
   IN_PROGRESS: { label: "In progress", badge: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500" },
 };
-// An entry of a partial-submit invoice.
-const ENTRY_STATUS_META = {
-  DRAFT: { label: "Draft", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500" },
-  PENDING: { label: "Pending approval", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
-  APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
-  REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
-};
 
 const InvoiceStatusBadge = ({ status }) => {
   const m = INVOICE_STATUS_META[status] || {};
@@ -722,89 +716,28 @@ const PriceBreakupPopup = ({ invoice, onClose }) => {
   entered what, how much, and where it stands. Draft / rejected entries can
   be continued or fixed from here.
 */
-const EntriesPopup = ({ invoice, onClose, onAddItems }) => {
-  const th = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
-  const thR = `${th} text-right`;
-  const td = "px-3 py-2.5 text-sm text-slate-700";
-  const tdR = `${td} text-right tabular-nums`;
-  const entries = invoice.entries || [];
-  return (
-    <Modal onClose={onClose} title={`${invoice.invoiceNumber} · Entries`} maxWidth="max-w-4xl">
-      <p className="mb-3 text-xs text-slate-500">
-        Invoice qty {invoice.qtyInvoiced || 0} · approved {invoice.qtyApproved || 0} · awaiting approval {invoice.qtyPendingApproval || 0}
-        {invoice.qtyDraft ? ` · in draft ${invoice.qtyDraft}` : ""} · left to enter {invoice.qtyLeftToEnter ?? 0}
-      </p>
-      <div className="overflow-x-auto rounded-xl border border-slate-100">
-        <table className="w-full min-w-full border-collapse">
-          <thead className="bg-slate-50">
-            <tr>
-              <th className={th}>Entry</th>
-              <th className={th}>Date</th>
-              <th className={th}>Items</th>
-              <th className={th}>Entered by</th>
-              <th className={thR}>Qty Entered</th>
-              <th className={thR}>FOC</th>
-              <th className={th}>Status</th>
-              <th className={thR}>Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {entries.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-6 text-center text-sm text-slate-400">No entries yet.</td></tr>
-            ) : (
-              entries.map((e) => {
-                const m = ENTRY_STATUS_META[e.status] || {};
-                return (
-                  <tr key={e._id}>
-                    <td className={`${td} font-semibold text-slate-900`}>Entry {e.entryNumber}</td>
-                    <td className={td}>{fmt(e.submittedAt || e.updatedAt)}</td>
-                    <td className={td}>
-                      {e.items || "—"}
-                      {e.status === "REJECTED" && e.rejectedReason && (
-                        <span className="block text-[11px] text-rose-600">Rejected: “{e.rejectedReason}”</span>
-                      )}
-                    </td>
-                    <td className={td}>{e.submittedByName || "—"}</td>
-                    <td className={`${tdR} font-semibold text-slate-900`}>{e.qty || 0}</td>
-                    <td className={tdR}>{e.focQty || 0}</td>
-                    <td className={td}>
-                      <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
-                        <span className={`h-1.5 w-1.5 rounded-full ${m.dot || "bg-slate-400"}`} />
-                        {m.label || e.status}
-                      </span>
-                    </td>
-                    <td className={tdR}>
-                      {e.status === "DRAFT" && (
-                        <button type="button" onClick={() => onAddItems(invoice)} className="rounded-md bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-sky-500">
-                          Continue
-                        </button>
-                      )}
-                      {e.status === "REJECTED" && (
-                        <button type="button" onClick={() => onAddItems(invoice, e._id)} className="rounded-md border border-orange-200 bg-white px-2.5 py-1 text-xs font-semibold text-orange-600 hover:bg-orange-50">
-                          Fix entry
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-          {entries.length > 0 && (
-            <tfoot className="bg-slate-50">
-              <tr>
-                <td className={`${td} font-semibold text-slate-900`} colSpan={4}>Total</td>
-                <td className={`${tdR} font-semibold text-slate-900`}>{entries.reduce((t, e) => t + (e.qty || 0), 0)}</td>
-                <td className={`${tdR} font-semibold text-slate-900`}>{entries.reduce((t, e) => t + (e.focQty || 0), 0)}</td>
-                <td colSpan={2} />
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-    </Modal>
-  );
-};
+const EntriesPopup = ({ invoice, onClose, onAddItems }) => (
+  <Modal onClose={onClose} title={`${invoice.invoiceNumber} · Entries`} maxWidth="max-w-3xl">
+    <p className="mb-3 text-xs text-slate-500">
+      Invoice qty {invoice.qtyInvoiced || 0} · approved {invoice.qtyApproved || 0} · awaiting approval {invoice.qtyPendingApproval || 0}
+      {invoice.qtyDraft ? ` · in draft ${invoice.qtyDraft}` : ""} · left to enter {invoice.qtyLeftToEnter ?? 0}
+    </p>
+    <EntriesContent
+      invoice={invoice}
+      renderAction={(card) =>
+        card.status === "DRAFT" ? (
+          <button type="button" onClick={() => onAddItems(invoice)} className="rounded-md bg-sky-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-sky-500">
+            Continue
+          </button>
+        ) : card.status === "REJECTED" ? (
+          <button type="button" onClick={() => onAddItems(invoice, card.entryId)} className="rounded-md border border-orange-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-orange-600 hover:bg-orange-50">
+            Fix entry
+          </button>
+        ) : null
+      }
+    />
+  </Modal>
+);
 
 /* Embedded (non-modal) invoice table — rendered directly inside the         */
 /* Tracking Order card so each invoice's state is visible without a click.   */

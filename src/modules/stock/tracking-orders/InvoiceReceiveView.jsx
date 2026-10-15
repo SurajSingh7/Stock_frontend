@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { pathLabel } from "@/shared/category/categoryPath";
-import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { unitLabel, Modal } from "@/modules/stock/shared/StockSharedUI";
+import { EntriesContent, entryView } from "./InvoiceEntries";
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
@@ -44,6 +44,16 @@ async function fetchInvoice(id) {
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoice");
   return json.data;
+}
+// Every invoice of this order — for the PO's received figures and the
+// "Previous invoices" box.
+async function fetchInvoicesForTracking(trackingOrderId) {
+  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/board?trackingOrderId=${trackingOrderId}&limit=200`, {
+    credentials: "include",
+  });
+  const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoices");
+  return json.data?.rows || [];
 }
 async function fetchProductDefinition(id) {
   const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { credentials: "include" });
@@ -173,19 +183,6 @@ const DynamicFieldInput = ({ fieldDef, value, onChange }) => {
 /* Product tab body                                                */
 /* ============================================================= */
 
-// Small on/off pill switch — used for the FOC toggle.
-const ToggleSwitch = ({ checked, onChange, label }) => (
-  <button
-    type="button" onClick={() => onChange(!checked)}
-    className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700"
-  >
-    <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${checked ? "bg-blue-600" : "bg-slate-300"}`}>
-      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition ${checked ? "translate-x-4.5" : "translate-x-1"}`} />
-    </span>
-    {label}
-  </button>
-);
-
 const UnitStat = ({ label, value }) => (
   <div className="rounded-lg bg-slate-50 px-3 py-2 text-center">
     <p className="text-sm font-bold tabular-nums text-slate-900">₹{value.toLocaleString("en-IN")}</p>
@@ -193,25 +190,6 @@ const UnitStat = ({ label, value }) => (
   </div>
 );
 
-// Basic/CGST/SGST/IGST/Total-per-unit strip — shown above the Add Rows /
-// Quantity controls so accounts can see the unit economics while receiving.
-const UnitPriceSummary = ({ poLine, taxType }) => {
-  const b = unitPriceBreakdown(poLine, taxType);
-  return (
-    <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
-      <UnitStat label="Basic / Unit" value={b.basic} />
-      {taxType === "IGST" ? (
-        <UnitStat label="IGST / Unit" value={b.igst} />
-      ) : (
-        <>
-          <UnitStat label="CGST / Unit" value={b.cgst} />
-          <UnitStat label="SGST / Unit" value={b.sgst} />
-        </>
-      )}
-      <UnitStat label="Total / Unit" value={b.total} />
-    </div>
-  );
-};
 
 // One set of tracked fields covering the whole Group receipt: 3 pieces
 // received together share a single unique number, they are not three separate
@@ -250,17 +228,26 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
   const receivedNow = isIndividual ? paidRows.length : Number(lineState.quantity || 0);
   const remaining = Math.max(0, orderedQty - usedByOthers - receivedNow);
   const overLimit = usedByOthers + receivedNow > orderedQty;
-  const focQtyNum = Math.max(0, Number(lineState.focQuantity) || 0);
+  // Serial products: the FOC count IS the number of FOC rows, so deleting a
+  // row from the table brings the count down with it.
+  const focQtyNum = isIndividual ? focRows.length : Math.max(0, Number(lineState.focQuantity) || 0);
 
   const fields = orderedFields(productDef);
   const selectedFields = fields.map((f) => f.def);
 
+  // New rows go on top — the one being typed into is always the first.
   const addRows = (n) => {
-    const rows = [...lineState.rows, ...Array.from({ length: n }, () => ({ fieldValues: {}, isFoc: false }))];
+    const rows = [...Array.from({ length: n }, () => ({ fieldValues: {}, isFoc: false })), ...lineState.rows];
     onLineChange({ ...lineState, rows });
   };
   const removeRow = (idx) => {
-    onLineChange({ ...lineState, rows: lineState.rows.filter((_, i) => i !== idx) });
+    const rows = lineState.rows.filter((_, i) => i !== idx);
+    const removedFoc = lineState.rows[idx]?.isFoc;
+    onLineChange({
+      ...lineState,
+      rows,
+      ...(removedFoc ? { focQuantity: String(rows.filter((r) => r.isFoc).length || "") } : {}),
+    });
   };
   const setRowField = (idx, code, value) => {
     const rows = lineState.rows.map((r, i) => (i === idx ? { ...r, fieldValues: { ...r.fieldValues, [code]: value } } : r));
@@ -276,29 +263,34 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
     onLineChange({ ...lineState, rows });
   };
 
-  const setFocEnabled = (on) => {
-    if (!on) {
-      onLineChange({ ...lineState, focEnabled: false, focQuantity: "", rows: paidRows });
-    } else {
-      onLineChange({ ...lineState, focEnabled: true });
-    }
-  };
+  // FOC rows follow the same rule: new ones on top; lowering the count drops
+  // the newest (top) FOC rows first, which are the ones least likely filled.
   const setFocQuantity = (val) => {
     const n = Math.max(0, Number(val) || 0);
-    let nextFoc = focRows;
-    if (n > focRows.length) {
-      nextFoc = [...focRows, ...Array.from({ length: n - focRows.length }, () => ({ fieldValues: {}, isFoc: true }))];
-    } else if (n < focRows.length) {
-      nextFoc = focRows.slice(0, n);
+    let rows = lineState.rows;
+    if (isIndividual) {
+      if (n > focRows.length) {
+        rows = [...Array.from({ length: n - focRows.length }, () => ({ fieldValues: {}, isFoc: true })), ...lineState.rows];
+      } else if (n < focRows.length) {
+        let drop = focRows.length - n;
+        rows = lineState.rows.filter((r) => !(r.isFoc && drop-- > 0));
+      }
     }
-    onLineChange({ ...lineState, focQuantity: val, rows: isIndividual ? [...paidRows, ...nextFoc] : lineState.rows });
+    onLineChange({ ...lineState, focQuantity: val, rows });
   };
 
-  const allRows = isIndividual ? [...paidRows, ...focRows] : [];
+  // Shown in stored order — newest first.
+  const allRows = isIndividual ? lineState.rows : [];
+
+  // FOC is entered from a small popup rather than an always-open field.
+  const [focPopup, setFocPopup] = useState(null); // draft value while the popup is open
+  const saveFoc = () => {
+    setFocQuantity(focPopup === "" ? "" : String(Math.max(0, Number(focPopup) || 0)));
+    setFocPopup(null);
+  };
 
   return (
     <div>
-      <UnitPriceSummary poLine={poLine} taxType={taxType} />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -309,33 +301,14 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
         </p>
       </div>
 
-      <div className="mb-3">
-        <ToggleSwitch checked={lineState.focEnabled} onChange={setFocEnabled} label="FOC (Free of Cost)" />
-        {lineState.focEnabled && (
-          <div className="mt-2 max-w-xs">
-            <input
-              type="number" min="0" value={lineState.focQuantity}
-              onChange={(e) => setFocQuantity(e.target.value)}
-              placeholder="FOC quantity"
-              className={inputCls}
-            />
-            {isIndividual && focQtyNum > 0 && (
-              <p className="mt-1 text-[11px] font-medium text-amber-600">
-                {focQtyNum} FOC row{focQtyNum > 1 ? "s" : ""} added below — must be filled before submitting.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
       {overLimit && (
         <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
           This is more than the invoice says — reduce rows/quantity.
         </div>
       )}
 
-      {/* Add-row controls (left) + Vendor Rating trigger (right) — same row */}
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+      {/* One row: Add Rows (or quantity) · FOC · Vendor Rating */}
+      <div className="mb-3 flex flex-wrap items-end gap-2">
         {isIndividual ? (
           <div>
             <label className={labelCls}>Add Rows</label>
@@ -359,7 +332,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
             </div>
           </div>
         ) : (
-          <div className="max-w-xs">
+          <div className="w-44">
             <label className={labelCls}>Quantity received ({unit})</label>
             <input
               type="number" min="0" value={lineState.quantity}
@@ -369,14 +342,60 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
           </div>
         )}
 
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+        <button
+          type="button" onClick={() => setFocPopup(focQtyNum ? String(focQtyNum) : "")}
+          className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold shadow-sm transition ${
+            focQtyNum > 0 ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          }`}
+        >
+          🎁 FOC{focQtyNum > 0 ? ` · ${focQtyNum}` : ""}
+        </button>
+
         <button
           type="button" onClick={onOpenRating}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3.5 py-2 text-sm font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50"
         >
           <IconStar filled={!!lineState.rating.rating} />
           {lineState.rating.rating ? `Vendor Rating · ${lineState.rating.rating}/5` : "Vendor Rating"}
         </button>
+        </div>
       </div>
+
+      {isIndividual && focQtyNum > 0 && (
+        <p className="mb-3 text-[11px] font-medium text-amber-600">
+          {focQtyNum} FOC row{focQtyNum > 1 ? "s" : ""} added below — must be filled before submitting.
+        </p>
+      )}
+
+      {focPopup !== null && (
+        <Modal onClose={() => setFocPopup(null)} title="FOC (Free of Cost)" maxWidth="max-w-sm">
+          <label className={labelCls}>FOC quantity ({unit || "units"})</label>
+          <input
+            type="number" min="0" autoFocus value={focPopup}
+            onChange={(e) => setFocPopup(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && saveFoc()}
+            placeholder="0" className={inputCls}
+          />
+          <p className="mt-1.5 text-[11px] text-slate-500">
+            Free units received with this product — not priced into the invoice.
+            {isIndividual ? " One row is added for each FOC unit." : ""}
+          </p>
+          <div className="mt-4 flex justify-end gap-2">
+            {focQtyNum > 0 && (
+              <button type="button" onClick={() => { setFocQuantity(""); setFocPopup(null); }} className="mr-auto rounded-lg px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+                Remove FOC
+              </button>
+            )}
+            <button type="button" onClick={() => setFocPopup(null)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+              Cancel
+            </button>
+            <button type="button" onClick={saveFoc} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">
+              Save
+            </button>
+          </div>
+        </Modal>
+      )}
 
       {!isIndividual && fields.length > 0 && (receivedNow > 0 || focQtyNum > 0) && (
         <GroupFieldSet
@@ -417,7 +436,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
                 const realIdx = lineState.rows.indexOf(row);
                 return (
                   <tr key={realIdx} className={row.isFoc ? "bg-amber-50/60" : ""}>
-                    <td className="px-3 py-2 tabular-nums text-slate-400">{idx + 1}</td>
+                    <td className="px-3 py-2 tabular-nums text-slate-400">{allRows.length - idx}</td>
                     <td className="px-3 py-2">
                       {row.isFoc ? (
                         <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">FOC</span>
@@ -464,6 +483,125 @@ const STATUS_PILL = {
   REJECTED: { label: "Rejected · fix and resubmit", cls: "border-rose-200 bg-rose-50 text-rose-700" },
 };
 
+// PO Details + Previous Invoices boxes on the Add Items screen. Hidden for
+// now — only the current invoice is shown. Flip to true to bring them back.
+const SHOW_ORDER_CONTEXT = false;
+
+const fmtDate = (d) =>
+  d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+const INVOICE_STATUS_META = {
+  ADDED: { label: "Added", cls: "bg-slate-100 text-slate-700" },
+  DRAFT: { label: "Draft", cls: "bg-sky-100 text-sky-700" },
+  PENDING: { label: "Pending approval", cls: "bg-amber-100 text-amber-800" },
+  IN_PROGRESS: { label: "In progress", cls: "bg-violet-100 text-violet-700" },
+  APPROVED: { label: "Approved", cls: "bg-emerald-100 text-emerald-700" },
+  REJECTED: { label: "Rejected", cls: "bg-rose-100 text-rose-700" },
+};
+const StatusChip = ({ status }) => {
+  const m = INVOICE_STATUS_META[status] || { label: status, cls: "bg-slate-100 text-slate-600" };
+  return <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${m.cls}`}>{m.label}</span>;
+};
+// What an invoice is worth on screen: as written on it, else at PO rates.
+const invoiceWorth = (inv) => (inv.invoiceAmount > 0 ? inv.invoiceAmount : inv.grandTotal || 0);
+
+// One previous invoice — number, date, status, each product and the amount.
+const PreviousInvoiceRow = ({ inv }) => (
+  <li className="rounded-lg border border-amber-100 bg-white px-3 py-2">
+    <div className="flex items-center justify-between gap-2">
+      <span className="truncate text-sm font-semibold text-slate-900">{inv.invoiceNumber}</span>
+      <StatusChip status={inv.status} />
+    </div>
+    <p className="mt-0.5 text-[11px] text-slate-500">{fmtDate(inv.invoiceDate)}</p>
+    <div className="mt-1 flex items-end justify-between gap-2 text-xs">
+      <span className="text-slate-600">{(inv.lines || []).map((l) => `${l.productName} ${l.invoiceQuantity}`).join(", ") || "—"}</span>
+      <span className="shrink-0 font-semibold tabular-nums text-slate-900">{rupees(invoiceWorth(inv))}</span>
+    </div>
+  </li>
+);
+
+// 👁 Unit price — every product of the invoice at the PO rate, per unit.
+const UnitPricePopup = ({ invoiceNumber, lines, taxType, onClose }) => {
+  const igst = taxType === "IGST";
+  const th = "px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-600";
+  const td = "px-3 py-2.5 text-sm";
+  return (
+    <Modal onClose={onClose} title={`${invoiceNumber} · Unit price (PO rate)`} maxWidth="max-w-4xl">
+      <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <table className="w-full min-w-full border-collapse">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className={`${th} text-left`}>Category path</th>
+              <th className={`${th} text-left`}>Product</th>
+              <th className={`${th} text-right`}>Basic / Unit</th>
+              {igst ? (
+                <th className={`${th} text-right`}>IGST / Unit</th>
+              ) : (
+                <>
+                  <th className={`${th} text-right`}>CGST / Unit</th>
+                  <th className={`${th} text-right`}>SGST / Unit</th>
+                </>
+              )}
+              <th className={`${th} text-right`}>Total / Unit</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {lines.map((l) => {
+              const b = unitPriceBreakdown(l, taxType);
+              return (
+                <tr key={String(l.quotationItemId)}>
+                  <td className={`${td} text-slate-500`}>{l.categoryPath || "—"}</td>
+                  <td className={`${td} font-semibold text-slate-900`}>{l.productName}</td>
+                  <td className={`${td} text-right tabular-nums`}>{rupees(b.basic)}</td>
+                  {igst ? (
+                    <td className={`${td} text-right tabular-nums`}>{rupees(b.igst)}</td>
+                  ) : (
+                    <>
+                      <td className={`${td} text-right tabular-nums`}>{rupees(b.cgst)}</td>
+                      <td className={`${td} text-right tabular-nums`}>{rupees(b.sgst)}</td>
+                    </>
+                  )}
+                  <td className={`${td} text-right font-bold tabular-nums text-indigo-700`}>{rupees(b.total)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] text-slate-400">PO rates — the price each unit on this invoice is billed at.</p>
+    </Modal>
+  );
+};
+
+/*
+  The "Entries" line under the current invoice: a one-line total, and the
+  cards / Σ total / detailed log (shared with the Tracking card) in a popup.
+*/
+const EntryCards = ({ invoice }) => {
+  const [open, setOpen] = useState(false);
+  const { partial, cards, sum } = entryView(invoice);
+  return (
+    <div>
+      <button
+        type="button" onClick={() => setOpen(true)}
+        className="flex w-full items-center gap-1.5 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900"
+      >
+        <span className="text-slate-400">▸</span>
+        {partial ? "Entries" : "Entry"}
+        <span className="rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold normal-case text-slate-700">{cards.length}</span>
+        <span className="ml-auto text-[11px] font-medium normal-case tracking-normal text-slate-500">
+          Total {partial ? sum("approved") + sum("pending") + sum("draft") : sum("entered")} / {sum("invoiceQty")} · FOC {sum("foc")}
+        </span>
+      </button>
+      {open && (
+        <Modal onClose={() => setOpen(false)} title={`${partial ? "Entries" : "Entry"} · ${invoice.invoiceNumber}`} maxWidth="max-w-3xl">
+          <EntriesContent invoice={invoice} />
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 
@@ -491,16 +629,23 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
   const [lines, setLines] = useState({}); // quotationItemId -> lineState
   const [activeTabId, setActiveTabId] = useState(null);
   const [ratingPopupFor, setRatingPopupFor] = useState(null);
+  const [orderInvoices, setOrderInvoices] = useState([]); // every invoice of this order
+  const [sidePopup, setSidePopup] = useState(null); // "unitPrice" | "allInvoices"
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const [detail, inv] = await Promise.all([fetchTrackingDetail(trackingOrderId), fetchInvoice(invoiceId)]);
+        const [detail, inv, siblings] = await Promise.all([
+          fetchTrackingDetail(trackingOrderId),
+          fetchInvoice(invoiceId),
+          fetchInvoicesForTracking(trackingOrderId).catch(() => []),
+        ]);
         setPo(detail.po);
         setVendor(detail.vendor);
         setInvoice(inv);
+        setOrderInvoices(siblings);
 
         const defs = {};
         await Promise.all(
@@ -684,13 +829,40 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-4xl space-y-4 p-6">
+      <div className="mx-auto max-w-5xl space-y-4 p-6">
         <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-100" />
         <div className="h-40 animate-pulse rounded-2xl bg-slate-100" />
         <div className="h-64 animate-pulse rounded-2xl bg-slate-100" />
       </div>
     );
   }
+
+  // Cancel / Save as Draft / Submit — at the bottom of the page.
+  const actionButtons = (
+    <div className="flex flex-wrap items-center gap-2.5">
+      <button
+        type="button" onClick={onBack}
+        className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+      >
+        Cancel
+      </button>
+      {!(partial && targetEntry?.status === "REJECTED") && (
+        <button
+          type="button" onClick={() => save(false)} disabled={!!saving}
+          className="rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving === "draft" ? "Saving…" : "Save as Draft"}
+        </button>
+      )}
+      <button
+        type="button" onClick={() => save(true)} disabled={!!saving || !canSubmit}
+        title={canSubmit ? "" : partial ? "Enter at least one item" : "Enter every item on the invoice first"}
+        className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {saving === "submit" ? "Submitting…" : partial ? "Submit this entry" : "Submit for approval"}
+      </button>
+    </div>
+  );
 
   const pill = partial
     ? {
@@ -699,10 +871,33 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
       }
     : STATUS_PILL[invoice?.status];
   const fileUrl = invoice?.invoiceFile ? `${API_BACKEND_URL.replace(/\/api\/v1$/, "")}${invoice.invoiceFile}` : "";
+
+  // PO: received = approved, across every invoice of the order (a partial
+  // invoice's lines carry its approved total).
+  const receivedByKey = {};
+  orderInvoices.forEach((inv) => {
+    if (inv.status !== "APPROVED" && !inv.partialSubmit) return;
+    (inv.lines || []).forEach((l) => {
+      const k = String(l.quotationItemId);
+      receivedByKey[k] = (receivedByKey[k] || 0) + (l.receivedQuantity || 0);
+    });
+  });
+  const previousInvoices = orderInvoices
+    .filter((inv) => String(inv._id) !== String(invoiceId))
+    .sort((a, b) => new Date(b.invoiceDate || 0) - new Date(a.invoiceDate || 0));
+  const prevTotals = {};
+  previousInvoices.forEach((inv) =>
+    (inv.lines || []).forEach((l) => (prevTotals[l.productName] = (prevTotals[l.productName] || 0) + (l.invoiceQuantity || 0)))
+  );
+  const prevAmount = previousInvoices.reduce((t, inv) => t + invoiceWorth(inv), 0);
+  const unitPriceLines = invoiceLines.map((l) => ({
+    ...tabLineFor(l),
+    categoryPath: l.categoryPath || l.categoryName,
+  }));
   const log = (invoice?.entryLog || []).slice().reverse();
 
   return (
-    <div className="mx-auto max-w-4xl p-6 pb-12">
+    <div className="mx-auto max-w-5xl p-6 pb-12">
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <button
           type="button" onClick={onBack}
@@ -740,69 +935,168 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         </div>
       )}
 
-      {/* The invoice as added — read-only here. */}
-      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 px-5 py-3">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Invoice 🔒</p>
-          <p className="text-[11px] text-slate-400">Changed from ⋮ → Edit invoice</p>
-        </div>
-        <div className="grid grid-cols-2 gap-4 p-5 sm:grid-cols-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoice No</p>
-            <p className="mt-1 text-sm font-medium text-slate-900">{invoice?.invoiceNumber}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date</p>
-            <p className="mt-1 text-sm font-medium text-slate-900">{invoice?.invoiceDate ? String(invoice.invoiceDate).slice(0, 10) : "—"}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Amount on invoice</p>
-            <p className="mt-1 text-sm font-medium text-slate-900">{rupees(invoice?.invoiceAmount)}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">File</p>
-            {fileUrl ? (
-              <a href={fileUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-medium text-indigo-600 hover:underline">View invoice</a>
-            ) : (
-              <p className="mt-1 text-sm text-slate-400">—</p>
-            )}
-          </div>
-        </div>
-        {(invoice?.extraCharges?.length > 0 || invoice?.notes) && (
-          <div className="grid gap-4 border-t border-slate-100 px-5 py-4 sm:grid-cols-2">
-            {invoice?.extraCharges?.length > 0 && (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Extra Charges</p>
-                <ul className="space-y-1 text-sm text-slate-700">
-                  {invoice.extraCharges.map((c, i) => (
-                    <li key={i} className={`flex items-center justify-between gap-2 ${c.includeInBilling === false ? "text-slate-400" : ""}`}>
-                      <span>
-                        {c.note || "—"}
-                        {c.includeInBilling === false && (
-                          <span className="ml-2 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Not billed</span>
-                        )}
-                      </span>
-                      <span className="tabular-nums">{rupees(c.amount)}</span>
-                    </li>
-                  ))}
-                </ul>
+      <div className="grid grid-cols-1 gap-5">
+        {/* Left — PO, previous invoices and this invoice, each its own colour. */}
+        <div className="space-y-4 rounded-2xl bg-slate-100/80 p-4">
+          {SHOW_ORDER_CONTEXT && <div className="grid gap-4 xl:grid-cols-2">
+            {/* PO details */}
+            <section className="overflow-hidden rounded-xl border border-blue-200 bg-white shadow-sm">
+              <div className="border-b border-blue-100 bg-blue-50 px-4 py-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-blue-800">📦 PO Details</p>
+                <p className="text-sm font-semibold text-slate-900">{po?.poNumber || "—"}</p>
+                <p className="text-[11px] text-slate-500">{fmtDate(po?.poDate || po?.createdAt)} · {vendor?.name || po?.vendorName || "—"}</p>
               </div>
-            )}
-            {invoice?.notes && (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Notes</p>
-                <p className="whitespace-pre-wrap text-sm text-slate-700">{invoice.notes}</p>
+              <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-2">Product</th>
+                    <th className="whitespace-nowrap px-2 py-2 text-right">Ordered</th>
+                    <th className="whitespace-nowrap px-2 py-2 text-right">Received</th>
+                    <th className="whitespace-nowrap px-3 py-2 text-right">Pending</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(po?.items || []).map((it) => {
+                    const got = receivedByKey[String(it.quotationItemId)] || 0;
+                    return (
+                      <tr key={String(it.quotationItemId)}>
+                        <td className="px-3 py-1.5 font-medium text-slate-800">{it.productName}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{it.quantity}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">{got}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-amber-700">{Math.max(0, (it.quantity || 0) - got)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
               </div>
-            )}
-          </div>
-        )}
-      </section>
+              <p className="border-t border-blue-100 px-3 py-2 text-right text-xs text-slate-600">
+                PO total <span className="font-semibold text-slate-900">{rupees(po?.grandTotal)}</span>
+              </p>
+            </section>
 
+            {/* Previous invoices */}
+            <section className="overflow-hidden rounded-xl border border-amber-200 bg-amber-50/40 shadow-sm">
+              <div className="border-b border-amber-100 bg-amber-50 px-4 py-2.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-amber-800">🧾 Previous Invoices</p>
+                <p className="text-[11px] text-slate-500">{previousInvoices.length} on this PO</p>
+              </div>
+              {previousInvoices.length === 0 ? (
+                <p className="px-4 py-6 text-center text-xs text-slate-400">This is the first invoice on this PO.</p>
+              ) : (
+                <>
+                  <ul className="space-y-2 p-3">
+                    {previousInvoices.slice(0, 3).map((inv) => <PreviousInvoiceRow key={inv._id} inv={inv} />)}
+                  </ul>
+                  <div className="border-t border-amber-100 px-3 py-2 text-xs text-slate-600">
+                    <p>Total: {Object.entries(prevTotals).map(([n, q]) => `${n} ${q}`).join(" · ")}</p>
+                    <p className="font-semibold text-slate-900">{rupees(prevAmount)}</p>
+                    {previousInvoices.length > 3 && (
+                      <button type="button" onClick={() => setSidePopup("allInvoices")} className="mt-1.5 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-50">
+                        View all ({previousInvoices.length})
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
+            </section>
+          </div>}
+
+          {/* Current invoice */}
+          <section className="overflow-hidden rounded-xl border-2 border-indigo-300 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 bg-indigo-50 px-4 py-2.5">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-800">✏️ Current Invoice 🔒</p>
+                <p className="truncate text-sm font-semibold text-slate-900">{invoice?.invoiceNumber}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <StatusChip status={invoice?.status} />
+                <button
+                  type="button" onClick={() => setSidePopup("unitPrice")}
+                  className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-50"
+                >
+                  👁 Unit price
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 py-2.5 text-xs text-slate-600">
+              <span>Date <span className="font-medium text-slate-900">{fmtDate(invoice?.invoiceDate)}</span></span>
+              <span>Amount <span className="font-medium text-slate-900">{rupees(invoice?.invoiceAmount)}</span></span>
+              <span>Total qty <span className="font-medium text-slate-900">{invoiceTotal}</span></span>
+              <span>Entered now <span className={`font-semibold ${enteredTotal >= invoiceTotal ? "text-emerald-700" : "text-indigo-700"}`}>{enteredTotal}</span></span>
+              {fileUrl ? (
+                <a href={fileUrl} target="_blank" rel="noreferrer" className="font-medium text-indigo-600 hover:underline">View file</a>
+              ) : (
+                <span className="text-slate-400">No file</span>
+              )}
+            </div>
+            <table className="w-full border-t border-slate-100 text-xs">
+              <thead>
+                <tr className="text-left text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-4 py-2">Category</th>
+                  <th className="px-2 py-2">Product</th>
+                  <th className="px-2 py-2 text-right">Invoice qty</th>
+                  {partial && <th className="px-2 py-2 text-right">Earlier entries</th>}
+                  <th className="px-2 py-2 text-right">FOC</th>
+                  <th className="px-2 py-2 text-right">Entered now</th>
+                  <th className="px-4 py-2 text-right">Left</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {invoiceLines.map((l) => {
+                  const k = String(l.quotationItemId);
+                  const built = builtLines.find((x) => String(x.quotationItemId) === k);
+                  const now = built?.receivedQuantity || 0;
+                  // Same count as the FOC button: FOC rows (filled or not) for
+                  // serial products, the FOC quantity for quantity products.
+                  const ls = lines[k] || emptyLineState();
+                  const foc = productDefs[l.productDefinitionId]?.trackingMethod === "individual"
+                    ? ls.rows.filter((r) => r.isFoc).length
+                    : Math.max(0, Number(ls.focQuantity) || 0);
+                  const earlier = othersByKey[k] || 0;
+                  const left = Math.max(0, (l.invoiceQuantity || 0) - earlier - now);
+                  return (
+                    <tr key={k}>
+                      <td className="px-4 py-1.5 text-slate-500">{l.categoryPath || l.categoryName || "—"}</td>
+                      <td className="px-2 py-1.5 font-medium text-slate-800">{l.productName}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{l.invoiceQuantity}</td>
+                      {partial && <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{earlier}</td>}
+                      <td className={`px-2 py-1.5 text-right tabular-nums ${foc ? "font-semibold text-amber-700" : "text-slate-400"}`}>{foc}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-indigo-700">{now}</td>
+                      <td className={`px-4 py-1.5 text-right tabular-nums font-semibold ${left ? "text-amber-700" : "text-emerald-700"}`}>{left}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {(invoice?.extraCharges?.length > 0 || invoice?.notes) && (
+              <div className="space-y-1 border-t border-slate-100 px-4 py-2.5 text-xs text-slate-600">
+                {invoice?.extraCharges?.length > 0 && (
+                  <p>
+                    Extra:{" "}
+                    {invoice.extraCharges.map((c, i) => (
+                      <span key={i} className={c.includeInBilling === false ? "text-slate-400" : ""}>
+                        {i > 0 && " · "}{c.note || "Charge"} {rupees(c.amount)}{c.includeInBilling === false ? " (not billed)" : ""}
+                      </span>
+                    ))}
+                  </p>
+                )}
+                {invoice?.notes && <p className="whitespace-pre-wrap">Notes: {invoice.notes}</p>}
+              </div>
+            )}
+            <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-2">
+              <EntryCards invoice={invoice} />
+            </div>
+          </section>
+        </div>
+
+        {/* Right — products: pick a tab, enter its units. */}
+        <div className="min-w-0">
       <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Products</p>
       <div className="mb-4 flex flex-wrap gap-3">
         {invoiceLines.map((l) => {
           const key = String(l.quotationItemId);
-          const def = productDefs[l.productDefinitionId];
           const isActive = activeTabId === key;
           const built = builtLines.find((b) => String(b.quotationItemId) === key);
           const others = othersByKey[key] || 0;
@@ -821,7 +1115,6 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
                   : `${built?.receivedQuantity || 0} / ${l.invoiceQuantity} entered`}
                 {done ? " ✓" : ""}
               </span>
-              <span className="block text-xs font-normal text-slate-400">{pathLabel(def) || l.categoryName}</span>
             </button>
           );
         })}
@@ -840,24 +1133,8 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
           />
         )}
       </section>
-
-      {log.length > 0 && (
-        <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">Entry history</p>
-          <ul className="space-y-1 text-sm text-slate-700">
-            {log.map((e, i) => (
-              <li key={i} className="flex flex-wrap gap-x-2">
-                <span className="font-semibold text-slate-900">{e.byName || "—"}</span>
-                <span className="text-slate-400">· {fmtDateTime(e.at)} ·</span>
-                <span>{(e.items || []).map((it) => `${it.productName} ${it.quantity >= 0 ? "+" : ""}${it.quantity}`).join(", ") || "—"}</span>
-                <span className={`text-xs font-semibold ${e.action === "SUBMIT" ? "text-indigo-600" : "text-slate-400"}`}>
-                  · {e.entryNumber ? `Entry ${e.entryNumber} ` : ""}{e.action === "SUBMIT" ? "submitted" : "draft saved"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+        </div>
+      </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-200 pt-5">
         {!partial && !allEntered && (
@@ -870,27 +1147,19 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
             Partial submit is on — this entry goes for approval with what it holds ({enteredTotal}).
           </span>
         )}
-        <button
-          type="button" onClick={onBack}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
-        >
-          Cancel
-        </button>
-        {!(partial && targetEntry?.status === "REJECTED") && <button
-          type="button" onClick={() => save(false)} disabled={!!saving}
-          className="rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving === "draft" ? "Saving…" : "Save as Draft"}
-        </button>}
-        <button
-          type="button" onClick={() => save(true)} disabled={!!saving || !canSubmit}
-          title={canSubmit ? "" : partial ? "Enter at least one item" : "Enter every item on the invoice first"}
-          className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving === "submit" ? "Submitting…" : partial ? "Submit this entry" : "Submit for approval"}
-        </button>
+        {actionButtons}
       </div>
 
+      {sidePopup === "unitPrice" && (
+        <UnitPricePopup invoiceNumber={invoice?.invoiceNumber} lines={unitPriceLines} taxType={po?.taxType} onClose={() => setSidePopup(null)} />
+      )}
+      {sidePopup === "allInvoices" && (
+        <Modal onClose={() => setSidePopup(null)} title={`Previous invoices · ${po?.poNumber || ""}`} maxWidth="max-w-lg">
+          <ul className="space-y-2">
+            {previousInvoices.map((inv) => <PreviousInvoiceRow key={inv._id} inv={inv} />)}
+          </ul>
+        </Modal>
+      )}
       {ratingPopupFor && (
         <RatingPopup
           initial={lines[ratingPopupFor]?.rating}

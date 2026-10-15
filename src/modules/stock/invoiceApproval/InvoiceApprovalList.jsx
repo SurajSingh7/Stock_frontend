@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Eye, Edit3, ClipboardCheck } from "lucide-react";
-import { SearchableSelect, Modal, inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import InvoiceReceiveView from "@/modules/stock/tracking-orders/InvoiceReceiveView";
 import InvoiceReviewView from "./InvoiceReviewView";
 
@@ -69,7 +69,8 @@ const ApprovalDot = ({ status }) => {
 // same pattern as the Tracking Order card's invoice table.
 const ItemsCell = ({ lines }) => {
   const list = lines || [];
-  const summary = list.map((l) => `${l.productName} (${l.receivedQuantity} ${unitLabel(l.unit)})`).join(", ");
+  // What the invoice bills, per product.
+  const summary = list.map((l) => `${l.productName} (${l.invoiceQuantity ?? l.receivedQuantity} ${unitLabel(l.unit)})`).join(", ");
   return (
     <div className="max-w-[240px]">
       <p className="truncate text-sm text-slate-700">{summary || "—"}</p>
@@ -77,45 +78,6 @@ const ItemsCell = ({ lines }) => {
         {list.length} Item{list.length === 1 ? "" : "s"}
       </span>
     </div>
-  );
-};
-
-/* ============================================================= */
-/* Detail / Review popup                                          */
-/* ============================================================= */
-
-const InvoiceDetailPopup = ({ invoice, onClose }) => {
-  const itemTh = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
-  const itemThRight = `${itemTh} text-right`;
-  const itemTd = "px-3 py-2 text-sm text-slate-700";
-  const itemTdRight = `${itemTd} text-right tabular-nums`;
-  return (
-    <Modal onClose={onClose} title={`Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
-      <div className="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vendor</p><p className="mt-1 text-sm font-medium text-slate-900">{invoice.vendorName}</p></div>
-        <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Date</p><p className="mt-1 text-sm font-medium text-slate-900">{fmtDateTime(invoice.invoiceDate)}</p></div>
-        <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Amount</p><p className="mt-1 text-sm font-medium text-slate-900">{money(invoice.amount)}</p></div>
-        <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p><div className="mt-1"><StatusBadge status={invoice.status} /></div></div>
-      </div>
-      {invoice.status === "REJECTED" && invoice.rejectedReason && (
-        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">Rejected: {invoice.rejectedReason}</div>
-      )}
-      <div className="overflow-x-auto rounded-xl border border-slate-100">
-        <table className="w-full min-w-full border-collapse">
-          <thead className="bg-slate-50">
-            <tr><th className={itemTh}>Product</th><th className={itemThRight}>Qty Received</th></tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(invoice.lines || []).map((l, i) => (
-              <tr key={i}>
-                <td className={`${itemTd} font-medium text-slate-900`}>{l.productName}</td>
-                <td className={itemTdRight}>{l.receivedQuantity} {unitLabel(l.unit)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Modal>
   );
 };
 
@@ -148,7 +110,7 @@ const InvoiceApprovalList = () => {
   const [limit, setLimit] = useState(10);
   const [total, setTotal] = useState(0);
 
-  const [viewing, setViewing] = useState(null);
+  const [expanded, setExpanded] = useState({}); // invoiceId -> entries open
   const [actionError, setActionError] = useState(null);
 
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
@@ -320,8 +282,8 @@ const InvoiceApprovalList = () => {
               <th className={th}>Invoice No</th>
               <th className={th}>Invoice Date</th>
               <th className={th}>Items</th>
-              <th className={thRight}>Qty </th>
-              <th className={thRight}>FOC</th>
+              <th className={thRight}>Invoice qty</th>
+              <th className={thRight}>Received</th>
               <th className={thRight}>Basic Price</th>
               <th className={thRight}>CGST</th>
               <th className={thRight}>SGST</th>
@@ -345,51 +307,80 @@ const InvoiceApprovalList = () => {
               </td></tr>
             ) : (
               rows.map((inv) => {
-                const pct = inv.orderedQty > 0 ? Math.round(((inv.qtyReceived || 0) / inv.orderedQty) * 100) : 0;
+                const partial = !!inv.partialSubmit;
+                const entries = (inv.entries || []).filter((e) => e.status !== "DRAFT").slice().sort((x, y) => y.entryNumber - x.entryNumber);
+                const open = !!expanded[inv._id];
+                const tab = inv.approvalTab || inv.status;
+                const reviewEntry = partial ? inv.pendingEntry : null;
                 return (
-                  <tr key={inv.entryId || inv._id} className="transition hover:bg-slate-50/60">
+                  <React.Fragment key={inv._id}>
+                  <tr className="transition hover:bg-slate-50/60">
                     <td className="px-4 py-3 text-sm font-semibold text-indigo-600">
                       {inv.invoiceNumber}
-                      {inv.entryNumber && (
-                        <span className="ml-1.5 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
-                          Entry {inv.entryNumber}
-                        </span>
+                      {partial && (
+                        <button
+                          type="button" onClick={() => setExpanded((p) => ({ ...p, [inv._id]: !p[inv._id] }))}
+                          className="mt-1 block w-fit rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200 hover:bg-violet-100"
+                        >
+                          Partial · {entries.length} {open ? "▾" : "▸"}
+                        </button>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-500 tabular-nums">{fmtDateTime(inv.invoiceDate)}</td>
                     <td className="px-4 py-3"><ItemsCell lines={inv.lines} /></td>
-                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">
-                      {inv.qtyReceived} 
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{inv.qtyInvoiced || 0}</td>
+                    {/* approved so far out of the invoice */}
+                    <td className="px-4 py-3 text-right text-sm tabular-nums">
+                      <span className="font-semibold text-slate-900">{inv.qtyApproved || 0}</span>
+                      <span className="text-slate-400"> / {inv.qtyInvoiced || 0}</span>
+                      {partial && inv.pendingEntryCount > 0 && (
+                        <span className="block text-[11px] text-amber-700">{inv.pendingEntryCount} entr{inv.pendingEntryCount > 1 ? "ies" : "y"} pending</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{inv.focQtyReceived || 0}</td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.basicAmount)}</td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.cgstAmount)}</td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.sgstAmount)}</td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.igstAmount)}</td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.extraChargesTotal)}</td>
                     <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900 tabular-nums">{money(inv.grandTotal)}</td>
-                    <td className="px-4 py-3"><ApprovalDot status={inv.status} /></td>
+                    <td className="px-4 py-3">
+                      {partial && tab === STATUS.APPROVED && inv.status !== "APPROVED" ? (
+                        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                          <span className="h-2 w-2 rounded-full bg-violet-500" />
+                          In progress · <span className="font-semibold text-violet-700">{inv.progressPct || 0}%</span>
+                        </span>
+                      ) : (
+                        <ApprovalDot status={tab} />
+                      )}
+                      {partial && tab === STATUS.PENDING && reviewEntry && (
+                        <span className="block text-[11px] text-slate-500">Entry {reviewEntry.entryNumber} · {inv.progressPct || 0}% approved</span>
+                      )}
+                      {partial && tab === STATUS.REJECTED && inv.rejectedEntry && (
+                        <span className="block text-[11px] text-slate-500">Entry {inv.rejectedEntry.entryNumber}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-right">
-                      {inv.status === STATUS.PENDING ? (
+                      {tab === STATUS.PENDING ? (
                         <div className="flex items-center justify-end">
                           <button
-                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: inv.entryId })}
-                            className="inline-flex items-center justify-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500"
+                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: reviewEntry?._id })}
+                            className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-500"
                           >
-                            <ClipboardCheck className="h-3.5 w-3.5" /> Review
+                            <ClipboardCheck className="h-3.5 w-3.5" /> {reviewEntry ? `Review Entry ${reviewEntry.entryNumber}` : "Review"}
                           </button>
                         </div>
                       ) : (
                         <div className="flex items-center justify-end gap-1.5">
                           <button
-                            type="button" onClick={() => setViewing(inv)} title="View"
+                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id })} title="View"
                             className="rounded-md border border-indigo-200 bg-white p-1.5 text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
                           >
                             <Eye className="h-3.5 w-3.5" />
                           </button>
-                          {inv.status === STATUS.REJECTED && (
+                          {tab === STATUS.REJECTED && (
                             <button
-                              type="button" onClick={() => setView({ mode: "editInvoice", invoice: inv })} title="Edit"
+                              type="button" onClick={() => setView({ mode: "editInvoice", invoice: { ...inv, entryId: inv.rejectedEntry?._id } })}
+                              title={inv.rejectedEntry ? `Fix Entry ${inv.rejectedEntry.entryNumber}` : "Edit"}
                               className="rounded-md border border-orange-200 bg-white p-1.5 text-orange-600 shadow-sm transition hover:border-orange-300 hover:bg-orange-50"
                             >
                               <Edit3 className="h-3.5 w-3.5" />
@@ -399,6 +390,65 @@ const InvoiceApprovalList = () => {
                       )}
                     </td>
                   </tr>
+                  {/* A partial invoice's entries — each its own share of the one bill */}
+                  {partial && open && (
+                    <tr className="bg-violet-50/30">
+                      <td colSpan={13} className="px-6 pb-4 pt-1">
+                        <div className="overflow-hidden rounded-xl border border-violet-100 bg-white">
+                          <table className="w-full text-sm">
+                            <thead className="bg-violet-50/60">
+                              <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-violet-800">
+                                <th className="px-3 py-2">Entry</th>
+                                <th className="px-3 py-2">Date</th>
+                                <th className="px-3 py-2">Entered by</th>
+                                <th className="px-3 py-2">Items</th>
+                                <th className="px-3 py-2 text-right">Qty</th>
+                                <th className="px-3 py-2 text-right">FOC</th>
+                                <th className="px-3 py-2 text-right">Value</th>
+                                <th className="px-3 py-2">Status</th>
+                                <th className="px-3 py-2 text-right">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {entries.map((e) => (
+                                <tr key={e._id}>
+                                  <td className="px-3 py-2 font-semibold text-slate-900">Entry {e.entryNumber}</td>
+                                  <td className="px-3 py-2 tabular-nums text-slate-500">{fmtDateTime(e.submittedAt || e.updatedAt)}</td>
+                                  <td className="px-3 py-2 text-slate-700">{e.submittedByName || "—"}</td>
+                                  <td className="px-3 py-2 text-slate-600">{e.items || "—"}</td>
+                                  <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-900">{e.qty || 0}</td>
+                                  <td className={`px-3 py-2 text-right tabular-nums ${e.focQty ? "text-amber-700" : "text-slate-400"}`}>{e.focQty || 0}</td>
+                                  <td className="px-3 py-2 text-right tabular-nums text-slate-700">{money(e.value)}</td>
+                                  <td className="px-3 py-2"><ApprovalDot status={e.status} /></td>
+                                  <td className="px-3 py-2 text-right">
+                                    {e.status === STATUS.PENDING ? (
+                                      <button
+                                        type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: e._id })}
+                                        className="rounded-full bg-blue-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-blue-500"
+                                      >
+                                        Review
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: e._id })} title="View entry"
+                                        className="rounded-md border border-indigo-200 bg-white p-1 text-indigo-600 hover:bg-indigo-50"
+                                      >
+                                        <Eye className="h-3.5 w-3.5" />
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          <p className="border-t border-violet-100 px-3 py-1.5 text-[11px] text-slate-500">
+                            One bill of {money(inv.grandTotal)} — entries are parts of it, not separate bills.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 );
               })
             )}
@@ -413,7 +463,6 @@ const InvoiceApprovalList = () => {
         />
       </div>
 
-      {viewing && <InvoiceDetailPopup invoice={viewing} onClose={() => setViewing(null)} />}
     </div>
   );
 };
