@@ -18,7 +18,7 @@ import {
 /* Transaction Register — everything that has happened against a  */
 /* vendor invoice, newest first.                                  */
 /*                                                                */
-/* Three kinds of row, one page. A payment, a credit note and a    */
+/* Three kinds of row, one page. A payment, a debit note and a    */
 /* misc charge are different documents but the same kind of event: */
 /* dated, with an amount, changing what we owe. Splitting them     */
 /* across three screens would mean nobody could ever see the order */
@@ -29,28 +29,28 @@ import {
 /* payment, an edit trail on an adjustment.                        */
 /* ============================================================= */
 
-const TYPE = { ALL: "ALL", PAYMENT: "PAYMENT", CREDIT_NOTE: "CREDIT_NOTE", MISC: "MISC" };
+const TYPE = { ALL: "ALL", PAYMENT: "PAYMENT", DEBIT_NOTE: "DEBIT_NOTE", MISC: "MISC" };
 
 const TABS = [
   { key: TYPE.ALL, label: "All", icon: LayoutGrid, on: "border-slate-300 bg-slate-100 text-slate-800" },
   { key: TYPE.PAYMENT, label: "Payments", icon: Wallet, on: "border-emerald-300 bg-emerald-50 text-emerald-700" },
-  { key: TYPE.CREDIT_NOTE, label: "Credit Notes", icon: FileMinus, on: "border-rose-300 bg-rose-50 text-rose-700" },
+  { key: TYPE.DEBIT_NOTE, label: "Debit Notes", icon: FileMinus, on: "border-rose-300 bg-rose-50 text-rose-700" },
   { key: TYPE.MISC, label: "Misc Charges", icon: PlusCircle, on: "border-sky-300 bg-sky-50 text-sky-700" },
 ];
 
 /*
-  What a row DID, which is not the same as its sign. A payment and a credit
+  What a row DID, which is not the same as its sign. A payment and a debit
   note both leave us owing less, but only one of them moved money — and
   somebody reconciling a bank statement has to tell them apart at a glance.
 */
 const TYPE_META = {
   PAYMENT: { label: "Payment", chip: "bg-emerald-50 text-emerald-700 ring-emerald-200", tone: "text-emerald-700", sign: "" },
-  CREDIT_NOTE: { label: "Credit Note", chip: "bg-rose-50 text-rose-700 ring-rose-200", tone: "text-rose-700", sign: "−" },
+  DEBIT_NOTE: { label: "Debit Note", chip: "bg-rose-50 text-rose-700 ring-rose-200", tone: "text-rose-700", sign: "−" },
   MISC: { label: "Misc Charge", chip: "bg-sky-50 text-sky-700 ring-sky-200", tone: "text-sky-700", sign: "+" },
 };
 const typeMeta = (t) => TYPE_META[t] || { label: t, chip: "bg-slate-50 text-slate-600 ring-slate-200", tone: "text-slate-700", sign: "" };
 
-const isAdjustment = (t) => t === TYPE.CREDIT_NOTE || t === TYPE.MISC;
+const isAdjustment = (t) => t === TYPE.DEBIT_NOTE || t === TYPE.MISC;
 
 /* A payment's description is assembled here, not on the server: the mode's
    display label belongs with the other client labels, and the service sends a
@@ -80,7 +80,7 @@ const AdjustmentHistory = ({ row: r }) => (
 
       {/* Every amount change, straight off the document. Nothing else in the
           system shows this, and "it used to be 60,000, who changed it" is the
-          second question after "where did the credit note go". */}
+          second question after "where did the debit note go". */}
       {r.edits.map((e, i) => (
         <div key={i} className="flex flex-wrap items-baseline gap-2">
           <span className="w-24 shrink-0 text-slate-400">{fmtDate(e.at)}</span>
@@ -144,7 +144,7 @@ const TransactionRegisterComp = () => {
   const [vendorId, setVendorId] = useState("");
   const [branchId, setBranchId] = useState("");
   const [mode, setMode] = useState("");
-  // Off by default: a withdrawn credit note is history, not a live figure.
+  // Off by default: a withdrawn debit note is history, not a live figure.
   const [includeWithdrawn, setIncludeWithdrawn] = useState(false);
   const [period, setPeriod] = useState(defaultPeriod);
   const [page, setPage] = useState(1);
@@ -220,9 +220,9 @@ const TransactionRegisterComp = () => {
   const switchTab = (key) => {
     setTab(key);
     setPage(1);
-    // Mode is payment-only. Leaving it set while moving to Credit Notes would
+    // Mode is payment-only. Leaving it set while moving to Debit Notes would
     // silently empty the tab for a reason the screen no longer shows.
-    if (key === TYPE.CREDIT_NOTE || key === TYPE.MISC) setMode("");
+    if (key === TYPE.DEBIT_NOTE || key === TYPE.MISC) setMode("");
   };
 
   const clearAll = () => {
@@ -234,12 +234,12 @@ const TransactionRegisterComp = () => {
     <div className="min-h-screen bg-slate-50/60 p-6">
       <ReportHeader
         title="Transaction Register" onRefresh={load}
-        subtitle="Every payment, credit note and misc charge raised against a vendor invoice — newest first."
+        subtitle="Every payment, debit note and misc charge raised against a vendor invoice — newest first."
         right={
           <div className="flex flex-wrap gap-2">
             <Tile icon={Users} label="Vendors" value={totals.vendors ?? 0} tone="border-slate-200 bg-white text-slate-700" />
             <Tile icon={Wallet} label="Paid" value={money(totals.paid || 0)} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
-            <Tile icon={FileMinus} label="Credit Notes" value={money(totals.creditNotes || 0)} tone="border-rose-200 bg-rose-50 text-rose-700" />
+            <Tile icon={FileMinus} label="Debit Notes" value={money(totals.debitNotes || 0)} tone="border-rose-200 bg-rose-50 text-rose-700" />
             <Tile icon={PlusCircle} label="Misc" value={money(totals.misc || 0)} tone="border-sky-200 bg-sky-50 text-sky-700" />
             {(totals.writtenOff || 0) > 0 && (
               <Tile icon={Clock} label="Written Off" value={money(totals.writtenOff)} tone="border-slate-300 bg-slate-100 text-slate-600" />
@@ -312,7 +312,7 @@ const TransactionRegisterComp = () => {
             done one channel at a time, and the NEFT statement does not contain
             the UPI rows — so each option carries its own amount.
 
-            Only on the tabs where it means anything. A credit note was not
+            Only on the tabs where it means anything. A debit note was not
             paid by NEFT, so offering the filter on those tabs would only let
             somebody empty the page for a reason the screen could not explain.
           */}
@@ -495,8 +495,8 @@ const TransactionRegisterComp = () => {
                 <td className={tdRight + " font-bold text-slate-900"}>
                   {tab === TYPE.PAYMENT
                     ? money(totals.paid || 0)
-                    : tab === TYPE.CREDIT_NOTE
-                      ? `−${money(totals.creditNotes || 0)}`
+                    : tab === TYPE.DEBIT_NOTE
+                      ? `−${money(totals.debitNotes || 0)}`
                       : tab === TYPE.MISC
                         ? `+${money(totals.misc || 0)}`
                         : ""}
@@ -514,9 +514,9 @@ const TransactionRegisterComp = () => {
       </div>
 
       <FootNote>
-        A payment sits on the day the money left; a credit note or misc charge on the day it was put on the
+        A payment sits on the day the money left; a debit note or misc charge on the day it was put on the
         invoice. One settlement paid partly by NEFT and partly by UPI appears as two rows with two
-        references, because that is how it appears on the statement. Withdrawn credit notes are hidden by
+        references, because that is how it appears on the statement. Withdrawn debit notes are hidden by
         default — switch them on above to see what was raised and later taken back, and why. Written off is
         not a payment: no money left, but a payable-versus-paid check will be short by exactly that.
       </FootNote>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
-import { RotateCcw, Users, Receipt, FileMinus, PlusCircle, Percent, IndianRupee, Info } from "lucide-react";
+import { RotateCcw, Users, Receipt, PlusCircle, Percent, IndianRupee, Info } from "lucide-react";
 import { SearchableSelect, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import PeriodPicker, { defaultPeriod } from "@/modules/stock/vendorLedger/PeriodPicker";
 import VendorInvoicesView, { MODE } from "./VendorInvoicesView";
@@ -21,8 +21,9 @@ import {
 /* columns: this one opens up the tax split — basic, CGST, SGST,   */
 /* IGST — which the ledger rolls into one Billing figure.          */
 /*                                                                */
-/* Every column here follows the period. Nothing on this page is   */
-/* as-on-today, which is exactly why Outstanding is its own page.  */
+/* Only what is ON the vendor's invoice: basic, extra, the GST     */
+/* split and the billed total. TDS, debit notes and misc happen    */
+/* after the bill and live on Vendor Outstanding Overview.         */
 /* ============================================================= */
 
 const BillingReportComp = () => {
@@ -125,9 +126,6 @@ const BillingReportComp = () => {
             <Tile icon={PlusCircle} label="Extra" value={money(totals.extraCharges || 0)} tone="border-slate-200 bg-white text-slate-700" />
             <Tile icon={Percent} label="GST" value={money(totals.gst || 0)} tone="border-violet-200 bg-violet-50 text-violet-700" />
             <Tile icon={Receipt} label="Billing" value={money(totals.billing || 0)} tone="border-blue-200 bg-blue-50 text-blue-700" />
-            <Tile icon={FileMinus} label="Credit Notes" value={money(totals.creditNotes || 0)} tone="border-rose-200 bg-rose-50 text-rose-700" />
-            <Tile icon={PlusCircle} label="Misc" value={money(totals.misc || 0)} tone="border-sky-200 bg-sky-50 text-sky-700" />
-            <Tile icon={IndianRupee} label="Net Billing" value={money(totals.netPayable || 0)} tone="border-emerald-200 bg-emerald-50 text-emerald-800" />
           </div>
         }
       />
@@ -180,16 +178,13 @@ const BillingReportComp = () => {
               <th className={thRight}>IGST</th>
               <th className={thRight}>GST</th>
               <th className={thRight}>Billing</th>
-              <th className={thRight}>Credit Notes</th>
-              <th className={thRight}>Misc</th>
-              <th className={thRight}>Net Billing</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-400">
+              <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">
                 No vendor billed anything in this period.
               </td></tr>
             ) : (
@@ -225,14 +220,7 @@ const BillingReportComp = () => {
                     <td className={tdRight}>{num(r.sgst)}</td>
                     <td className={tdRight}>{num(r.igst)}</td>
                     <td className={tdRight}>{num(gst, "text-violet-700")}</td>
-                    <td className={tdRight}>{num(r.billing, "font-medium text-blue-700")}</td>
-                    <td className={tdRight}>
-                      {r.creditNotes ? <span className="text-rose-700">−{money(r.creditNotes)}</span> : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className={tdRight}>
-                      {r.misc ? <span className="text-sky-700">+{money(r.misc)}</span> : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className={tdRight + " font-bold text-slate-900"}>{money(r.netPayable)}</td>
+                    <td className={tdRight}>{num(r.billing, "font-bold text-blue-700")}</td>
                   </tr>
                 );
               })
@@ -250,9 +238,6 @@ const BillingReportComp = () => {
                 <td className={tdRight + " font-semibold"}>{money(totals.igst || 0)}</td>
                 <td className={tdRight + " font-bold text-violet-700"}>{money(totals.gst || 0)}</td>
                 <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
-                <td className={tdRight + " font-bold text-rose-700"}>{totals.creditNotes ? `−${money(totals.creditNotes)}` : money(0)}</td>
-                <td className={tdRight + " font-bold text-sky-700"}>{totals.misc ? `+${money(totals.misc)}` : money(0)}</td>
-                <td className={tdRight + " font-bold text-slate-900"}>{money(totals.netPayable || 0)}</td>
               </tr>
             </tfoot>
           )}
@@ -267,9 +252,8 @@ const BillingReportComp = () => {
       <FootNote>
         Every column here follows the period above. Billing is (Basic + Extra) + GST, as the vendor billed
         it — Extra is freight, handling and anything else outside the item lines, which is why it is not
-        taxed with them. Net Billing is Billing less credit notes and plus misc charges. Click the info icon
-        on any invoice count to see the invoices behind it. What is still unpaid is a different question —
-        see Outstanding.
+        taxed with them. Click the info icon on any invoice count to see the invoices behind it. TDS, debit
+        notes, misc charges and what is still due come after the bill — see Vendor Outstanding Overview.
       </FootNote>
     </div>
   );

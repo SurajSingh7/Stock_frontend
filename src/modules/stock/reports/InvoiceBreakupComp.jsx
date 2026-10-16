@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
-import { RotateCcw, Receipt, Calculator, AlertTriangle, Wallet } from "lucide-react";
+import { RotateCcw, Receipt, Calculator, AlertTriangle, Wallet, PlusCircle, Percent, FileMinus } from "lucide-react";
 import { SearchableSelect, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import { paymentTermShort } from "@/modules/stock/shared/paymentTerms";
 import { PAYMENT_MODE_LABEL, paymentStateMeta, PAYMENT_STATE } from "@/modules/stock/shared/paymentStatus";
@@ -49,7 +49,7 @@ const InvoiceBreakupComp = () => {
   const [error, setError] = useState(null);
   /*
     The calculation replaces the list rather than opening over it, the same
-    way CreditNoteView and RecordPaymentView do. The row travels with the
+    way DebitNoteView and RecordPaymentView do. The row travels with the
     view, so opening a working costs no second request.
   */
   const [view, setView] = useState({ mode: "list" });
@@ -131,14 +131,20 @@ const InvoiceBreakupComp = () => {
     <div className="min-h-screen bg-slate-50/60 p-6">
       <ReportHeader
         title="Invoice Breakup" onRefresh={load}
-        subtitle="How each invoice was worked out — line by line, from unit price to outstanding."
+        subtitle="How each invoice was worked out — line by line, from unit price to balance due."
         right={
           <div className="flex flex-wrap gap-2">
             <Tile icon={Receipt} label="Invoices" value={totals.invoiceCount ?? 0} tone="border-slate-200 bg-white text-slate-700" />
             <Tile icon={Receipt} label="Billing" value={money(totals.billing || 0)} tone="border-blue-200 bg-blue-50 text-blue-700" />
-            <Tile icon={Calculator} label="Payable" value={money(totals.payable || 0)} tone="border-slate-200 bg-white text-slate-700" />
+            <Tile icon={PlusCircle} label="Misc" value={money(totals.misc || 0)} tone="border-sky-200 bg-sky-50 text-sky-700" />
+            <Tile icon={Percent} label="TDS" value={money(totals.tds || 0)} tone="border-amber-200 bg-amber-50 text-amber-700" />
+            <Tile icon={FileMinus} label="Debit Notes" value={money(totals.debitNotes || 0)} tone="border-rose-200 bg-rose-50 text-rose-700" />
+            <Tile icon={Calculator} label="Net Payable" value={money(totals.payable || 0)} tone="border-slate-200 bg-white text-slate-700" />
             <Tile icon={Wallet} label="Paid" value={money(totals.paid || 0)} tone="border-emerald-200 bg-emerald-50 text-emerald-700" />
-            <Tile icon={AlertTriangle} label="Outstanding" value={money(totals.outstanding || 0)} tone="border-amber-300 bg-amber-50 text-amber-800" />
+            {(totals.writtenOff || 0) > 0 && (
+              <Tile icon={FileMinus} label="Written Off" value={money(totals.writtenOff)} tone="border-slate-300 bg-slate-100 text-slate-600" />
+            )}
+            <Tile icon={AlertTriangle} label="Balance Due" value={money(totals.outstanding || 0)} tone="border-amber-300 bg-amber-50 text-amber-800" />
           </div>
         }
       />
@@ -312,17 +318,23 @@ const InvoiceBreakupComp = () => {
                     <span className="text-slate-500">+ Extra <strong className="text-slate-900">{money(r.totals.extraChargesTotal)}</strong></span>
                   )}
                   <span className="text-slate-500">+ GST <strong className="text-violet-700">{money(r.totals.gstAmount)}</strong></span>
-                  <span className="text-slate-500">= Invoice <strong className="text-blue-700">{money(r.totals.grandTotal)}</strong></span>
-                  {r.creditTotal > 0 && (
-                    <span className="text-slate-500">− Credit <strong className="text-rose-700">{money(r.creditTotal)}</strong></span>
-                  )}
+                  <span className="text-slate-500">= Billing <strong className="text-blue-700">{money(r.totals.grandTotal)}</strong></span>
                   {r.miscTotal > 0 && (
                     <span className="text-slate-500">+ Misc <strong className="text-sky-700">{money(r.miscTotal)}</strong></span>
                   )}
-                  <span className="text-slate-500">= Payable <strong className="text-slate-900">{money(r.payable)}</strong></span>
+                  {r.totals.tdsAmount > 0 && (
+                    <span className="text-slate-500">− TDS {r.totals.tdsRate}% <strong className="text-amber-700">{money(r.totals.tdsAmount)}</strong></span>
+                  )}
+                  {r.debitTotal > 0 && (
+                    <span className="text-slate-500">− Debit Notes <strong className="text-rose-700">{money(r.debitTotal)}</strong></span>
+                  )}
+                  <span className="text-slate-500">= Net Payable <strong className="text-slate-900">{money(r.payable)}</strong></span>
                   <span className="text-slate-500">− Paid <strong className="text-emerald-700">{money(r.paidTotal)}</strong></span>
+                  {r.writtenOff > 0 && (
+                    <span className="text-slate-500">− Written Off <strong className="text-slate-600">{money(r.writtenOff)}</strong></span>
+                  )}
                   <span className="ml-auto font-semibold text-slate-500">
-                    Outstanding <strong className={r.outstanding > 0 ? "text-amber-700" : "text-slate-900"}>{money(r.outstanding)}</strong>
+                    Balance Due <strong className={r.outstanding > 0 ? "text-amber-700" : "text-slate-900"}>{money(r.outstanding)}</strong>
                   </span>
                 </div>
               </div>
@@ -342,7 +354,8 @@ const InvoiceBreakupComp = () => {
         The period follows the invoice date. Unit price is what the invoice was billed at, snapshotted when
         it was created — it never re-reads the purchase order. GST rate comes off the PO line, and whether
         it splits into CGST + SGST or charges as IGST depends on the vendor&apos;s state against the
-        branch&apos;s. FOC units are received but never priced.
+        branch&apos;s. FOC units are received but never priced. Net Payable is Billing + Misc − TDS − Debit
+        Notes; Balance Due is Net Payable − Paid − Written Off.
       </FootNote>
     </div>
   );

@@ -131,6 +131,12 @@ const DecisionPopup = ({ row, onClose, onDone }) => {
           <span className="text-slate-500">Invoice total (incl. GST)</span>
           <span className="tabular-nums text-slate-800">{money(row.grossAmount)}</span>
         </div>
+        {row.tdsAmount > 0 && (
+          <div className="flex justify-between">
+            <span className="text-slate-500">TDS <span className="text-xs text-slate-400">{row.tdsRate}% on basic</span></span>
+            <span className="tabular-nums text-amber-700">&minus;{money(row.tdsAmount)}</span>
+          </div>
+        )}
         {live.map((a) => {
           const meta = ADJUSTMENT_META[a.type] || {};
           return (
@@ -345,6 +351,7 @@ const PaymentApprovalComp = () => {
               <th className={th}>Invoice</th>
               <th className={th}>Vendor</th>
               <th className={thRight}>Invoice total</th>
+              <th className={thRight}>TDS</th>
               <th className={thRight}>Adjust</th>
               <th className={thRight}>Payable</th>
               <th className={th}>Terms</th>
@@ -355,9 +362,9 @@ const PaymentApprovalComp = () => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">
+              <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">
                 Nothing here with these filters.
               </td></tr>
             ) : (
@@ -369,6 +376,16 @@ const PaymentApprovalComp = () => {
                   </td>
                   <td className={td}>{r.vendorName || "—"}</td>
                   <td className={tdRight + " text-slate-500"}>{money(r.grossAmount)}</td>
+                  <td className={tdRight}>
+                    {r.tdsAmount > 0 ? (
+                      <span className="font-semibold text-amber-700" title={`TDS ${r.tdsRate}% on basic`}>
+                        &minus;{money(r.tdsAmount)}
+                        <span className="ml-1 text-[10px] font-medium text-amber-500">{r.tdsRate}%</span>
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
                   {/* Broken out because it IS the question: why is the ask not
                       the invoice total. */}
                   <td className={tdRight}>

@@ -35,8 +35,8 @@ const btn = (active, disabled) =>
       ? "bg-teal-500 text-white shadow-sm"
       : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50");
 
-const PeriodPicker = ({ value, onChange }) => {
-  const { tab = "period", year, month, fromMonth, toMonth, from, to } = value;
+const PeriodPicker = ({ value, onChange, allowAllTime = false }) => {
+  const { tab = "period", year, month, fromMonth, toMonth, from, to, allTime } = value;
   const now = new Date();
   const thisYear = now.getFullYear();
   const thisMonth = now.getMonth() + 1;
@@ -47,7 +47,8 @@ const PeriodPicker = ({ value, onChange }) => {
     [thisYear]
   );
 
-  const set = (patch) => onChange({ ...value, ...patch });
+  // Any pick narrows the window, so it always leaves "All time".
+  const set = (patch) => onChange({ ...value, allTime: false, ...patch });
 
   const pickMonth = (m) => {
     // "All" means the whole year, which for the CURRENT year still ends today
@@ -81,7 +82,7 @@ const PeriodPicker = ({ value, onChange }) => {
 
   const setMonthRange = (which, v) => {
     // <input type="month"> gives "2026-01".
-    const next = { ...value, tab: "range", [which]: v };
+    const next = { ...value, allTime: false, tab: "range", [which]: v };
     const f = which === "fromMonth" ? v : fromMonth;
     const t = which === "toMonth" ? v : toMonth;
     if (f) { const [y, m] = f.split("-").map(Number); next.from = firstOf(y, m); }
@@ -109,6 +110,15 @@ const PeriodPicker = ({ value, onChange }) => {
       <div className="p-4">
         {tab === "period" && (
           <div className="flex flex-wrap items-center gap-3">
+            {allowAllTime && (
+              <button
+                type="button"
+                onClick={() => onChange({ ...value, ...allTimePeriod() })}
+                className={btn(!!allTime, false) + " py-2.5"}
+              >
+                All time
+              </button>
+            )}
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
               <span className="text-sm font-semibold text-slate-600">Year</span>
               <select
@@ -121,7 +131,7 @@ const PeriodPicker = ({ value, onChange }) => {
 
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2">
               <span className="mr-1 text-sm font-semibold text-slate-600">Month</span>
-              <button type="button" onClick={() => pickMonth(0)} className={btn(month === 0, false)}>All</button>
+              <button type="button" onClick={() => pickMonth(0)} className={btn(!allTime && month === 0, false)}>All</button>
               {MONTHS.map((label, i) => {
                 const m = i + 1;
                 // A month in the future has no figures and never will until it
@@ -131,7 +141,7 @@ const PeriodPicker = ({ value, onChange }) => {
                   <button
                     key={label} type="button" disabled={future}
                     onClick={() => !future && pickMonth(m)}
-                    className={btn(month === m, future)}
+                    className={btn(!allTime && month === m, future)}
                   >
                     {label}
                   </button>
@@ -213,6 +223,13 @@ export const defaultPeriod = () => {
     from: firstOf(y, m),
     to: lastOf(y, m),
   };
+};
+
+// No window at all — every invoice ever. Only offered where allowAllTime is
+// set (Outstanding), because there a narrower default could hide a debt.
+export const allTimePeriod = () => {
+  const now = new Date();
+  return { tab: "period", year: now.getFullYear(), month: null, allTime: true, fromMonth: "", toMonth: "", from: "", to: "" };
 };
 
 export default PeriodPicker;

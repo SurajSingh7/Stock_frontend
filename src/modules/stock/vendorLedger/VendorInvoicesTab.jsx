@@ -159,7 +159,8 @@ const VendorInvoicesTab = ({ vendorId, year }) => {
               <th className={th}>Date</th>
               <th className={th}>Due</th>
               <th className={thRight}>Billing</th>
-              <th className={thRight}>Credit Notes</th>
+              <th className={thRight}>TDS</th>
+              <th className={thRight}>Debit Notes</th>
               <th className={thRight}>Misc</th>
               <th className={thRight}>Payable</th>
               <th className={thRight}>Paid</th>
@@ -169,9 +170,9 @@ const VendorInvoicesTab = ({ vendorId, year }) => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
                 No invoice matches these filters.
               </td></tr>
             ) : (
@@ -196,8 +197,9 @@ const VendorInvoicesTab = ({ vendorId, year }) => {
                       )}
                     </td>
                     <td className={tdRight}>{num(r.billing, "font-medium text-blue-700")}</td>
+                    <td className={tdRight}>{r.tds ? <span className="text-amber-700">−{money(r.tds)}</span> : <span className="text-slate-300">—</span>}</td>
                     <td className={tdRight}>
-                      {r.creditNotes ? <span className="text-rose-700">−{money(r.creditNotes)}</span> : <span className="text-slate-300">—</span>}
+                      {r.debitNotes ? <span className="text-rose-700">−{money(r.debitNotes)}</span> : <span className="text-slate-300">—</span>}
                     </td>
                     <td className={tdRight}>
                       {r.misc ? <span className="text-sky-700">+{money(r.misc)}</span> : <span className="text-slate-300">—</span>}
@@ -255,7 +257,8 @@ const VendorInvoicesTab = ({ vendorId, year }) => {
                   {totals.invoiceCount || 0} {totals.invoiceCount === 1 ? "invoice" : "invoices"}
                 </td>
                 <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
-                <td className={tdRight + " font-bold text-rose-700"}>{totals.creditNotes ? `−${money(totals.creditNotes)}` : money(0)}</td>
+                <td className={tdRight + " font-bold text-amber-700"}>{totals.tds ? `−${money(totals.tds)}` : money(0)}</td>
+                <td className={tdRight + " font-bold text-rose-700"}>{totals.debitNotes ? `−${money(totals.debitNotes)}` : money(0)}</td>
                 <td className={tdRight + " font-bold text-sky-700"}>{totals.misc ? `+${money(totals.misc)}` : money(0)}</td>
                 <td className={tdRight + " font-bold text-slate-900"}>{money(totals.payable || 0)}</td>
                 <td className={tdRight + " font-bold text-emerald-700"}>{money(totals.paid || 0)}</td>

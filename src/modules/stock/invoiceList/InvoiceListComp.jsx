@@ -4,12 +4,14 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createPortal } from "react-dom";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
-import { CalendarDays, RotateCcw, Lock, Layers, MoreVertical } from "lucide-react";
+import { CalendarDays, RotateCcw, Lock, Layers, MoreVertical, Eye, Info } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import { paymentTermShort, paymentTermLabel } from "@/modules/stock/shared/paymentTerms";
 import { PAYMENT_STATE, PAYABLE_OPTIONS, PAYABLE_FILTER } from "@/modules/stock/shared/paymentStatus";
 import { usePermissions } from "@/context/PermissionContext";
+import { anchorRect } from "@/modules/stock/shared/anchorRect";
 import { AdjustmentHistoryPopup } from "./AdjustmentPopups";
+import { InvoiceFilePopup, NetPayablePopup } from "@/modules/stock/shared/InvoiceInfoPopups";
 
 /* ============================================================= */
 /* The payment-side list of approved invoices: what is owed, and  */
@@ -55,9 +57,15 @@ const RowMenu = ({ items }) => {
 
   const toggle = () => {
     if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      // Right-aligned under the button, nudged in from the viewport edge.
-      setAt({ top: r.bottom + 6, left: Math.max(12, r.right - 232) });
+      const r = anchorRect(btnRef.current);
+      // Right-aligned under the button (menu is w-60 = 240px), kept on screen;
+      // flips above when the last rows leave no room below.
+      const height = items.length * 52 + 8;
+      const below = r.bottom + 6;
+      setAt({
+        top: below + height > r.vh - 8 ? Math.max(8, r.top - height - 6) : below,
+        left: Math.min(Math.max(8, r.right - 240), r.vw - 248),
+      });
     }
     setOpen((v) => !v);
   };
@@ -345,7 +353,7 @@ const InvoiceListComp = () => {
   const { permissions, isAdmin } = usePermissions();
   /*
     One write on this screen, and it carries its own action: scheduling changes
-    WHEN money leaves. Credit notes and misc charges are not raised here at
+    WHEN money leaves. Debit notes and misc charges are not raised here at
     all — that is the account team's screen.
   */
   const canSchedule = useMemo(() => {
@@ -524,9 +532,8 @@ const InvoiceListComp = () => {
               <th className={th}>Invoice Date</th>
               <th className={th}>PO Number</th>
               <th className={th}>Vendor</th>
-              <th className={thRight}>Invoice</th>
-              <th className={thRight}>Adjust</th>
-              <th className={thRight}>Payable</th>
+              <th className={thRight}>Net Payable</th>
+              <th className={thRight}>Paid</th>
               <th className={th}>Terms</th>
               <th className={th}>Due On</th>
               <th className={th}>Scheduled On</th>
@@ -536,37 +543,48 @@ const InvoiceListComp = () => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-400">
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
                 No approved invoices match these filters.
               </td></tr>
             ) : (
               rows.map((r) => (
                 <tr key={r._id} className="transition hover:bg-slate-50/60">
-                  <td className={td + " font-semibold text-slate-900"}>{r.invoiceNumber}</td>
+                  <td className={td}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="font-semibold text-slate-900">{r.invoiceNumber}</span>
+                      {r.invoiceFile && (
+                        <button
+                          type="button" onClick={() => setPopup({ type: "file", row: r })}
+                          title="View the invoice as uploaded"
+                          className="rounded-md border border-indigo-200 bg-white p-0.5 text-indigo-600 shadow-sm transition hover:bg-indigo-50"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </span>
+                  </td>
                   <td className={td}>{fmtDate(r.invoiceDate)}</td>
                   <td className={td}>{r.poNumber || "—"}</td>
                   <td className={td}>{r.vendorName || "—"}</td>
-                  <td className={tdRight + " text-slate-500"}>{money(r.grossAmount)}</td>
-                  {/* Its own column: seeing THAT payable differs from the
-                      invoice is useless without seeing by how much. */}
+                  {/* Net Payable with its working one click away — Billing,
+                      Misc, TDS and Debit Notes live in the ⓘ, not as columns. */}
                   <td className={tdRight}>
-                    {r.adjustmentTotal === 0 ? (
-                      <span className="text-slate-300">—</span>
-                    ) : (
+                    <span className="inline-flex items-center justify-end gap-1.5">
+                      <span className="font-semibold text-slate-900">{money(r.payable)}</span>
                       <button
-                        type="button" onClick={() => setPopup({ type: "adjustments", row: r })}
-                        className={
-                          "font-semibold underline decoration-dotted underline-offset-2 " +
-                          (r.adjustmentTotal < 0 ? "text-rose-600" : "text-sky-600")
-                        }
+                        type="button" onClick={() => setPopup({ type: "netPayable", row: r })}
+                        title="Billing, Misc, TDS and Debit Notes behind this figure"
+                        className="rounded-md border border-blue-200 bg-white p-0.5 text-blue-600 shadow-sm transition hover:bg-blue-50"
                       >
-                        {r.adjustmentTotal < 0 ? "−" : "+"}{money(Math.abs(r.adjustmentTotal))}
+                        <Info className="h-3.5 w-3.5" />
                       </button>
-                    )}
+                    </span>
                   </td>
-                  <td className={tdRight + " font-semibold text-slate-900"}>{money(r.payable)}</td>
+                  <td className={tdRight}>
+                    {r.paidTotal > 0 ? <span className="font-medium text-emerald-700">{money(r.paidTotal)}</span> : <span className="text-slate-300">—</span>}
+                  </td>
                   <td className={td}>{paymentTermShort(r.paymentTerms)}</td>
                   {/* The contract. Never edited, and shown next to the
                       decision so the two can be compared at a glance. */}
@@ -620,6 +638,13 @@ const InvoiceListComp = () => {
       </div>
 
       {editing && <SchedulePaymentPopup row={editing} onClose={() => setEditing(null)} onDone={refresh} />}
+      {popup?.type === "file" && (
+        <InvoiceFilePopup
+          invoiceNumber={popup.row.invoiceNumber} vendorName={popup.row.vendorName}
+          file={popup.row.invoiceFile} onClose={() => setPopup(null)}
+        />
+      )}
+      {popup?.type === "netPayable" && <NetPayablePopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "adjustments" && (
         <AdjustmentHistoryPopup invoice={popup.row} basePath="invoice-list" onClose={() => setPopup(null)} />
       )}

@@ -295,7 +295,7 @@ const PaidReportComp = () => {
         The period follows the date money left, not the date it was billed. Click the info icon on any
         payment count to see the individual transfers. Written off is not a payment — no money left — but a
         payable-versus-paid check comes up short by exactly that, so it is shown above. What is still owed
-        is a different question — see Outstanding.
+        is a different question — see Vendor Outstanding Overview.
       </FootNote>
     </div>
   );

@@ -11,6 +11,7 @@ import InvoiceReceiveView from "./InvoiceReceiveView";
 import AddInvoicePopup from "./AddInvoicePopup";
 import { EntriesContent } from "./InvoiceEntries";
 import { usePermissions } from "@/context/PermissionContext";
+import { anchorRect } from "@/modules/stock/shared/anchorRect";
 import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -781,8 +782,8 @@ const RowActionMenu = ({ invoice, canEditInvoice, canPartial, onView, onAddItems
   const open = !!menuPos;
   const toggle = () => {
     if (open) return setMenuPos(null);
-    const r = btnRef.current.getBoundingClientRect();
-    setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    const r = anchorRect(btnRef.current);
+    setMenuPos({ top: r.bottom + 4, right: r.vw - r.right });
   };
   useEffect(() => {
     if (!open) return undefined;

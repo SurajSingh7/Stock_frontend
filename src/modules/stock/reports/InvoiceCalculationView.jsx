@@ -16,10 +16,10 @@ import { th, thRight, td, tdRight, fmtDate } from "./reportUi";
 /* wrong shape: the working is the thing somebody reads carefully, */
 /* line by line, often beside a vendor's own statement. Squeezing  */
 /* it under a table row meant a cramped column and no room for     */
-/* the per-line tax split, the credit notes' claimed units, or the */
+/* the per-line tax split, the debit notes' claimed units, or the */
 /* payments — the three things a reader actually queries.          */
 /*                                                                */
-/* Same pattern as CreditNoteView and RecordPaymentView: it        */
+/* Same pattern as DebitNoteView and RecordPaymentView: it        */
 /* replaces the list rather than opening over it, and comes back   */
 /* with the Back button.                                          */
 /* ============================================================= */
@@ -49,7 +49,7 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
   const isIgst = r.taxType === "IGST";
   const pm = paymentStateMeta(r.paymentState);
   const sm = stageMeta(r.stage);
-  const credits = (r.adjustments || []).filter((a) => a.type === "CREDIT_NOTE");
+  const debits = (r.adjustments || []).filter((a) => a.type === "DEBIT_NOTE");
   const miscs = (r.adjustments || []).filter((a) => a.type === "MISC");
 
   /*
@@ -241,21 +241,8 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
             )}
 
             <Rule />
-            <Step label="INVOICE TOTAL" amount={money(r.totals.grandTotal)} strong tone="text-slate-900" />
+            <Step label="BILLING" amount={money(r.totals.grandTotal)} strong tone="text-slate-900" />
 
-            {credits.map((a) => (
-              <Step
-                key={a._id}
-                label={`− Credit note · ${a.reason || "—"}`}
-                formula={
-                  a.lines.length
-                    ? a.lines.map((l) => `${l.quantity} × ${money(l.rate)} +${l.gstRate}% GST`).join(", ")
-                    : ""
-                }
-                amount={`−${money(a.amount)}`}
-                tone="text-rose-700"
-              />
-            ))}
             {miscs.map((a) => (
               <Step
                 key={a._id}
@@ -265,8 +252,31 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
               />
             ))}
 
-            {(credits.length > 0 || miscs.length > 0) && <Rule />}
-            <Step label="PAYABLE" amount={money(r.payable)} strong tone="text-slate-900" />
+            {r.totals.tdsAmount > 0 && (
+              <Step
+                label="− TDS"
+                formula={`${money(r.totals.basicAmount)} basic × ${r.totals.tdsRate}%`}
+                amount={`−${money(r.totals.tdsAmount)}`}
+                tone="text-amber-700"
+              />
+            )}
+
+            {debits.map((a) => (
+              <Step
+                key={a._id}
+                label={`− Debit note · ${a.reason || "—"}`}
+                formula={
+                  a.lines.length
+                    ? a.lines.map((l) => `${l.quantity} × ${money(l.rate)} +${l.gstRate}% GST`).join(", ")
+                    : ""
+                }
+                amount={`−${money(a.amount)}`}
+                tone="text-rose-700"
+              />
+            ))}
+
+            {(debits.length > 0 || miscs.length > 0 || r.totals.tdsAmount > 0) && <Rule />}
+            <Step label="NET PAYABLE" amount={money(r.payable)} strong tone="text-slate-900" />
 
             {/* Recorded on the invoice but deliberately left out of the bill —
                 shown so the breakup accounts for every charge, outside the sum. */}
@@ -300,33 +310,33 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
 
             <Rule />
             <Step
-              label="OUTSTANDING" amount={money(r.outstanding)} strong
+              label="BALANCE DUE" amount={money(r.outstanding)} strong
               tone={r.outstanding > 0 ? "text-amber-700" : "text-slate-900"}
             />
           </div>
         </div>
 
         {/* ── Adjustments in full ──────────────────────────────── */}
-        {/* A credit note's amount is only checkable against the units it
+        {/* A debit note's amount is only checkable against the units it
             claimed, which is why the lines come back rather than just a total. */}
-        {(credits.length > 0 || miscs.length > 0) && (
-          <Card title="Credit notes and misc charges">
+        {(debits.length > 0 || miscs.length > 0) && (
+          <Card title="Debit notes and misc charges">
             <div className="space-y-3">
               {(r.adjustments || []).map((a) => {
-                const isCredit = a.type === "CREDIT_NOTE";
+                const isDebit = a.type === "DEBIT_NOTE";
                 return (
                   <div
                     key={a._id}
                     className={`rounded-xl border p-3 ${
-                      isCredit ? "border-rose-200 bg-rose-50/40" : "border-sky-200 bg-sky-50/40"
+                      isDebit ? "border-rose-200 bg-rose-50/40" : "border-sky-200 bg-sky-50/40"
                     }`}
                   >
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={`text-sm font-semibold ${isCredit ? "text-rose-700" : "text-sky-700"}`}>
-                        {isCredit ? "Credit note" : "Misc charge"}
+                      <span className={`text-sm font-semibold ${isDebit ? "text-rose-700" : "text-sky-700"}`}>
+                        {isDebit ? "Debit note" : "Misc charge"}
                       </span>
                       <span className="ml-auto font-bold tabular-nums text-slate-900">
-                        {isCredit ? "−" : "+"}{money(a.amount)}
+                        {isDebit ? "−" : "+"}{money(a.amount)}
                       </span>
                     </div>
                     <p className="mt-1 text-sm text-slate-800">{a.reason || "—"}</p>

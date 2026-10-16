@@ -83,7 +83,7 @@ const MonthDetailPopup = ({ vendor, year, month, onClose }) => {
       setData(json.data);
     } catch (e) {
       setError(e.message);
-      setData({ billing: [], credits: [], miscs: [], payments: [] });
+      setData({ billing: [], debits: [], miscs: [], payments: [] });
     }
   }, [vendor._id, year, month]);
 
@@ -122,7 +122,7 @@ const MonthDetailPopup = ({ vendor, year, month, onClose }) => {
             )}
           />
           <Section
-            title="Credit notes" tone="text-rose-700" rows={data.credits}
+            title="Debit notes" tone="text-rose-700" rows={data.debits}
             render={(r, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50/40 px-3 py-2 text-sm">
                 <InvoiceRef row={r} />
@@ -174,7 +174,7 @@ const MonthDetailPopup = ({ vendor, year, month, onClose }) => {
             )}
           />
 
-          {data.billing.length === 0 && data.credits.length === 0 &&
+          {data.billing.length === 0 && data.debits.length === 0 &&
            data.miscs.length === 0 && data.payments.length === 0 &&
            (data.writeOffs || []).length === 0 && (
             <p className="py-8 text-center text-sm text-slate-400">Nothing happened in this month.</p>
@@ -319,8 +319,9 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
               <th className={thRight}>SGST</th>
               <th className={thRight}>IGST</th>
               <th className={thRight}>Billing</th>
+              <th className={thRight}>TDS</th>
               <th className={thRight}>Misc</th>
-              <th className={thRight}>Credit Notes</th>
+              <th className={thRight}>Debit Notes</th>
               <th className={thRight}>Net Payable</th>
               <th className={thRight}>Paid</th>
               <th className={thRight}>Written Off</th>
@@ -331,18 +332,18 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
             {/* The opening line is the whole point of a ledger: this year did
                 not start from zero unless it actually did. */}
             <tr className="bg-slate-50/60">
-              <td className={td + " font-semibold text-slate-600"} colSpan={12}>
+              <td className={td + " font-semibold text-slate-600"} colSpan={13}>
                 Opening balance carried forward
               </td>
               <td className={tdRight + " font-bold text-slate-900"}>{money(data?.opening || 0)}</td>
             </tr>
 
             {loading ? (
-              <tr><td colSpan={13} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={14} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : (
               rows.map((r) => {
                 const quiet =
-                  r.invoiceCount === 0 && !r.paid && !r.creditNotes && !r.misc && !r.writtenOff;
+                  r.invoiceCount === 0 && !r.paid && !r.debitNotes && !r.misc && !r.writtenOff;
                 return (
                   <tr
                     key={r.month}
@@ -358,8 +359,9 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
                     <td className={tdRight}>{num(r.sgst)}</td>
                     <td className={tdRight}>{num(r.igst)}</td>
                     <td className={tdRight}>{num(r.billing, "font-medium text-blue-700")}</td>
+                    <td className={tdRight}>{r.tds ? <span className="text-amber-700">−{money(r.tds)}</span> : <span className="text-slate-300">—</span>}</td>
                     <td className={tdRight}>{r.misc ? <span className="text-sky-700">+{money(r.misc)}</span> : <span className="text-slate-300">—</span>}</td>
-                    <td className={tdRight}>{r.creditNotes ? <span className="text-rose-700">−{money(r.creditNotes)}</span> : <span className="text-slate-300">—</span>}</td>
+                    <td className={tdRight}>{r.debitNotes ? <span className="text-rose-700">−{money(r.debitNotes)}</span> : <span className="text-slate-300">—</span>}</td>
                     <td className={tdRight}>{num(r.netPayable, "font-semibold text-slate-900")}</td>
                     <td className={tdRight}>{num(r.paid, "font-medium text-emerald-700")}</td>
                     <td className={tdRight}>
@@ -382,8 +384,9 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
               <td className={tdRight + " font-semibold"}>{money(t.sgst || 0)}</td>
               <td className={tdRight + " font-semibold"}>{money(t.igst || 0)}</td>
               <td className={tdRight + " font-bold text-blue-700"}>{money(t.billing || 0)}</td>
+              <td className={tdRight + " font-bold text-amber-700"}>{t.tds ? `−${money(t.tds)}` : money(0)}</td>
               <td className={tdRight + " font-bold text-sky-700"}>{t.misc ? `+${money(t.misc)}` : money(0)}</td>
-              <td className={tdRight + " font-bold text-rose-700"}>{t.creditNotes ? `−${money(t.creditNotes)}` : money(0)}</td>
+              <td className={tdRight + " font-bold text-rose-700"}>{t.debitNotes ? `−${money(t.debitNotes)}` : money(0)}</td>
               <td className={tdRight + " font-bold text-slate-900"}>{money(t.netPayable || 0)}</td>
               <td className={tdRight + " font-bold text-emerald-700"}>{money(t.paid || 0)}</td>
               <td className={tdRight + " font-bold text-slate-500"}>{t.writtenOff ? `−${money(t.writtenOff)}` : money(0)}</td>
@@ -394,7 +397,7 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
       </div>
 
       <p className="mt-3 text-xs text-slate-400">
-        Billing sits in the month of the invoice date, credit notes and misc in the month they were accepted,
+        Billing sits in the month of the invoice date, debit notes and misc in the month they were accepted,
         payments in the month they were paid. Written off is an invoice closed for less than its payable — it
         reduces the balance without any money leaving. Click any month to see the documents behind it.
       </p>

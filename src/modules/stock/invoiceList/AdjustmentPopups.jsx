@@ -9,12 +9,12 @@ const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
 export const ADJUSTMENT_META = {
-  CREDIT_NOTE: { label: "Credit note", tone: "text-rose-700", chip: "bg-rose-50 text-rose-700 ring-rose-200", sign: "−" },
+  DEBIT_NOTE: { label: "Debit note", tone: "text-rose-700", chip: "bg-rose-50 text-rose-700 ring-rose-200", sign: "−" },
   MISC: { label: "Misc charge", tone: "text-sky-700", chip: "bg-sky-50 text-sky-700 ring-sky-200", sign: "+" },
 };
 
 /* ============================================================= */
-/* Misc charge — a popup, not a page. Unlike a credit note it has */
+/* Misc charge — a popup, not a page. Unlike a debit note it has */
 /* no items to pick through: a description, an amount, a reason.  */
 /* And it ADDS to the payable, which the copy says outright so    */
 /* nobody reads it as the deduction its sibling is.               */

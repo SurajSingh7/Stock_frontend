@@ -57,7 +57,7 @@ export const STAGE_META = {
   REJECTED: {
     label: "Rejected",
     short: "rejected",
-    hint: "Sent back — the credit notes or charges need fixing before it can go again. The money is still owed.",
+    hint: "Sent back — the debit notes or charges need fixing before it can go again. The money is still owed.",
     chip: "bg-rose-50 text-rose-700 ring-rose-200",
     tile: "border-rose-300 bg-rose-50 text-rose-800",
   },

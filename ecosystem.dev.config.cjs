@@ -6,14 +6,15 @@ module.exports = {
   apps: [
     {
       name: 'stock-frontend',
-      script: './node_modules/next/dist/bin/next',
-      args: 'dev',
-      // pm2 restarts the whole dev server when a watched file changes (on top
-      // of next dev's own hot reload). Next writes into .next constantly, so it
-      // MUST stay ignored — watching it restarts the server in a loop.
-      watch: true,
-      ignore_watch: ['node_modules', '.next', '.git', 'public/uploads'],
-      watch_delay: 1500,
+      // Runs `next dev` with its server child forced windowless — see the file.
+      script: './pm2-next-dev.cjs',
+      // NO pm2 watch. `next dev` already hot-reloads every save by itself; a pm2
+      // watch on top restarted the whole server on each change, and on Windows
+      // every restart opened a fresh "next-server" console window on screen.
+      // Restart by hand (pm2 restart stock-frontend) only after changing
+      // next.config.mjs or .env.
+      watch: false,
+      windowsHide: true,
       env: {
         NODE_ENV: 'development',
       },

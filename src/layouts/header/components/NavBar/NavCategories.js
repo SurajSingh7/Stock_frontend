@@ -138,15 +138,20 @@ export const navCategories = [
         moduleKey: "billing-report",
         action: ["VIEW_MENU"],
       },
+      /*
+        Billing to balance due in one row — the page to open when someone asks
+        "where do we stand with this vendor". It replaced the Outstanding and
+        Vendor Ledger entries; a vendor's month-wise ledger opens from its ⋮.
+      */
       {
-        name: "Outstanding",
-        path: "/stock/reports/outstanding",
-        moduleKey: "outstanding-report",
+        name: "Vendor Outstanding Overview",
+        path: "/stock/reports/account-summary",
+        moduleKey: "account-summary",
         action: ["VIEW_MENU"],
       },
       /*
         The third of the vendor-money set: Billing asks what was billed,
-        Outstanding what is still owed, Paid what actually left. Reading as one
+        the overview what is still owed, Paid what actually left. Reading as one
         set in the menu is the point — those are the three questions.
 
         Not "Payments": that name belongs to the Account group, where accounts
@@ -159,7 +164,7 @@ export const navCategories = [
         action: ["VIEW_MENU"],
       },
       /*
-        Payments, credit notes and misc charges on one page with tabs. They are
+        Payments, debit notes and misc charges on one page with tabs. They are
         the same kind of row — a dated event with an amount that changed what
         we owe — and split across three menu entries nobody could ever see the
         order things happened in.
@@ -179,12 +184,6 @@ export const navCategories = [
         name: "Invoice Breakup",
         path: "/stock/reports/invoice-breakup",
         moduleKey: "invoice-breakup",
-        action: ["VIEW_MENU"],
-      },
-      {
-        name: "Vendor Ledger",
-        path: "/stock/vendor-ledger",
-        moduleKey: "vendor-ledger",
         action: ["VIEW_MENU"],
       },
     ],
@@ -275,6 +274,12 @@ export const navCategories = [
         name: "GST Rates",
         path: "/master/gst-rate",
         moduleKey: "gst-rates",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "TDS Rates",
+        path: "/master/tds-rate",
+        moduleKey: "tds-rates",
         action: ["VIEW_MENU"],
       },
     ],

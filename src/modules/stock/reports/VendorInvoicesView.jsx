@@ -9,6 +9,7 @@ import { paymentStateMeta } from "@/modules/stock/shared/paymentStatus";
 import { stageMeta } from "@/modules/stock/shared/ledgerStages";
 import { paymentTermShort } from "@/modules/stock/shared/paymentTerms";
 import InvoiceCalculationView from "./InvoiceCalculationView";
+import { BillingCell, BillingBreakupPopup } from "./taxBreakup";
 import {
   th, thRight, td, tdRight, num, fmtDate, Tile, ErrorBanner, FootNote,
 } from "./reportUi";
@@ -23,20 +24,30 @@ import {
 /* Detail lives one click away instead, at two depths:             */
 /*   info        a popup — what is ON this invoice (its lines),    */
 /*               without leaving the table or losing your place.   */
-/*   Calculation a full page — the whole working, credit notes and */
+/*   Calculation a full page — the whole working, debit notes and */
 /*               payments included.                                */
 /*                                                                */
-/* Shared by Billing and Outstanding because it is the same drill: */
-/* a rolled-up figure opened to show the documents underneath.     */
-/* `mode` picks the columns — Billing wants the tax split,         */
-/* Outstanding wants what is still owed and why.                    */
+/* Shared by Billing and Vendor Outstanding Overview because it is */
+/* the same drill: a rolled-up figure opened to show the documents */
+/* underneath. `mode` picks the columns — Billing wants the tax    */
+/* split, the overview wants billing through to balance due.        */
 /*                                                                */
 /* Both read the same endpoint the Invoice Breakup page uses, each */
 /* through its OWN route so the permission matches the report that */
 /* linked here. A drill-down that 403s is worse than none.         */
 /* ============================================================= */
 
-export const MODE = { BILLING: "BILLING", OUTSTANDING: "OUTSTANDING" };
+export const MODE = { BILLING: "BILLING", ACCOUNT: "ACCOUNT" };
+
+// The report each mode was opened from — its route carries that report's own
+// permission, and its name heads the page.
+const MODE_META = {
+  BILLING: { base: "billing", title: "Billing" },
+  ACCOUNT: { base: "account-summary", title: "Vendor Outstanding Overview" },
+};
+
+const minus = (v, tone) => (v ? <span className={tone}>−{money(v)}</span> : <span className="text-slate-300">—</span>);
+const plus = (v, tone) => (v ? <span className={tone}>+{money(v)}</span> : <span className="text-slate-300">—</span>);
 
 /* One figure in a summary strip. */
 const Bit = ({ label, value, tone = "text-slate-900", lead }) => (
@@ -53,7 +64,7 @@ const Bit = ({ label, value, tone = "text-slate-900", lead }) => (
   keystroke and re-render behind it.
 
   Deliberately NOT the whole Calculation page in a modal. This answers "what
-  did we buy and at what price"; the arithmetic walkthrough — credit notes,
+  did we buy and at what price"; the arithmetic walkthrough — debit notes,
   payments, what is still owed — stays on its own page, reachable from the
   button at the bottom. Two copies of that working would be two things to keep
   in step.
@@ -204,7 +215,8 @@ const InvoiceDetailPopup = ({ row: r, onClose, onCalculation }) => {
         )}
         <Bit lead="+ " label="GST" value={money(r.totals.gstAmount)} tone="text-violet-700" />
         <Bit lead="= " label="Billing" value={money(r.totals.grandTotal)} tone="text-blue-700" />
-        {r.creditTotal > 0 && <Bit lead="− " label="Credit" value={money(r.creditTotal)} tone="text-rose-700" />}
+        {r.totals.tdsAmount > 0 && <Bit lead="− " label={`TDS ${r.totals.tdsRate}%`} value={money(r.totals.tdsAmount)} tone="text-amber-700" />}
+        {r.debitTotal > 0 && <Bit lead="− " label="Debit" value={money(r.debitTotal)} tone="text-rose-700" />}
         {r.miscTotal > 0 && <Bit lead="+ " label="Misc" value={money(r.miscTotal)} tone="text-sky-700" />}
         <Bit lead="= " label="Payable" value={money(r.payable)} />
         <Bit lead="− " label="Paid" value={money(r.paidTotal)} tone="text-emerald-700" />
@@ -242,28 +254,25 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
   const [error, setError] = useState(null);
   const [detail, setDetail] = useState(null);
   const [calc, setCalc] = useState(null);
+  const [breakupRow, setBreakupRow] = useState(null);
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
 
   const isBilling = mode === MODE.BILLING;
+  const meta = MODE_META[mode] || MODE_META.ACCOUNT;
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-      /*
-        Billing passes the period because its parent row was counted for that
-        period. Outstanding does not: what is still owed is as on today, and a
-        date window here would show a smaller figure than the row it opened
-        from — the drill-down would contradict the page that linked to it.
-      */
-      if (isBilling && period.from) params.set("from", period.from);
-      if (isBilling && period.to) params.set("to", period.to);
+      // Every mode windows by invoice date — the parent row was built from
+      // exactly the invoices dated in this period.
+      if (period.from) params.set("from", period.from);
+      if (period.to) params.set("to", period.to);
 
-      const base = isBilling ? "billing" : "outstanding";
       const res = await fetch(
-        `${API_BACKEND_URL}/stock/reports/${base}/${vendorId}/invoices?${params.toString()}`,
+        `${API_BACKEND_URL}/stock/reports/${meta.base}/${vendorId}/invoices?${params.toString()}`,
         { credentials: "include" }
       );
       const json = await res.json();
@@ -277,7 +286,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
     } finally {
       setLoading(false);
     }
-  }, [isBilling, vendorId, page, limit, period.from, period.to]);
+  }, [meta.base, vendorId, page, limit, period.from, period.to]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -288,7 +297,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
   }
 
   const openCalculation = (r) => { setDetail(null); setCalc(r); };
-  const colCount = isBilling ? 12 : 14;
+  const colCount = isBilling ? 9 : 11;
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -302,10 +311,10 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-lg font-semibold tracking-tight text-slate-900">
-            {isBilling ? "Billing" : "Outstanding"} · {vendorName}
+            {meta.title} · {vendorName}
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            {isBilling ? periodLabel || "Chosen period" : "As on today"} ·{" "}
+            {isBilling ? periodLabel || "Chosen period" : `${periodLabel || "All time"} · as on today`} ·{" "}
             {total} {total === 1 ? "invoice" : "invoices"}
           </p>
         </div>
@@ -320,15 +329,17 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
             </>
           ) : (
             <>
-              <Tile icon={Receipt} label="Payable" value={money(totals.payable || 0)} tone="border-slate-200 bg-white text-slate-700" />
+              <Tile icon={Receipt} label="Billing" value={money(totals.billing || 0)} tone="border-blue-200 bg-blue-50 text-blue-700" />
+              <Tile icon={Receipt} label="Net Payable" value={money(totals.payable || 0)} tone="border-slate-200 bg-white text-slate-700" />
               <Tile icon={Wallet} label="Paid" value={money(totals.paid || 0)} tone="border-emerald-200 bg-emerald-50 text-emerald-700" />
-              <Tile icon={AlertTriangle} label="Outstanding" value={money(totals.outstanding || 0)} tone="border-amber-300 bg-amber-50 text-amber-800" />
+              <Tile icon={AlertTriangle} label="Balance Due" value={money(totals.outstanding || 0)} tone="border-amber-300 bg-amber-50 text-amber-800" />
             </>
           )}
         </div>
       </div>
 
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
+
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-200">
@@ -344,26 +355,17 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                   <th className={thRight}>SGST</th>
                   <th className={thRight}>IGST</th>
                   <th className={thRight}>Billing</th>
-                  <th className={thRight}>Credit Notes</th>
-                  <th className={thRight}>Misc</th>
-                  <th className={thRight}>Payable</th>
                 </>
               ) : (
                 <>
-                  <th className={th}>Due</th>
-                  {/* Basic, Extra and GST live here: on the main page Billing
-                      is one lump, and this is where somebody comes to find out
-                      what that lump was made of. */}
-                  <th className={thRight}>Basic</th>
-                  <th className={thRight}>+Extra</th>
-                  <th className={thRight}>GST</th>
                   <th className={thRight}>Billing</th>
-                  <th className={thRight}>Credit Notes</th>
                   <th className={thRight}>Misc</th>
-                  <th className={thRight}>Payable</th>
+                  <th className={thRight}>TDS</th>
+                  <th className={thRight}>Debit Notes</th>
+                  <th className={thRight}>Net Payable</th>
                   <th className={thRight}>Paid</th>
-                  <th className={thRight}>Outstanding</th>
-                  <th className={th}>Stage</th>
+                  <th className={thRight}>Written Off</th>
+                  <th className={thRight}>Balance Due</th>
                 </>
               )}
               <th className={thRight}>&nbsp;</th>
@@ -374,12 +376,10 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
               <tr><td colSpan={colCount} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
               <tr><td colSpan={colCount} className="px-4 py-12 text-center text-sm text-slate-400">
-                No invoice for this vendor {isBilling ? "in this period" : "is outstanding"}.
+                No invoice for this vendor in this period.
               </td></tr>
             ) : (
               rows.map((r) => {
-                const pm = paymentStateMeta(r.paymentState);
-                const sm = stageMeta(r.stage);
                 return (
                   <tr key={String(r.invoiceId)} className="transition hover:bg-slate-50/60">
                     {/* Number, PO and the info button together. The number alone
@@ -410,66 +410,31 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                         <td className={tdRight}>{num(r.totals.cgstAmount)}</td>
                         <td className={tdRight}>{num(r.totals.sgstAmount)}</td>
                         <td className={tdRight}>{num(r.totals.igstAmount)}</td>
-                        <td className={tdRight}>{num(r.totals.grandTotal, "font-medium text-blue-700")}</td>
-                        <td className={tdRight}>
-                          {r.creditTotal ? <span className="text-rose-700">−{money(r.creditTotal)}</span> : <span className="text-slate-300">—</span>}
-                        </td>
-                        <td className={tdRight}>
-                          {r.miscTotal ? <span className="text-sky-700">+{money(r.miscTotal)}</span> : <span className="text-slate-300">—</span>}
-                        </td>
-                        <td className={tdRight + " font-semibold text-slate-900"}>{money(r.payable)}</td>
+                        <td className={tdRight}>{num(r.totals.grandTotal, "font-bold text-blue-700")}</td>
                       </>
                     ) : (
                       <>
-                        <td className={td + " whitespace-nowrap text-xs"}>
-                          <span className="block">{fmtDate(r.dueDate)}</span>
-                          {r.daysOverdue > 0 && (
-                            <span className="text-[11px] font-semibold text-rose-600">
-                              {r.daysOverdue} days overdue
-                            </span>
-                          )}
-                        </td>
-                        {/* What the one Billing figure on the main page was
-                            made of — the thing that could not be seen there. */}
-                        <td className={tdRight}>{num(r.totals.basicAmount)}</td>
-                        <td className={tdRight}>{num(r.totals.extraChargesTotal, "text-slate-600")}</td>
-                        <td className={tdRight}>{num(r.totals.gstAmount, "text-violet-700")}</td>
-                        <td className={tdRight}>{num(r.totals.grandTotal, "text-blue-700")}</td>
                         <td className={tdRight}>
-                          {r.creditTotal ? <span className="text-rose-700">−{money(r.creditTotal)}</span> : <span className="text-slate-300">—</span>}
+                          <BillingCell
+                            value={r.totals.grandTotal}
+                            onInfo={() => setBreakupRow({
+                              title: r.invoiceNumber,
+                              b: {
+                                basic: r.totals.basicAmount, extra: r.totals.extraChargesTotal,
+                                cgst: r.totals.cgstAmount, sgst: r.totals.sgstAmount, igst: r.totals.igstAmount,
+                                gst: r.totals.gstAmount, billing: r.totals.grandTotal,
+                              },
+                            })}
+                          />
                         </td>
-                        <td className={tdRight}>
-                          {r.miscTotal ? <span className="text-sky-700">+{money(r.miscTotal)}</span> : <span className="text-slate-300">—</span>}
-                        </td>
+                        <td className={tdRight}>{plus(r.miscTotal, "text-sky-700")}</td>
+                        <td className={tdRight}>{minus(r.totals.tdsAmount, "text-amber-700")}</td>
+                        <td className={tdRight}>{minus(r.debitTotal, "text-rose-700")}</td>
                         <td className={tdRight + " font-semibold text-slate-900"}>{money(r.payable)}</td>
-                        <td className={tdRight}>{num(r.paidTotal, "text-emerald-700")}</td>
-                        <td className={tdRight + " font-bold text-slate-900"}>
+                        <td className={tdRight}>{minus(r.paidTotal, "text-emerald-700")}</td>
+                        <td className={tdRight}>{minus(r.writtenOff, "text-slate-500")}</td>
+                        <td className={tdRight + " font-bold text-amber-800"}>
                           {r.outstanding ? money(r.outstanding) : <span className="text-slate-300">—</span>}
-                          {r.writtenOff > 0 && (
-                            <span className="mt-0.5 block text-[10px] font-normal text-slate-400">
-                              {money(r.writtenOff)} written off
-                            </span>
-                          )}
-                        </td>
-                        <td className={td}>
-                          <span className="flex flex-wrap items-center gap-1">
-                            <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${pm.chip}`}>
-                              {pm.label}
-                            </span>
-                            {r.outstanding > 0 && (
-                              <span
-                                title={sm.hint}
-                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${sm.chip}`}
-                              >
-                                {sm.label}
-                              </span>
-                            )}
-                          </span>
-                          {r.rejectedReason && (
-                            <span className="mt-0.5 block max-w-[180px] text-[11px] text-rose-600" title={r.rejectedReason}>
-                              {r.rejectedReason}
-                            </span>
-                          )}
                         </td>
                       </>
                     )}
@@ -507,23 +472,17 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                       GST {money(totals.gst || 0)}
                     </td>
                     <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
-                    <td className={tdRight + " font-bold text-rose-700"}>{totals.creditNotes ? `−${money(totals.creditNotes)}` : money(0)}</td>
-                    <td className={tdRight + " font-bold text-sky-700"}>{totals.misc ? `+${money(totals.misc)}` : money(0)}</td>
-                    <td className={tdRight + " font-bold text-slate-900"}>{money(totals.payable || 0)}</td>
                   </>
                 ) : (
                   <>
-                    <td />
-                    <td className={tdRight + " font-semibold"}>{money(totals.basic || 0)}</td>
-                    <td className={tdRight + " font-semibold"}>{money(totals.extraCharges || 0)}</td>
-                    <td className={tdRight + " font-bold text-violet-700"}>{money(totals.gst || 0)}</td>
                     <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
-                    <td className={tdRight + " font-bold text-rose-700"}>{totals.creditNotes ? `−${money(totals.creditNotes)}` : money(0)}</td>
                     <td className={tdRight + " font-bold text-sky-700"}>{totals.misc ? `+${money(totals.misc)}` : money(0)}</td>
+                    <td className={tdRight + " font-bold text-amber-700"}>{totals.tds ? `−${money(totals.tds)}` : money(0)}</td>
+                    <td className={tdRight + " font-bold text-rose-700"}>{totals.debitNotes ? `−${money(totals.debitNotes)}` : money(0)}</td>
                     <td className={tdRight + " font-bold text-slate-900"}>{money(totals.payable || 0)}</td>
-                    <td className={tdRight + " font-bold text-emerald-700"}>{money(totals.paid || 0)}</td>
-                    <td className={tdRight + " font-bold text-slate-900"}>{money(totals.outstanding || 0)}</td>
-                    <td />
+                    <td className={tdRight + " font-bold text-emerald-700"}>{totals.paid ? `−${money(totals.paid)}` : money(0)}</td>
+                    <td className={tdRight + " font-bold text-slate-500"}>{totals.writtenOff ? `−${money(totals.writtenOff)}` : money(0)}</td>
+                    <td className={tdRight + " font-bold text-amber-800"}>{money(totals.outstanding || 0)}</td>
                   </>
                 )}
                 <td />
@@ -539,10 +498,19 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
       </div>
 
       <FootNote>
-        {isBilling
-          ? "Billing is (Basic + Extra) + GST, as the vendor billed it. Extra charges are freight, handling and anything else the invoice carried outside the item lines — they are not taxed with the items, which is why they sit in their own column. The info icon beside an invoice number opens its item lines; Calculation opens the full working. The TOTAL row covers every page, not just this one."
-          : "As on today, whatever period the report behind this was showing — an unpaid invoice does not stop being owed because a month ended. Basic, Extra and GST are what the one Billing figure on the report behind this was made of. Days overdue count from the contractual due date, and money settled short is written off rather than left outstanding. The info icon beside an invoice number opens its item lines; Calculation opens the full working."}
+        {!isBilling
+          ? "Invoices dated in the period the summary was showing; every figure is as on today. Net Payable is Billing + Misc − TDS − Debit Notes, and Net Payable − Paid − Written Off = Balance Due. The info icon beside an invoice number opens its item lines; Calculation opens the full working."
+          : "Billing is (Basic + Extra) + GST, as the vendor billed it. Extra charges are freight, handling and anything else the invoice carried outside the item lines — they are not taxed with the items, which is why they sit in their own column. The info icon beside an invoice number opens its item lines; Calculation opens the full working. The TOTAL row covers every page, not just this one."}
       </FootNote>
+
+      {breakupRow && (
+        <BillingBreakupPopup
+          title={breakupRow.title}
+          subtitle={`Billing breakup · ${vendorName}`}
+          b={breakupRow.b}
+          onClose={() => setBreakupRow(null)}
+        />
+      )}
 
       {detail && (
         <InvoiceDetailPopup

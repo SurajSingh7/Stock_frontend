@@ -1,10 +1,10 @@
-import VendorLedgerComp from '@/modules/stock/vendorLedger/VendorLedgerComp';
+import TdsRate from '@/modules/master/tdsRate/TdsRate';
 import React from 'react'
 
 const page = () => {
   return (
     <div>
-        <VendorLedgerComp/>
+        <TdsRate/>
     </div>
   )
 }

@@ -15,7 +15,7 @@ import {
   PAYABLE_FILTER, PAYABLE_OPTIONS,
 } from "@/modules/stock/shared/paymentStatus";
 import { usePermissions } from "@/context/PermissionContext";
-import CreditNoteView from "@/modules/stock/invoiceList/CreditNoteView";
+import DebitNoteView from "@/modules/stock/invoiceList/DebitNoteView";
 import RecordPaymentView from "@/modules/stock/payments/RecordPaymentView";
 import { MiscChargePopup, AdjustmentCard, ADJUSTMENT_META } from "@/modules/stock/invoiceList/AdjustmentPopups";
 
@@ -170,10 +170,10 @@ const ManageAdjustmentsPopup = ({ invoice, canManage, onClose, onEdit, onAdd, on
       {canManage && invoice.canEditAdjustments && (
         <div className="mb-4 flex flex-wrap gap-2">
           <button
-            type="button" onClick={() => onAdd("CREDIT_NOTE")}
+            type="button" onClick={() => onAdd("DEBIT_NOTE")}
             className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50"
           >
-            <FileMinus className="h-3.5 w-3.5" /> Add credit note
+            <FileMinus className="h-3.5 w-3.5" /> Add debit note
           </button>
           <button
             type="button" onClick={() => onAdd("MISC")}
@@ -232,7 +232,7 @@ const ManageAdjustmentsPopup = ({ invoice, canManage, onClose, onEdit, onAdd, on
           <p className="text-sm font-semibold text-rose-800">
             Withdraw this {(ADJUSTMENT_META[confirming.type] || {}).label?.toLowerCase() || "adjustment"} of {money(confirming.amount)}?
           </p>
-          {confirming.type === "CREDIT_NOTE" && (
+          {confirming.type === "DEBIT_NOTE" && (
             <p className="mt-1 text-xs text-rose-700">
               Any units it marked faulty go back to available stock.
             </p>
@@ -321,10 +321,10 @@ const FixAndResendPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChang
         {canManage && (
           <span className="flex gap-2">
             <button
-              type="button" onClick={() => onAdd("CREDIT_NOTE")}
+              type="button" onClick={() => onAdd("DEBIT_NOTE")}
               className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50"
             >
-              <FileMinus className="h-3.5 w-3.5" /> Credit note
+              <FileMinus className="h-3.5 w-3.5" /> Debit note
             </button>
             <button
               type="button" onClick={() => onAdd("MISC")}
@@ -340,7 +340,7 @@ const FixAndResendPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChang
         <div className="h-20 animate-pulse rounded-xl bg-slate-100" />
       ) : rows.length === 0 ? (
         <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-400">
-          No credit notes or misc charges on this invoice.
+          No debit notes or misc charges on this invoice.
         </p>
       ) : (
         <div className="space-y-3">
@@ -397,7 +397,7 @@ const FixAndResendPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChang
 /* ── The last look before it goes to the approval team ────────── */
 /* Sending was a one-click button, and that was wrong: what the    */
 /* approval team is asked to release is the payable AFTER every    */
-/* credit note and misc charge, and the person sending it has no   */
+/* debit note and misc charge, and the person sending it has no   */
 /* other place on this screen where those add up in front of them. */
 /*                                                                 */
 /* So the popup is the figure, itemised, with the send button      */
@@ -440,9 +440,9 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
     }
   };
 
-  const credits = (rows || []).filter((a) => a.type === "CREDIT_NOTE");
+  const debits = (rows || []).filter((a) => a.type === "DEBIT_NOTE");
   const miscs = (rows || []).filter((a) => a.type === "MISC");
-  const creditTotal = credits.reduce((s, a) => s + (a.amount || 0), 0);
+  const debitTotal = debits.reduce((s, a) => s + (a.amount || 0), 0);
   const miscTotal = miscs.reduce((s, a) => s + (a.amount || 0), 0);
 
   return (
@@ -499,10 +499,20 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
               <span className="tabular-nums text-slate-900">{money(invoice.grossAmount)}</span>
             </div>
 
-            {credits.map((a) => (
+            {invoice.tdsAmount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-amber-700">
+                  TDS
+                  <span className="ml-1.5 text-xs text-slate-400">{invoice.tdsRate}% on basic</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-amber-700">&minus;{money(invoice.tdsAmount)}</span>
+              </div>
+            )}
+
+            {debits.map((a) => (
               <div key={a._id} className="flex justify-between">
                 <span className="min-w-0 text-rose-700">
-                  Credit note
+                  Debit note
                   <span className="ml-1.5 text-xs text-slate-400">{a.reason || "—"}</span>
                 </span>
                 <span className="shrink-0 tabular-nums text-rose-700">&minus;{money(a.amount)}</span>
@@ -520,7 +530,7 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
             ))}
 
             {rows.length === 0 && (
-              <p className="py-1 text-xs text-slate-400">No credit notes or misc charges on this invoice.</p>
+              <p className="py-1 text-xs text-slate-400">No debit notes or misc charges on this invoice.</p>
             )}
 
             <div className="flex justify-between border-t border-slate-200 pt-1.5 text-base">
@@ -539,14 +549,14 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
       </div>
 
       {/* The full cards underneath, because a one-line reason is enough to
-          recognise a credit note but not enough to check one — the units it
+          recognise a debit note but not enough to check one — the units it
           claimed are what somebody would query. */}
       {rows !== null && rows.length > 0 && (
         <details className="mt-3">
           <summary className="cursor-pointer text-xs font-semibold text-indigo-600">
             Show the {rows.length === 1 ? "adjustment" : `${rows.length} adjustments`} in full
             <span className="ml-1.5 font-normal text-slate-400">
-              ({credits.length} credit {credits.length === 1 ? "note" : "notes"} &minus;{money(creditTotal)},
+              ({debits.length} debit {debits.length === 1 ? "note" : "notes"} &minus;{money(debitTotal)},
               {" "}{miscs.length} misc +{money(miscTotal)})
             </span>
           </summary>
@@ -565,7 +575,7 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
       />
 
       <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
-        Once sent, the credit notes, misc charges and the payable date are locked until the
+        Once sent, the debit notes, misc charges and the payable date are locked until the
         approval team decides.
       </p>
 
@@ -688,13 +698,13 @@ const PaymentsComp = () => {
     reason: each is a form with a list inside it, and a popup holding a
     scrollable list inside another scrollable list is unusable.
 
-    Credit note — picking units out of a 40-piece delivery needs the room.
+    Debit note — picking units out of a 40-piece delivery needs the room.
     Payment   — one settlement can be five bank entries, each with its own
                 reference and its own receipt files.
   */
-  if (view.mode === "creditNote") {
+  if (view.mode === "debitNote") {
     return (
-      <CreditNoteView
+      <DebitNoteView
         invoice={view.row} adjustment={view.adjustment || null}
         onBack={() => setView({ mode: "list" })} onDone={refresh}
       />
@@ -718,7 +728,7 @@ const PaymentsComp = () => {
       <div className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Payments</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          Raise credit notes and misc charges, ask for payment approval once an invoice is due, then record what was paid.
+          Raise debit notes and misc charges, ask for payment approval once an invoice is due, then record what was paid.
         </p>
       </div>
 
@@ -856,6 +866,11 @@ const PaymentsComp = () => {
                     <td className={td}>{r.vendorName || "—"}</td>
                     <td className={tdRight + " font-semibold text-slate-900"}>
                       {money(r.payable)}
+                      {r.tdsAmount > 0 && (
+                        <span className="ml-1 text-[11px] text-amber-600" title={`TDS ${r.tdsRate}% on basic`}>
+                          (TDS −{money(r.tdsAmount)})
+                        </span>
+                      )}
                       {r.adjustmentTotal !== 0 && (
                         <span className={`ml-1 text-[11px] ${r.adjustmentTotal < 0 ? "text-rose-600" : "text-sky-600"}`}>
                           ({r.adjustmentTotal < 0 ? "−" : "+"}{money(Math.abs(r.adjustmentTotal))})
@@ -926,7 +941,7 @@ const PaymentsComp = () => {
                         {canManage && r.canEditAdjustments && r.approvalStatus !== APPROVAL_STATUS.REJECTED && (
                           <>
                             <button
-                              type="button" onClick={() => setView({ mode: "creditNote", row: r })}
+                              type="button" onClick={() => setView({ mode: "debitNote", row: r })}
                               title="Claim money back for faulty goods"
                               className="inline-flex items-center rounded-lg border border-rose-200 bg-white px-2 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50"
                             >
@@ -942,7 +957,7 @@ const PaymentsComp = () => {
                           </>
                         )}
                         {/* Opens the figure being approved rather than sending
-                            straight away — the payable after every credit note
+                            straight away — the payable after every debit note
                             and misc charge is what the approver acts on, and
                             this is the sender's only chance to see it. */}
                         {canRequest && r.canSendForApproval && r.approvalStatus !== APPROVAL_STATUS.REJECTED && (
@@ -963,7 +978,7 @@ const PaymentsComp = () => {
                         )}
                         <button
                           type="button" onClick={() => setPopup({ type: "adjustments", row: r })}
-                          title="Credit notes and misc charges on this invoice"
+                          title="Debit notes and misc charges on this invoice"
                           className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
                         >
                           <Layers className="h-3.5 w-3.5" />
@@ -989,13 +1004,13 @@ const PaymentsComp = () => {
           onClose={() => setPopup(null)}
           onChanged={refresh}
           onAdd={(type) =>
-            type === "CREDIT_NOTE"
-              ? setView({ mode: "creditNote", row: popup.row })
+            type === "DEBIT_NOTE"
+              ? setView({ mode: "debitNote", row: popup.row })
               : setPopup({ type: "misc", row: popup.row })
           }
           onEdit={(adj) =>
-            adj.type === "CREDIT_NOTE"
-              ? setView({ mode: "creditNote", row: popup.row, adjustment: adj })
+            adj.type === "DEBIT_NOTE"
+              ? setView({ mode: "debitNote", row: popup.row, adjustment: adj })
               : setPopup({ type: "misc", row: popup.row, adjustment: adj })
           }
         />
@@ -1007,13 +1022,13 @@ const PaymentsComp = () => {
           onChanged={refresh}
           onResent={refresh}
           onAdd={(type) =>
-            type === "CREDIT_NOTE"
-              ? setView({ mode: "creditNote", row: popup.row })
+            type === "DEBIT_NOTE"
+              ? setView({ mode: "debitNote", row: popup.row })
               : setPopup({ type: "misc", row: popup.row })
           }
           onEdit={(adj) =>
-            adj.type === "CREDIT_NOTE"
-              ? setView({ mode: "creditNote", row: popup.row, adjustment: adj })
+            adj.type === "DEBIT_NOTE"
+              ? setView({ mode: "debitNote", row: popup.row, adjustment: adj })
               : setPopup({ type: "misc", row: popup.row, adjustment: adj })
           }
         />

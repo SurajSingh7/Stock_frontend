@@ -6,7 +6,7 @@ import { ArrowLeft, Plus, X, Search, AlertTriangle } from "lucide-react";
 import { inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
-/* Credit note — a full page, not a popup, because picking units  */
+/* Debit note — a full page, not a popup, because picking units  */
 /* out of a 40-piece delivery needs room to search and scroll.    */
 /*                                                                */
 /* ONE product at a time, chosen by tab. Stacking every product   */
@@ -33,10 +33,10 @@ const fmtDate = (d) =>
 const MODE = { NONE: "NONE", ALL: "ALL", PICK: "PICK" };
 
 // Mirrors the server: basic at the billed rate, plus that line's GST slab. A
-// credit note that gave back basic only would under-settle by the tax.
+// debit note that gave back basic only would under-settle by the tax.
 const withGst = (basic, gstRate) => basic + (basic * (gstRate || 0)) / 100;
 
-const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
+const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
   const isEdit = !!adjustment;
   const [lines, setLines] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +66,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
     try {
       const qs = isEdit ? `?adjustmentId=${adjustment._id}` : "";
       const res = await fetch(
-        `${API_BACKEND_URL}/stock/payments/${invoice._id}/creditable-items${qs}`,
+        `${API_BACKEND_URL}/stock/payments/${invoice._id}/debit-note-items${qs}`,
         { credentials: "include" }
       );
       const json = await res.json();
@@ -85,13 +85,13 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
             nextPicked[key] = new Set(l.selectedUnitIds.map(String));
             /*
               Reopened as ALL only when the claim really was everything
-              creditable. Defaulting to ALL would silently widen a hand-picked
+              debitable. Defaulting to ALL would silently widen a hand-picked
               claim the moment somebody opened the note to fix its reason.
             */
-            nextModes[key] = l.selectedUnitIds.length === l.creditableQuantity ? MODE.ALL : MODE.PICK;
+            nextModes[key] = l.selectedUnitIds.length === l.debitableQuantity ? MODE.ALL : MODE.PICK;
           } else if (l.selectedQuantity) {
             nextQty[key] = String(l.selectedQuantity);
-            nextModes[key] = l.selectedQuantity === l.creditableQuantity ? MODE.ALL : MODE.PICK;
+            nextModes[key] = l.selectedQuantity === l.debitableQuantity ? MODE.ALL : MODE.PICK;
           }
         });
         setModes(nextModes);
@@ -131,7 +131,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
       const isIndividual = l.trackingMethod === "individual";
 
       let qty = 0;
-      if (mode === MODE.ALL) qty = l.creditableQuantity || 0;
+      if (mode === MODE.ALL) qty = l.debitableQuantity || 0;
       else if (mode === MODE.PICK) {
         qty = isIndividual ? picked[key]?.size || 0 : Number(quantities[key]) || 0;
       }
@@ -183,7 +183,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
 
           if (l.trackingMethod === "individual") {
             /*
-              ALL sends every unit the server said was creditable, so what
+              ALL sends every unit the server said was debitable, so what
               travels is always an explicit list. The server never has to
               re-interpret what "all" meant at the moment the form was open —
               by then another note may have taken some of those units.
@@ -195,7 +195,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
             return ids.length ? { quotationItemId: key, inventoryItemIds: ids } : null;
           }
 
-          const qty = mode === MODE.ALL ? l.creditableQuantity || 0 : Number(quantities[key]) || 0;
+          const qty = mode === MODE.ALL ? l.debitableQuantity || 0 : Number(quantities[key]) || 0;
           return qty > 0 ? { quotationItemId: key, quantity: qty } : null;
         })
         .filter(Boolean);
@@ -216,11 +216,11 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(
-          isEdit ? { ...body, editReason: editReason.trim() } : { ...body, type: "CREDIT_NOTE" }
+          isEdit ? { ...body, editReason: editReason.trim() } : { ...body, type: "DEBIT_NOTE" }
         ),
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save credit note");
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save debit note");
       onDone();
     } catch (e) {
       setError(e.message);
@@ -245,7 +245,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
 
         <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h1 className="text-lg font-semibold tracking-tight text-slate-900">
-            {isEdit ? "Edit credit note" : "Credit note"} · Invoice {invoice.invoiceNumber}
+            {isEdit ? "Edit debit note" : "Debit note"} · Invoice {invoice.invoiceNumber}
           </h1>
           <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
             <span>{invoice.vendorName}</span>
@@ -296,7 +296,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
                       </span>
                       <span className="block text-[11px] text-slate-400">
                         {l.trackingMethod === "individual" ? "Individual" : "Group"} ·{" "}
-                        {l.creditableQuantity} {unitLabel(l.unit)} creditable
+                        {l.debitableQuantity} {unitLabel(l.unit)} debitable
                       </span>
                     </button>
                   );
@@ -432,7 +432,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
               <span className="font-medium tabular-nums text-slate-900">{money(totals.extrasAmount)}</span>
             </div>
             <div className="flex justify-between border-t border-slate-200 pt-1.5 text-base">
-              <span className="font-semibold text-slate-900">Credit note</span>
+              <span className="font-semibold text-slate-900">Debit note</span>
               <span className="font-bold tabular-nums text-slate-900">{money(totals.total)}</span>
             </div>
             <div className="flex justify-between text-xs text-slate-500">
@@ -446,7 +446,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
           {overPayable && (
             <p className="mt-3 flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-inset ring-rose-100">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              A credit note cannot exceed the payable amount ({money(basePayable)}). Reduce the claim or split it across two notes.
+              A debit note cannot exceed the payable amount ({money(basePayable)}). Reduce the claim or split it across two notes.
             </p>
           )}
 
@@ -468,7 +468,7 @@ const CreditNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
               type="button" onClick={submit} disabled={!canSubmit}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
-              {saving ? "Saving…" : isEdit ? "Save changes" : "Apply credit note"}
+              {saving ? "Saving…" : isEdit ? "Save changes" : "Apply debit note"}
             </button>
           </div>
         </div>
@@ -489,7 +489,7 @@ const ProductPanel = ({
   const isIndividual = l.trackingMethod === "individual";
   const term = (search || "").trim().toLowerCase();
   const allAmount =
-    Math.round(withGst((l.creditableQuantity || 0) * (l.rate || 0), l.gstRate) * 100) / 100;
+    Math.round(withGst((l.debitableQuantity || 0) * (l.rate || 0), l.gstRate) * 100) / 100;
 
   // Blocked units stay on screen with their reason. Hiding them would leave
   // someone hunting for stock they can see elsewhere.
@@ -529,7 +529,7 @@ const ProductPanel = ({
             {money(l.rate)} each{l.gstRate > 0 ? ` + ${l.gstRate}% GST` : ""} ·
             {" "}Received {l.receivedQuantity}
             {l.focQuantity > 0 ? ` + ${l.focQuantity} FOC` : ""} ·
-            {" "}{l.creditableQuantity} {unitLabel(l.unit)} still creditable
+            {" "}{l.debitableQuantity} {unitLabel(l.unit)} still debitable
           </p>
         </div>
         {claim.qty > 0 && (
@@ -543,11 +543,11 @@ const ProductPanel = ({
         {radio(MODE.NONE, "Nothing from this product")}
         {radio(
           MODE.ALL,
-          `All ${l.creditableQuantity} creditable ${unitLabel(l.unit) || "units"}`,
-          l.creditableQuantity > 0 ? (
+          `All ${l.debitableQuantity} debitable ${unitLabel(l.unit) || "units"}`,
+          l.debitableQuantity > 0 ? (
             <span className="text-sm font-semibold tabular-nums text-slate-900">{money(allAmount)}</span>
           ) : (
-            <span className="text-xs text-slate-400">nothing creditable</span>
+            <span className="text-xs text-slate-400">nothing debitable</span>
           )
         )}
         {radio(
@@ -566,11 +566,11 @@ const ProductPanel = ({
             </span>
           ) : (
             <input
-              type="number" min="0" max={l.creditableQuantity}
+              type="number" min="0" max={l.debitableQuantity}
               value={quantity}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => onQuantity(e.target.value)}
-              disabled={l.creditableQuantity <= 0}
+              disabled={l.debitableQuantity <= 0}
               placeholder={unitLabel(l.unit)}
               className="w-28 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 disabled:text-slate-400"
             />
@@ -636,4 +636,4 @@ const ProductPanel = ({
   );
 };
 
-export default CreditNoteView;
+export default DebitNoteView;
