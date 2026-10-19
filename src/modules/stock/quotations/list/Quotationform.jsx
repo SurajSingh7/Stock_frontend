@@ -6,6 +6,7 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { ArrowLeft, Plus, Trash2, Star } from "lucide-react";
 import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import WarrantyInput from "@/shared/warranty/WarrantyInput";
+import { usePendingOrders, PendingOrdersInline } from "@/modules/stock/quotations/PendingOrdersNotice";
 import { formatWarrantyShort, isValidWarrantyMonths, WARRANTY_RANGE_MESSAGE } from "@/shared/warranty/warranty";
 
 /* ============================================================= */
@@ -204,6 +205,8 @@ const QuotationForm = () => {
   const router = useRouter();
 
   const [blocks, setBlocks] = useState([]);
+  // Stock already on its way for the categories picked — warned, never blocked.
+  const pendingByCat = usePendingOrders(blocks.map((b) => b.categoryId));
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -432,6 +435,7 @@ const QuotationForm = () => {
                   <Trash2 className="h-3.5 w-3.5" /> Remove
                 </button>
               </div>
+              <PendingOrdersInline group={pendingByCat[String(block.categoryId)]} />
 
               {block.products.length === 0 ? (
                 <p className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-400">

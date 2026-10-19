@@ -302,6 +302,8 @@ const defaultVendor = () => ({
   panNumber: "",
   branchId: "",
   paymentTerms: "",
+  tdsRate: "",
+  parentVendorId: "",
   notes: "",
   contacts: [emptyContact("PRIMARY")],
   address: { fullAddress: "", area: "", city: "", pinCode: "", state: { key: "", name: "", code: "" } },
@@ -312,6 +314,44 @@ const defaultVendor = () => ({
 /* ------------------------------------------------------------------ */
 /* Card 1 — Basic Details (GST verified ⇒ name / PAN / state locked)   */
 /* ------------------------------------------------------------------ */
+
+/*
+  "Main Vendor": the main firm this vendor belongs to (same owner). Lists only
+  main vendors — one level, so a child is never offered — and never itself.
+*/
+const MainVendorField = ({ vendor, setVendor }) => {
+  const [options, setOptions] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BACKEND_URL}/stock/vendors?group=mains&limit=500`, { credentials: "include" });
+        const json = await res.json();
+        if (res.ok && json.success) setOptions((json.data || []).filter((v) => v.isActive !== false));
+      } catch {
+        // Non-fatal — the field just offers nothing to pick.
+      }
+    })();
+  }, []);
+  const selfId = vendor._id ? String(vendor._id) : "";
+  return (
+    <Field label="Main Vendor">
+      <select
+        className={inputCls}
+        value={vendor.parentVendorId ? String(vendor.parentVendorId) : ""}
+        onChange={(e) => setVendor((v) => ({ ...v, parentVendorId: e.target.value }))}
+      >
+        <option value="">— This is a main vendor —</option>
+        {options
+          .filter((o) => String(o._id) !== selfId)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((o) => (
+            <option key={o._id} value={o._id}>{o.name}{o.vendorCode ? ` (${o.vendorCode})` : ""}</option>
+          ))}
+      </select>
+      <p className="text-xs text-slate-400">Pick one when this firm belongs to another vendor&apos;s owner — they show as one group.</p>
+    </Field>
+  );
+};
 
 const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, branches = [], isEdit = false, canChangeBranch = false, branchLabel = "" }) => {
   const [verifying, setVerifying] = useState(false);
@@ -529,6 +569,22 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, br
             ))}
           </select>
         </Field>
+
+        {/* TDS held back on this vendor's invoices, as % of Basic. Taken onto
+            each invoice when it is approved — changing it later does not move
+            invoices already approved. Blank = no TDS. */}
+        <Field label="TDS %" error={errors.tdsRate}>
+          <input
+            type="number" min="0" max="100" step="0.01"
+            className={errors.tdsRate ? inputErrCls : inputCls}
+            value={vendor.tdsRate ?? ""}
+            onChange={(e) => setVendor((v) => ({ ...v, tdsRate: e.target.value }))}
+            placeholder="e.g. 2 (blank = no TDS)"
+          />
+          <p className="text-xs text-slate-400">Deducted on the Basic of each invoice when it is approved.</p>
+        </Field>
+
+        <MainVendorField vendor={vendor} setVendor={setVendor} />
 
         <Field label="Notes">
           <textarea
@@ -1230,6 +1286,10 @@ const validateVendor = (vendor, isEdit = false) => {
   }
 
   if (!vendor.paymentTerms) { f.paymentTerms = "Payment terms is required"; push(f.paymentTerms); }
+  if (vendor.tdsRate !== "" && vendor.tdsRate != null) {
+    const t = Number(vendor.tdsRate);
+    if (!Number.isFinite(t) || t < 0 || t > 100) { f.tdsRate = "TDS % must be between 0 and 100"; push(f.tdsRate); }
+  }
   // Only on edit — that is the only mode where the field is shown. On create
   // the backend fills it from the logged-in user and refuses if they have none.
   if (isEdit && !vendor.branchId) { f.branchId = "Branch is required"; push(f.branchId); }
@@ -1424,6 +1484,8 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
       const payload = {
         ...vendor,
         panNumber: vendor.panNumber?.toUpperCase() || "",
+        tdsRate: Number(vendor.tdsRate) || 0,
+        parentVendorId: vendor.parentVendorId || null,
         gst: { ...vendor.gst, gstNumber: vendor.gst.gstNumber?.toUpperCase() || "" },
         // strip the UI-only categoryName helper
         assignedProducts: vendor.assignedProducts.map((ap) => ({

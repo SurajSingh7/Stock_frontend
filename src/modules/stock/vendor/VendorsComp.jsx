@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import {
   Search, Plus, Pencil, Trash2, RotateCcw, ShieldCheck, ShieldAlert,
-  Building2, Phone, X, ChevronDown, MoreVertical, Eye,
+  Building2, Phone, X, ChevronDown, MoreVertical, Eye, ChevronRight, Users, Info, Mail, CornerDownRight,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
@@ -498,6 +498,67 @@ const RowMenu = ({ items }) => {
 /* Main                                                           */
 /* ============================================================= */
 
+const GroupMemberRow = ({ v, main }) => (
+  <div className={`rounded-xl border px-3 py-2.5 ${v.isCurrent ? "border-indigo-200 bg-indigo-50/50" : "border-slate-200 bg-white"}`}>
+    <div className="flex flex-wrap items-center gap-2">
+      {main ? (
+        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">Main</span>
+      ) : (
+        <CornerDownRight className="h-3.5 w-3.5 text-slate-400" />
+      )}
+      <span className="text-sm font-semibold text-slate-900">{v.name}</span>
+      {v.vendorCode && <span className="text-xs text-slate-400">{v.vendorCode}</span>}
+      {v.isCurrent && <span className="text-[11px] font-semibold text-indigo-600">· this vendor</span>}
+    </div>
+    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+      {v.contactName && <span>{v.contactName}</span>}
+      <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3 text-slate-400" />{v.phone || "—"}</span>
+      <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3 text-slate-400" />{v.email || "—"}</span>
+      {v.gstNumber && <span className="text-slate-400">GST {v.gstNumber}</span>}
+    </div>
+  </div>
+);
+
+
+/* ── A vendor's group: its main vendor and every child firm ───────── */
+/* So when one firm is a problem, the owner's other firms are one     */
+/* click away — with whom to call.                                    */
+const VendorGroupPopup = ({ vendorId, onClose }) => {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${vendorId}/group`, { credentials: "include" });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load the group");
+        setData(json.data);
+      } catch (e) {
+        setError(e.message);
+      }
+    })();
+  }, [vendorId]);
+
+  return (
+    <Modal onClose={onClose} title="Vendor group" maxWidth="max-w-xl">
+      {error ? (
+        <p className="text-sm text-rose-600">{error}</p>
+      ) : !data ? (
+        <p className="py-6 text-center text-sm text-slate-400">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          {data.main && <GroupMemberRow v={data.main} main />}
+          {data.children.length === 0 ? (
+            <p className="px-1 text-sm text-slate-400">No other vendor under this main vendor yet.</p>
+          ) : (
+            <div className="space-y-2 pl-4">{data.children.map((c) => <GroupMemberRow key={c._id} v={c} />)}</div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 const VendorsComp = () => {
   const router = useRouter();
 
@@ -510,6 +571,13 @@ const VendorsComp = () => {
   const [categoryId, setCategoryId] = useState("");
   const [productId, setProductId] = useState("");
   const [status, setStatus] = useState("ACTIVE");
+  // "all" = every vendor in its own row (a child says "under X");
+  // "top" = main / stand-alone vendors, children opened under their main;
+  // "groups" = only main vendors that have child vendors.
+  const [groupView, setGroupView] = useState("all");
+  const [expanded, setExpanded] = useState({});         // mainId -> true
+  const [childrenOf, setChildrenOf] = useState({});     // mainId -> rows | "loading"
+  const [groupPopup, setGroupPopup] = useState(null);   // vendorId
 
   const [categories, setCategories] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
@@ -557,6 +625,9 @@ const VendorsComp = () => {
   const loadVendors = useCallback(async () => {
     setLoading(true);
     setError(null);
+    // A fresh list starts with every group closed.
+    setExpanded({});
+    setChildrenOf({});
     try {
       const params = new URLSearchParams({
         page: String(page),
@@ -566,6 +637,7 @@ const VendorsComp = () => {
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (categoryId) params.set("categoryId", categoryId);
       if (productId) params.set("productId", productId);
+      if (groupView !== "all") params.set("group", groupView);
 
       const res = await fetch(`${API_BACKEND_URL}/stock/vendors?${params.toString()}`, { credentials: "include" });
       const json = await res.json();
@@ -581,7 +653,22 @@ const VendorsComp = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debouncedSearch, categoryId, productId, status]);
+  }, [page, limit, debouncedSearch, categoryId, productId, status, groupView]);
+
+  // Child vendors of one main vendor, fetched when its row is opened.
+  const toggleGroup = async (mainId) => {
+    const open = !expanded[mainId];
+    setExpanded((p) => ({ ...p, [mainId]: open }));
+    if (!open || Array.isArray(childrenOf[mainId])) return;
+    setChildrenOf((p) => ({ ...p, [mainId]: "loading" }));
+    try {
+      const res = await fetch(`${API_BACKEND_URL}/stock/vendors?parentId=${mainId}&limit=200`, { credentials: "include" });
+      const json = await res.json();
+      setChildrenOf((p) => ({ ...p, [mainId]: res.ok && json.success ? json.data || [] : [] }));
+    } catch {
+      setChildrenOf((p) => ({ ...p, [mainId]: [] }));
+    }
+  };
 
   useEffect(() => { loadVendors(); }, [loadVendors]);
 
@@ -623,10 +710,10 @@ const VendorsComp = () => {
     [categories]
   );
 
-  const hasActiveFilters = !!search || !!categoryId || !!productId || status !== "ACTIVE";
+  const hasActiveFilters = !!search || !!categoryId || !!productId || status !== "ACTIVE" || groupView !== "all";
 
   const clearFilters = () => {
-    setSearch(""); setCategoryId(""); setProductId(""); setStatus("ACTIVE"); setPage(1);
+    setSearch(""); setCategoryId(""); setProductId(""); setStatus("ACTIVE"); setGroupView("all"); setPage(1);
   };
 
   return (
@@ -703,6 +790,32 @@ const VendorsComp = () => {
         </div>
       </div>
 
+      {/* Vendor groups: everything, or only main vendors that have child firms. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-slate-700">Show</span>
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
+          {[
+            { key: "all", label: "All Vendors" },
+            { key: "top", label: "Main Vendors" },
+            { key: "groups", label: "Vendor Groups" },
+          ].map((o) => (
+            <button
+              key={o.key} type="button" onClick={() => { setGroupView(o.key); setPage(1); }}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                groupView === o.key ? "bg-slate-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-slate-400">
+          {groupView === "all"
+            ? "Every vendor in its own row; a child firm shows which main vendor it is under."
+            : "Child vendors sit under their main vendor — open ▸ to see them."}
+        </span>
+      </div>
+
       {/* table */}
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-200">
@@ -712,6 +825,7 @@ const VendorsComp = () => {
               <th className={th}>GST Status</th>
               <th className={th}>Phone</th>
               <th className={th}>Payment Term</th>
+              <th className={th}>TDS</th>
               <th className={th}>Assigned Products</th>
               <th className={th}>Status</th>
               <th className={thRight}>Actions</th>
@@ -721,25 +835,70 @@ const VendorsComp = () => {
             {loading ? (
               <SkeletonRows />
             ) : error ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-rose-600">{error}</td></tr>
+              <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-rose-600">{error}</td></tr>
             ) : vendors.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-16 text-center">
+                <td colSpan={8} className="px-4 py-16 text-center">
                   <Building2 className="mx-auto mb-3 h-10 w-10 text-slate-300" />
                   <p className="text-sm font-medium text-slate-700">No vendors found</p>
                   <p className="mt-1 text-sm text-slate-400">Adjust the filters above, or add a new vendor.</p>
                 </td>
               </tr>
             ) : (
-              vendors.map((vendor) => {
+              vendors.flatMap((top) => {
+                const kids = expanded[top._id] ? childrenOf[top._id] : null;
+                return [
+                  { vendor: top, child: false },
+                  ...(kids === "loading" ? [{ loadingFor: top._id }] : (kids || []).map((k) => ({ vendor: k, child: true }))),
+                ];
+              }).map((entry) => {
+                if (entry.loadingFor) {
+                  return (
+                    <tr key={`loading-${entry.loadingFor}`}>
+                      <td colSpan={8} className="bg-slate-50/50 px-10 py-2.5 text-xs text-slate-400">Loading child vendors…</td>
+                    </tr>
+                  );
+                }
+                const { vendor, child } = entry;
                 const primaryContact = vendor.contacts?.find((c) => c.label === "PRIMARY") || vendor.contacts?.[0];
                 const productCount = (vendor.assignedProducts || []).reduce((sum, ap) => sum + (ap.products?.length || 0), 0);
+                const isMain = !vendor.parentVendorId && vendor.childCount > 0;
+                const canExpand = isMain && groupView !== "all";
                 return (
-                  <tr key={vendor._id} className="transition hover:bg-slate-50/60">
-                    <td className="px-4 py-3.5">
-                      <div className="text-sm font-medium text-slate-900">
+                  <tr key={vendor._id} className={`transition hover:bg-slate-50/60 ${child ? "bg-slate-50/40" : ""}`}>
+                    <td className={`py-3.5 pr-4 ${child ? "pl-10" : "pl-4"}`}>
+                      <div className="flex items-center gap-1.5 text-sm font-medium text-slate-900">
+                        {canExpand && (
+                          <button
+                            type="button" onClick={() => toggleGroup(vendor._id)}
+                            title={expanded[vendor._id] ? "Hide child vendors" : "Show child vendors"}
+                            className="rounded-md p-0.5 text-slate-500 transition hover:bg-slate-100"
+                          >
+                            {expanded[vendor._id] ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        )}
+                        {child && <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />}
                         <TruncateText text={vendor.name} title="Vendor name" />
+                        {isMain && (
+                          <button
+                            type="button" onClick={() => setGroupPopup(vendor._id)} title="Vendor group"
+                            className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700 transition hover:bg-violet-200"
+                          >
+                            <Users className="h-3 w-3" /> Main · {vendor.childCount}
+                          </button>
+                        )}
+                        {vendor.parentVendorId && (
+                          <button
+                            type="button" onClick={() => setGroupPopup(vendor._id)} title="See the whole group"
+                            className="rounded-md p-0.5 text-violet-500 transition hover:bg-violet-50"
+                          >
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
+                      {vendor.parentVendorId && !child && vendor.parentVendorName && (
+                        <div className="mt-0.5 text-xs text-violet-600">under {vendor.parentVendorName}</div>
+                      )}
                       {vendor.vendorAlias && (
                         <div className="mt-0.5 text-xs text-slate-400">
                           <TruncateText text={vendor.vendorAlias} max={20} title="Vendor alias" />
@@ -755,6 +914,15 @@ const VendorsComp = () => {
                     </td>
                     <td className="px-4 py-3.5 text-sm text-slate-700">
                       {vendor.paymentTerms?.replace(/_/g, " ") || "—"}
+                    </td>
+                    <td className="px-4 py-3.5 text-sm">
+                      {vendor.tdsRate > 0 ? (
+                        <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                          {vendor.tdsRate}%
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5">
                       {productCount === 0 ? (
@@ -812,6 +980,7 @@ const VendorsComp = () => {
       </div>
 
       {productsPopup && <AssignedProductsPopup vendor={productsPopup} onClose={() => setProductsPopup(null)} />}
+      {groupPopup && <VendorGroupPopup vendorId={groupPopup} onClose={() => setGroupPopup(null)} />}
 
       <ConfirmDeleteModal
         vendor={deleteTarget} deleting={deleting}

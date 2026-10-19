@@ -1,10 +1,10 @@
-import TdsRate from '@/modules/master/tdsRate/TdsRate';
+import FaultyItemsComp from '@/modules/stock/faultyItems/FaultyItemsComp';
 import React from 'react'
 
 const page = () => {
   return (
     <div>
-        <TdsRate/>
+        <FaultyItemsComp/>
     </div>
   )
 }

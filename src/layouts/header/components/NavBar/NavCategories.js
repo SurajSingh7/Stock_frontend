@@ -48,6 +48,14 @@ export const navCategories = [
         moduleKey: "invoice-list",
         action: ["VIEW_MENU"],
       },
+      // Everything debit notes claimed as faulty — its own module, so it can be
+      // given to someone who does not get the Invoice List.
+      {
+        name: "Faulty Items",
+        path: "/stock/faulty-items",
+        moduleKey: "faulty-items",
+        action: ["VIEW_MENU"],
+      },
     ],
   },
 
@@ -274,12 +282,6 @@ export const navCategories = [
         name: "GST Rates",
         path: "/master/gst-rate",
         moduleKey: "gst-rates",
-        action: ["VIEW_MENU"],
-      },
-      {
-        name: "TDS Rates",
-        path: "/master/tds-rate",
-        moduleKey: "tds-rates",
         action: ["VIEW_MENU"],
       },
     ],

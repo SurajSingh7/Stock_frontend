@@ -7,6 +7,7 @@ import { ArrowLeft, Check, X, Pencil } from "lucide-react";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { formatWarrantyShort } from "@/shared/warranty/warranty";
 import { QUOTATION_STATUS_META as STATUS_META } from "@/modules/stock/quotations/quotationStatus";
+import { fetchPendingOrders, PendingOrdersConfirm } from "@/modules/stock/quotations/PendingOrdersNotice";
 
 /* ============================================================= */
 /* Constants — SAME tokens as PurchaseOrderPage                   */
@@ -185,6 +186,8 @@ const ReviewMode = ({ quotation, onDone }) => {
   const [decisions, setDecisions] = useState({});
   const [rowError, setRowError] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  // Open orders for approved categories, shown as a confirm before submitting.
+  const [pendingWarn, setPendingWarn] = useState(null);
   const [error, setError] = useState(null);
 
   const setDecision = (catId, patch) => setDecisions((prev) => ({ ...prev, [catId]: { ...prev[catId], ...patch } }));
@@ -213,9 +216,24 @@ const ReviewMode = ({ quotation, onDone }) => {
   const allDecided = categories.every((c) => decisions[c.categoryId]?.status);
   const allLocked = categories.every((c) => decisions[c.categoryId]?.status && decisions[c.categoryId]?.locked);
 
+  /*
+    Before submitting: if any APPROVED category already has stock on its way
+    (open orders not fully received or closed), say so and ask once. Rejected
+    categories order nothing, so they are not checked.
+  */
   const submit = async () => {
     if (!allDecided) { setError("Every category must be approved or rejected"); return; }
     if (!allLocked) { setError("Finish changing decisions before submitting"); return; }
+    const approvedIds = categories.filter((c) => decisions[c.categoryId]?.status === DECISION.APPROVED).map((c) => c.categoryId);
+    setSubmitting(true);
+    let pending = [];
+    try { pending = await fetchPendingOrders(approvedIds, quotation._id); } catch { pending = []; }
+    setSubmitting(false);
+    if (pending.length) { setPendingWarn(pending); return; }
+    doSubmit();
+  };
+
+  const doSubmit = async () => {
     const payload = categories.map((c) => {
       const d = decisions[c.categoryId];
       return d.status === DECISION.APPROVED
@@ -233,7 +251,7 @@ const ReviewMode = ({ quotation, onDone }) => {
       // Stay on Quotation Approval — go back to the list so it reloads
       // (fresh list + tab counts), rather than navigating away to Tracking Orders.
       router.push("/stock/quotations/approval");
-    } catch (err) { setError(err.message); window.scrollTo({ top: 0, behavior: "smooth" }); } finally { setSubmitting(false); }
+    } catch (err) { setError(err.message); setPendingWarn(null); window.scrollTo({ top: 0, behavior: "smooth" }); } finally { setSubmitting(false); }
   };
 
   return (
@@ -253,6 +271,15 @@ const ReviewMode = ({ quotation, onDone }) => {
       </div>
 
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+
+      {pendingWarn && (
+        <PendingOrdersConfirm
+          groups={pendingWarn}
+          busy={submitting}
+          onCancel={() => setPendingWarn(null)}
+          onConfirm={doSubmit}
+        />
+      )}
 
       {categories.map((cat) => {
         const d = decisions[cat.categoryId] || {};
