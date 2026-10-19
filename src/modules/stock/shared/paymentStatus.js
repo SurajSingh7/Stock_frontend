@@ -54,10 +54,10 @@ export const APPROVAL_STATUS_META = {
 // Null is a real state and needs a word: nothing has been asked for yet.
 export const approvalMeta = (status) =>
   APPROVAL_STATUS_META[status] || {
-    label: "Not Requested",
+    label: "Not Sent",
     chip: "bg-slate-50 text-slate-500 ring-slate-200",
     dot: "bg-slate-300",
-    hint: "No payment approval has been requested for this invoice yet",
+    hint: "Not sent for payment approval yet",
   };
 
 export const PAYMENT_STATE = {

@@ -175,7 +175,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
       if (q < (enteredByKey[k] || 0)) return setError(`${it.productName}: ${enteredByKey[k]} already entered — can't be less`);
     }
     const badCharge = extraCharges.findIndex((c) => !(Number(c.amount) > 0));
-    if (badCharge !== -1) return setError(`Extra charge ${badCharge + 1}: enter an amount greater than 0, or remove it`);
+    if (badCharge !== -1) return setError(`Misc ${badCharge + 1}: enter an amount greater than 0, or remove it`);
 
     const payload = {
       invoiceNumber: invoiceNumber.trim(),
@@ -297,16 +297,16 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
 
               <div className="rounded-xl border border-slate-200 p-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Extra Charges</p>
+                  <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Misc <span className="font-semibold normal-case tracking-normal text-slate-400">(Extra Charges)</span></p>
                   <button
                     type="button" onClick={() => setExtraCharges((p) => [...p, { amount: "", note: "", includeInBilling: true }])}
                     className="rounded-lg border border-blue-300 bg-white px-2.5 py-1 text-xs font-semibold text-blue-600 shadow-sm hover:bg-blue-50"
                   >
-                    + Add Charge
+                    + Add Misc
                   </button>
                 </div>
                 {extraCharges.length === 0 ? (
-                  <p className="text-sm text-slate-400">No extra charges.</p>
+                  <p className="text-sm text-slate-400">No misc (freight, handling…).</p>
                 ) : (
                   <div className="space-y-2">
                     {extraCharges.map((c, idx) => (

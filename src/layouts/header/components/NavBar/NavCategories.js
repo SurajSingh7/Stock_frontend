@@ -85,7 +85,7 @@ export const navCategories = [
         action: ["VIEW_MENU"],
       },
       {
-        name: "Payment Approval",
+        name: "Approvals",
         path: "/stock/payment-approval",
         moduleKey: "payment-approval",
         action: ["VIEW_MENU"],

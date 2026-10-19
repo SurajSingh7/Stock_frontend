@@ -9,9 +9,11 @@ import { paymentTermShort, paymentTermLabel } from "@/modules/stock/shared/payme
 import { APPROVAL_STATUS } from "@/modules/stock/shared/paymentStatus";
 import { usePermissions } from "@/context/PermissionContext";
 import { ADJUSTMENT_META } from "@/modules/stock/invoiceList/AdjustmentPopups";
+import DebitNoteQueue from "@/modules/stock/invoiceList/DebitNoteQueue";
 
 /* ============================================================= */
-/* Payment Approval — the approval team's screen.                 */
+/* Approvals — the approval team's screen: payments, and debit    */
+/* notes that have passed review (their own tab).                 */
 /*                                                                */
 /* Read and decide, nothing else. This team holds no action that   */
 /* can change a payable: they agree to a number accounts computed, */
@@ -56,7 +58,13 @@ const DecisionPopup = ({ row, onClose, onDone }) => {
     try {
       const res = await fetch(`${API_BACKEND_URL}/stock/payment-approval/${row._id}/adjustments`, { credentials: "include" });
       const json = await res.json();
-      setAdjustments(res.ok && json.success ? json.data || [] : []);
+      // Only what is in the payable: misc charges and APPROVED debit notes.
+      // One still in review/approval is not part of this number.
+      setAdjustments(
+        res.ok && json.success
+          ? (json.data || []).filter((a) => a.type !== "DEBIT_NOTE" || !a.status || a.status === "APPROVED")
+          : []
+      );
     } catch {
       // Non-fatal — the totals above still tell the whole money story.
       setAdjustments([]);
@@ -163,6 +171,28 @@ const DecisionPopup = ({ row, onClose, onDone }) => {
           )}
       </div>
 
+      {/* A resend: the reason it was sent back, and what accounts say about it. */}
+      {(row.paymentApproval?.previousRejectedReason || row.paymentApproval?.sentNote) && (
+        <div className="mb-4 space-y-2">
+          {row.paymentApproval?.previousRejectedReason && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50/60 px-3 py-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-rose-600">
+                Sent back earlier{row.paymentApproval.previousRejectedByName ? ` by ${row.paymentApproval.previousRejectedByName}` : ""}
+              </p>
+              <p className="mt-0.5 text-sm text-rose-900">{row.paymentApproval.previousRejectedReason}</p>
+            </div>
+          )}
+          {row.paymentApproval?.sentNote && (
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-indigo-600">
+                Note from {row.paymentApproval?.sentByName || "accounts"}
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap text-sm text-indigo-950">{row.paymentApproval.sentNote}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mb-4 text-xs text-slate-500">
         Sent by {row.paymentApproval?.sentByName || "—"} · {fmtDateTime(row.paymentApproval?.sentAt)}
       </div>
@@ -224,6 +254,26 @@ const PaymentApprovalComp = () => {
     const mod = (permissions || []).find((m) => m.moduleKey === "payment-approval");
     return (mod?.actions || []).map((a) => String(a).toUpperCase()).includes("APPROVE");
   }, [permissions, isAdmin]);
+  const canApproveDn = useMemo(() => {
+    if (isAdmin) return true;
+    const mod = (permissions || []).find((m) => m.moduleKey === "payment-approval");
+    return (mod?.actions || []).map((a) => String(a).toUpperCase()).includes("APPROVE_DEBIT_NOTE");
+  }, [permissions, isAdmin]);
+
+  // Payments, or debit notes waiting on approval.
+  const [section, setSection] = useState("payments");
+  const [dnCounts, setDnCounts] = useState({});
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BACKEND_URL}/stock/payment-approval-debit-notes?limit=1&status=APPROVAL_PENDING`, { credentials: "include" });
+        const j = await r.json();
+        if (j.success) setDnCounts(j.data?.counts || {});
+      } catch {
+        // Non-fatal — the badge just stays empty.
+      }
+    })();
+  }, []);
 
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({});
@@ -287,11 +337,33 @@ const PaymentApprovalComp = () => {
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Payment approval</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Approvals</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          Approve or send back what accounts have asked to pay. Each request shows how its payable was reached.
+          Approve or reject what accounts have asked to pay, and debit notes that have passed review.
         </p>
       </div>
+
+      <div className="mb-5 flex gap-1 border-b border-slate-200">
+        {[
+          { key: "payments", label: "Payments", badge: counts.PENDING },
+          { key: "dn", label: "Debit Notes", badge: dnCounts.APPROVAL_PENDING },
+        ].map((t) => (
+          <button
+            key={t.key} type="button" onClick={() => setSection(t.key)}
+            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+              section === t.key ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {t.label}
+            {t.badge > 0 && <span className="rounded-full bg-amber-100 px-1.5 text-xs tabular-nums text-amber-700">{t.badge}</span>}
+          </button>
+        ))}
+      </div>
+
+      {section === "dn" ? (
+        <DebitNoteQueue mode="approval" canAct={canApproveDn} onCounts={setDnCounts} />
+      ) : (
+      <>
 
       {error && (
         <div className="mb-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -412,6 +484,16 @@ const PaymentApprovalComp = () => {
                   <td className={td}>
                     <span className="block">{r.paymentApproval?.sentByName || "—"}</span>
                     <span className="text-[11px] text-slate-400">{fmtDate(r.paymentApproval?.sentAt)}</span>
+                    {r.paymentApproval?.previousRejectedReason && (
+                      <span className="mt-0.5 block w-fit rounded-full bg-orange-50 px-2 py-0.5 text-[10px] font-semibold text-orange-700 ring-1 ring-inset ring-orange-200">
+                        Resent
+                      </span>
+                    )}
+                    {r.paymentApproval?.sentNote && (
+                      <span className="mt-0.5 block max-w-[200px] truncate text-[11px] text-indigo-600" title={r.paymentApproval.sentNote}>
+                        “{r.paymentApproval.sentNote}”
+                      </span>
+                    )}
                   </td>
                   <td className={tdRight}>
                     <button
@@ -437,6 +519,9 @@ const PaymentApprovalComp = () => {
           onItemsPerPageChange={(n) => { setLimit(n); setPage(1); }}
         />
       </div>
+
+      </>
+      )}
 
       {deciding && <DecisionPopup row={deciding} onClose={() => setDeciding(null)} onDone={refresh} />}
     </div>

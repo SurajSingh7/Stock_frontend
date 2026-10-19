@@ -23,6 +23,10 @@ import { inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI
 /* Individual: WHICH units (by serial / MAC). Group: HOW MUCH.    */
 /* The server decides what is claimable; this page only renders   */
 /* what it was told and sends back what was picked.               */
+/*                                                                */
+/* Raised from the Invoice List and submitted for REVIEW. Editing  */
+/* is only for a note sent back in review (Review Rejected) — it    */
+/* goes back to Review Pending when resubmitted.                    */
 /* ============================================================= */
 
 const fmtDate = (d) =>
@@ -66,7 +70,7 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
     try {
       const qs = isEdit ? `?adjustmentId=${adjustment._id}` : "";
       const res = await fetch(
-        `${API_BACKEND_URL}/stock/payments/${invoice._id}/debit-note-items${qs}`,
+        `${API_BACKEND_URL}/stock/invoice-list/${invoice._id}/debit-note-items${qs}`,
         { credentials: "include" }
       );
       const json = await res.json();
@@ -166,9 +170,12 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
     [lines, lineClaim]
   );
 
-  // While editing, the payable already has the OLD figure taken off it — so
-  // the ceiling has to add that back before comparing.
-  const basePayable = (invoice.payable || 0) + (isEdit ? adjustment.amount || 0 : 0);
+  // A note not yet approved is not in the payable, new or being edited.
+  const basePayable = invoice.payable || 0;
+  // Why it came back, for a note being edited after review.
+  const sentBack = isEdit
+    ? [...(adjustment.history || [])].reverse().find((h) => h.action === "REVIEW_REJECTED") || null
+    : null;
   const overPayable = totals.total > basePayable;
   const canSubmit = !saving && totals.total > 0 && !!reason.trim() && !overPayable;
 
@@ -208,16 +215,14 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
         reason: reason.trim(),
       };
       const url = isEdit
-        ? `${API_BACKEND_URL}/stock/payments/adjustments/${adjustment._id}`
-        : `${API_BACKEND_URL}/stock/payments/${invoice._id}/adjustments`;
+        ? `${API_BACKEND_URL}/stock/invoice-list/debit-notes/${adjustment._id}/resubmit`
+        : `${API_BACKEND_URL}/stock/invoice-list/${invoice._id}/debit-notes`;
 
       const res = await fetch(url, {
         method: isEdit ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(
-          isEdit ? { ...body, editReason: editReason.trim() } : { ...body, type: "DEBIT_NOTE" }
-        ),
+        body: JSON.stringify(isEdit ? { ...body, editNote: editReason.trim() } : body),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to save debit note");
@@ -245,7 +250,7 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
 
         <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h1 className="text-lg font-semibold tracking-tight text-slate-900">
-            {isEdit ? "Edit debit note" : "Debit note"} · Invoice {invoice.invoiceNumber}
+            {isEdit ? `Edit & resubmit DN-${adjustment.dnNumber}` : "New debit note"} · Invoice {invoice.invoiceNumber}
           </h1>
           <div className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500">
             <span>{invoice.vendorName}</span>
@@ -254,6 +259,13 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
             <span>Payable <strong className="text-slate-900">{money(basePayable)}</strong></span>
           </div>
         </div>
+
+        {sentBack && (
+          <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+            <span className="font-semibold">Sent back in review</span>
+            {sentBack.byName ? ` by ${sentBack.byName}` : ""}: {sentBack.note || "—"}
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -436,7 +448,7 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
               <span className="font-bold tabular-nums text-slate-900">{money(totals.total)}</span>
             </div>
             <div className="flex justify-between text-xs text-slate-500">
-              <span>Payable after this</span>
+              <span>Payable if approved</span>
               <span className="tabular-nums">
                 {money(basePayable)} &rarr; {money(Math.max(0, basePayable - totals.total))}
               </span>
@@ -452,8 +464,9 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
 
           {totalUnits > 0 && (
             <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
-              {totalUnits} inventory {totalUnits === 1 ? "unit" : "units"} will be marked faulty and leave available stock
-              {isEdit ? ". Units dropped from this note go back to available." : " as soon as this is saved."}
+              {totalUnits} inventory {totalUnits === 1 ? "unit" : "units"} will be held out of available stock while this
+              is reviewed and approved. They go back to available if it is rejected in approval or withdrawn
+              {isEdit ? "; units dropped from this note go back now." : "."}
             </p>
           )}
 
@@ -468,7 +481,7 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
               type="button" onClick={submit} disabled={!canSubmit}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
-              {saving ? "Saving…" : isEdit ? "Save changes" : "Apply debit note"}
+              {saving ? "Submitting…" : isEdit ? "Resubmit for review" : "Submit for review"}
             </button>
           </div>
         </div>

@@ -5,7 +5,7 @@ import { Info } from "lucide-react";
 import { Modal, money } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
-/* Tax breakup — Basic, +Extra, CGST, SGST, IGST, GST behind one  */
+/* Tax breakup — Basic, CGST, SGST, IGST, GST behind one          */
 /* Billing figure.                                                */
 /*                                                                */
 /* Not columns on the Vendor Outstanding Overview (or its invoice */
@@ -37,7 +37,7 @@ const Line = ({ label, value, tone = "text-slate-900", strong }) => (
   </div>
 );
 
-/* b: { basic, extra, cgst, sgst, igst, gst, billing } */
+/* b: { basic, cgst, sgst, igst, gst, billing } — Billing is Basic + GST; misc sits outside it. */
 export const BillingBreakupPopup = ({ title, subtitle, b, onClose }) => (
   <Modal onClose={onClose} maxWidth="max-w-sm">
     <div className="mb-3 flex items-start justify-between gap-3">
@@ -49,7 +49,6 @@ export const BillingBreakupPopup = ({ title, subtitle, b, onClose }) => (
     </div>
     <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-3">
       <Line label="Basic" value={b.basic} />
-      <Line label="+ Extra" value={b.extra} tone="text-slate-700" />
       <Line label="CGST" value={b.cgst} tone="text-violet-700" />
       <Line label="SGST" value={b.sgst} tone="text-violet-700" />
       <Line label="IGST" value={b.igst} tone="text-violet-700" />

@@ -123,9 +123,9 @@ const BillingReportComp = () => {
             <Tile icon={Users} label="Vendors" value={totals.vendors ?? 0} tone="border-slate-200 bg-white text-slate-700" />
             <Tile icon={Receipt} label="Invoices" value={totals.invoiceCount ?? 0} tone="border-slate-200 bg-white text-slate-700" />
             <Tile icon={IndianRupee} label="Basic" value={money(totals.basic || 0)} tone="border-slate-200 bg-white text-slate-700" />
-            <Tile icon={PlusCircle} label="Extra" value={money(totals.extraCharges || 0)} tone="border-slate-200 bg-white text-slate-700" />
             <Tile icon={Percent} label="GST" value={money(totals.gst || 0)} tone="border-violet-200 bg-violet-50 text-violet-700" />
             <Tile icon={Receipt} label="Billing" value={money(totals.billing || 0)} tone="border-blue-200 bg-blue-50 text-blue-700" />
+            <Tile icon={PlusCircle} label="Misc" value={money(totals.misc || 0)} tone="border-sky-200 bg-sky-50 text-sky-700" />
           </div>
         }
       />
@@ -169,15 +169,12 @@ const BillingReportComp = () => {
                   names on one screen is how a reader starts doubting both. */}
               <th className={thRight}>Invoices</th>
               <th className={thRight}>Basic</th>
-              {/* Billing is (Basic + Extra) + GST. Without this column any
-                  invoice carrying freight leaves an unexplained gap and the
-                  row simply does not add up. */}
-              <th className={thRight}>+Extra</th>
               <th className={thRight}>CGST</th>
               <th className={thRight}>SGST</th>
               <th className={thRight}>IGST</th>
               <th className={thRight}>GST</th>
               <th className={thRight}>Billing</th>
+              <th className={thRight}>Misc</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -212,7 +209,6 @@ const BillingReportComp = () => {
                       </span>
                     </td>
                     <td className={tdRight}>{num(r.basic)}</td>
-                    <td className={tdRight}>{num(r.extraCharges, "text-slate-600")}</td>
                     {/* CGST/SGST blank on an inter-state vendor, IGST blank on an
                         intra-state one. Both columns stay on screen so the
                         difference is visible rather than inferred. */}
@@ -221,6 +217,7 @@ const BillingReportComp = () => {
                     <td className={tdRight}>{num(r.igst)}</td>
                     <td className={tdRight}>{num(gst, "text-violet-700")}</td>
                     <td className={tdRight}>{num(r.billing, "font-bold text-blue-700")}</td>
+                    <td className={tdRight}>{num(r.misc, "text-sky-700")}</td>
                   </tr>
                 );
               })
@@ -232,12 +229,12 @@ const BillingReportComp = () => {
                 <td className={tdSticky + " font-bold text-slate-900"}>TOTAL</td>
                 <td className={tdRight + " font-bold"}>{totals.invoiceCount || 0}</td>
                 <td className={tdRight + " font-semibold"}>{money(totals.basic || 0)}</td>
-                <td className={tdRight + " font-semibold"}>{money(totals.extraCharges || 0)}</td>
                 <td className={tdRight + " font-semibold"}>{money(totals.cgst || 0)}</td>
                 <td className={tdRight + " font-semibold"}>{money(totals.sgst || 0)}</td>
                 <td className={tdRight + " font-semibold"}>{money(totals.igst || 0)}</td>
                 <td className={tdRight + " font-bold text-violet-700"}>{money(totals.gst || 0)}</td>
                 <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
+                <td className={tdRight + " font-bold text-sky-700"}>{money(totals.misc || 0)}</td>
               </tr>
             </tfoot>
           )}
@@ -250,10 +247,9 @@ const BillingReportComp = () => {
       </div>
 
       <FootNote>
-        Every column here follows the period above. Billing is (Basic + Extra) + GST, as the vendor billed
-        it — Extra is freight, handling and anything else outside the item lines, which is why it is not
-        taxed with them. Click the info icon on any invoice count to see the invoices behind it. TDS, debit
-        notes, misc charges and what is still due come after the bill — see Vendor Outstanding Overview.
+        Every column here follows the period above. Billing is Basic + GST; Misc is the invoice&apos;s extra
+        charges (freight, handling…), shown beside it and added after it. Click the info icon on any invoice count to see the invoices behind it. TDS, debit
+        notes and what is still due come after the bill — see Vendor Outstanding Overview.
       </FootNote>
     </div>
   );

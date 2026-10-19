@@ -188,11 +188,11 @@ const InvoiceDetailPopup = ({ row: r, onClose, onCalculation }) => {
         </table>
       </div>
 
-      {/* Extra charges sit outside the item lines and are not taxed with them,
-          which is why they are listed separately rather than folded in. */}
+      {/* Misc (the invoice's extra charges) sits outside the item lines and
+          outside Billing — it is added after it. */}
       {(r.extraCharges || []).length > 0 && (
         <>
-          <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-wider text-slate-700">Extra charges</p>
+          <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-wider text-slate-700">Misc</p>
           <div className="space-y-1">
             {r.extraCharges.map((c, i) => (
               <div key={i} className={`flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm ${c.includeInBilling === false ? "opacity-60" : ""}`}>
@@ -210,15 +210,12 @@ const InvoiceDetailPopup = ({ row: r, onClose, onCalculation }) => {
       {/* The summary, in the order the arithmetic runs. */}
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl bg-slate-50 px-4 py-3 text-sm">
         <Bit label="Basic" value={money(r.totals.basicAmount)} />
-        {r.totals.extraChargesTotal > 0 && (
-          <Bit lead="+ " label="Extra" value={money(r.totals.extraChargesTotal)} />
-        )}
         <Bit lead="+ " label="GST" value={money(r.totals.gstAmount)} tone="text-violet-700" />
         <Bit lead="= " label="Billing" value={money(r.totals.grandTotal)} tone="text-blue-700" />
-        {r.totals.tdsAmount > 0 && <Bit lead="− " label={`TDS ${r.totals.tdsRate}%`} value={money(r.totals.tdsAmount)} tone="text-amber-700" />}
-        {r.debitTotal > 0 && <Bit lead="− " label="Debit" value={money(r.debitTotal)} tone="text-rose-700" />}
         {r.miscTotal > 0 && <Bit lead="+ " label="Misc" value={money(r.miscTotal)} tone="text-sky-700" />}
-        <Bit lead="= " label="Payable" value={money(r.payable)} />
+        {r.totals.tdsAmount > 0 && <Bit lead="− " label={`TDS ${r.totals.tdsRate}%`} value={money(r.totals.tdsAmount)} tone="text-amber-700" />}
+        {r.debitTotal > 0 && <Bit lead="− " label="Debit Notes" value={money(r.debitTotal)} tone="text-rose-700" />}
+        <Bit lead="= " label="Net Payable" value={money(r.payable)} />
         <Bit lead="− " label="Paid" value={money(r.paidTotal)} tone="text-emerald-700" />
         <span className="ml-auto font-semibold text-slate-500">
           Outstanding{" "}
@@ -323,9 +320,9 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
           {isBilling ? (
             <>
               <Tile icon={Receipt} label="Basic" value={money(totals.basic || 0)} tone="border-slate-200 bg-white text-slate-700" />
-              <Tile icon={Receipt} label="Extra" value={money(totals.extraCharges || 0)} tone="border-slate-200 bg-white text-slate-700" />
               <Tile icon={Percent} label="GST" value={money(totals.gst || 0)} tone="border-violet-200 bg-violet-50 text-violet-700" />
               <Tile icon={Receipt} label="Billing" value={money(totals.billing || 0)} tone="border-blue-200 bg-blue-50 text-blue-700" />
+              <Tile icon={Receipt} label="Misc" value={money(totals.misc || 0)} tone="border-sky-200 bg-sky-50 text-sky-700" />
             </>
           ) : (
             <>
@@ -350,11 +347,11 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
               {isBilling ? (
                 <>
                   <th className={thRight}>Basic</th>
-                  <th className={thRight}>+Extra</th>
                   <th className={thRight}>CGST</th>
                   <th className={thRight}>SGST</th>
                   <th className={thRight}>IGST</th>
                   <th className={thRight}>Billing</th>
+                  <th className={thRight}>Misc</th>
                 </>
               ) : (
                 <>
@@ -403,14 +400,11 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                     {isBilling ? (
                       <>
                         <td className={tdRight}>{num(r.totals.basicAmount)}</td>
-                        {/* The column that makes the row add up: Billing is
-                            (basic + extra) + GST, and without this one any
-                            invoice carrying freight looks like an error. */}
-                        <td className={tdRight}>{num(r.totals.extraChargesTotal, "text-slate-600")}</td>
                         <td className={tdRight}>{num(r.totals.cgstAmount)}</td>
                         <td className={tdRight}>{num(r.totals.sgstAmount)}</td>
                         <td className={tdRight}>{num(r.totals.igstAmount)}</td>
                         <td className={tdRight}>{num(r.totals.grandTotal, "font-bold text-blue-700")}</td>
+                        <td className={tdRight}>{num(r.miscTotal, "text-sky-700")}</td>
                       </>
                     ) : (
                       <>
@@ -420,7 +414,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                             onInfo={() => setBreakupRow({
                               title: r.invoiceNumber,
                               b: {
-                                basic: r.totals.basicAmount, extra: r.totals.extraChargesTotal,
+                                basic: r.totals.basicAmount,
                                 cgst: r.totals.cgstAmount, sgst: r.totals.sgstAmount, igst: r.totals.igstAmount,
                                 gst: r.totals.gstAmount, billing: r.totals.grandTotal,
                               },
@@ -464,7 +458,6 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                 {isBilling ? (
                   <>
                     <td className={tdRight + " font-semibold"}>{money(totals.basic || 0)}</td>
-                    <td className={tdRight + " font-semibold"}>{money(totals.extraCharges || 0)}</td>
                     {/* The per-tax split is not totalled: the endpoint returns
                         one combined GST figure, and inventing a CGST/SGST split
                         for the footer would be a number nothing computed. */}
@@ -472,6 +465,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
                       GST {money(totals.gst || 0)}
                     </td>
                     <td className={tdRight + " font-bold text-blue-700"}>{money(totals.billing || 0)}</td>
+                    <td className={tdRight + " font-bold text-sky-700"}>{money(totals.misc || 0)}</td>
                   </>
                 ) : (
                   <>
@@ -500,7 +494,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
       <FootNote>
         {!isBilling
           ? "Invoices dated in the period the summary was showing; every figure is as on today. Net Payable is Billing + Misc − TDS − Debit Notes, and Net Payable − Paid − Written Off = Balance Due. The info icon beside an invoice number opens its item lines; Calculation opens the full working."
-          : "Billing is (Basic + Extra) + GST, as the vendor billed it. Extra charges are freight, handling and anything else the invoice carried outside the item lines — they are not taxed with the items, which is why they sit in their own column. The info icon beside an invoice number opens its item lines; Calculation opens the full working. The TOTAL row covers every page, not just this one."}
+          : "Billing is Basic + GST. Misc is the invoice's extra charges (freight, handling…) and is added after Billing. The info icon beside an invoice number opens its item lines; Calculation opens the full working. The TOTAL row covers every page, not just this one."}
       </FootNote>
 
       {breakupRow && (

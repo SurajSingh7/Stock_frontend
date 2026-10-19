@@ -596,7 +596,7 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
       </div>
       {invoice.extraCharges?.length > 0 && (
         <div className="mt-4">
-          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Extra Charges</p>
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Misc (Extra Charges)</p>
           <ul className="space-y-1 text-sm text-slate-700">
             {invoice.extraCharges.map((c, i) => (
               <li key={i} className={`flex items-center justify-between gap-2 ${c.includeInBilling === false ? "text-slate-400" : ""}`}>
@@ -663,14 +663,16 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
 const PriceBreakupPopup = ({ invoice, onClose }) => {
   const now = invoice.atEntered || invoice;
   const full = invoice;
-  const diff = Math.round(((invoice.invoiceAmount || 0) - (full.grandTotal || 0)) * 100) / 100;
+  // Checked against Billing + Misc — the vendor's total includes the misc.
+  const diff = Math.round(((invoice.invoiceAmount || 0) - (full.invoiceTotal ?? full.grandTotal ?? 0)) * 100) / 100;
   const complete = (invoice.qtyReceived || 0) === (invoice.qtyInvoiced || 0);
   const rows = [
     ["Basic Price", "basicAmount"],
     ["CGST", "cgstAmount"],
     ["SGST", "sgstAmount"],
     ["IGST", "igstAmount"],
-    ["Extra charges", "extraChargesTotal"],
+    ["Billing (Basic + GST)", "grandTotal"],
+    ["+ Misc", "miscTotal"],
   ];
   const cell = (v) => (v ? money(v) : "—");
   return (
@@ -693,8 +695,8 @@ const PriceBreakupPopup = ({ invoice, onClose }) => {
           ))}
           <tr className="border-t-2 border-slate-200 font-semibold">
             <td className="py-2 text-slate-900">Total (PO rates)</td>
-            {!complete && <td className="py-2 text-right tabular-nums text-slate-600">{money(now.grandTotal)}</td>}
-            <td className="py-2 text-right tabular-nums text-slate-900">{money(full.grandTotal)}</td>
+            {!complete && <td className="py-2 text-right tabular-nums text-slate-600">{money(now.invoiceTotal ?? now.grandTotal)}</td>}
+            <td className="py-2 text-right tabular-nums text-slate-900">{money(full.invoiceTotal ?? full.grandTotal)}</td>
           </tr>
         </tbody>
       </table>
@@ -938,7 +940,7 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, canP
                 <td className={invTdRight}>{money(inv.invoiceAmount)}</td>
                 <td className={`${invTdRight} font-semibold text-slate-900`}>
                   <span className="inline-flex items-center justify-end gap-1">
-                    {money(inv.grandTotal)}
+                    {money(inv.invoiceTotal ?? inv.grandTotal)}
                     <button
                       type="button" onClick={() => onPriceInfo(inv)} title="Price breakup"
                       className="rounded p-0.5 text-slate-400 transition hover:bg-indigo-50 hover:text-indigo-600"

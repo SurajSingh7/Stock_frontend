@@ -314,9 +314,6 @@ const InvoiceBreakupComp = () => {
                     the result; the Calculation page is for following it. */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 bg-slate-50/60 px-5 py-2.5 text-xs">
                   <span className="text-slate-500">Basic <strong className="text-slate-900">{money(r.totals.basicAmount)}</strong></span>
-                  {r.totals.extraChargesTotal > 0 && (
-                    <span className="text-slate-500">+ Extra <strong className="text-slate-900">{money(r.totals.extraChargesTotal)}</strong></span>
-                  )}
                   <span className="text-slate-500">+ GST <strong className="text-violet-700">{money(r.totals.gstAmount)}</strong></span>
                   <span className="text-slate-500">= Billing <strong className="text-blue-700">{money(r.totals.grandTotal)}</strong></span>
                   {r.miscTotal > 0 && (

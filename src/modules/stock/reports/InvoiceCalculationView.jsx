@@ -217,9 +217,6 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
               </p>
             )}
 
-            {(r.extraCharges || []).filter((c) => c.includeInBilling !== false).map((c, i) => (
-              <Step key={i} label={`+ ${c.note || "Extra charge"}`} amount={money(c.amount)} tone="text-slate-600" />
-            ))}
 
             {/* The REASON for the tax split, not just the amount. Whether an
                 invoice carries IGST or CGST+SGST depends on the vendor's state
@@ -241,7 +238,12 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
             )}
 
             <Rule />
-            <Step label="BILLING" amount={money(r.totals.grandTotal)} strong tone="text-slate-900" />
+            <Step label="BILLING" amount={money(r.totals.grandTotal)} formula="Basic + GST" strong tone="text-slate-900" />
+
+            {/* Misc: the invoice's own extra charges, after Billing. */}
+            {(r.extraCharges || []).filter((c) => c.includeInBilling !== false).map((c, i) => (
+              <Step key={`m${i}`} label={`+ Misc · ${c.note || "—"}`} amount={`+${money(c.amount)}`} tone="text-sky-700" />
+            ))}
 
             {miscs.map((a) => (
               <Step
@@ -275,7 +277,7 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
               />
             ))}
 
-            {(debits.length > 0 || miscs.length > 0 || r.totals.tdsAmount > 0) && <Rule />}
+            {(debits.length > 0 || miscs.length > 0 || r.totals.tdsAmount > 0 || (r.totals.miscTotal || 0) > 0) && <Rule />}
             <Step label="NET PAYABLE" amount={money(r.payable)} strong tone="text-slate-900" />
 
             {/* Recorded on the invoice but deliberately left out of the bill —
@@ -285,7 +287,7 @@ const InvoiceCalculationView = ({ row: r, onBack }) => {
                 <Rule />
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Not billed · note only</p>
                 {r.extraCharges.filter((c) => c.includeInBilling === false).map((c, i) => (
-                  <Step key={i} label={c.note || "Extra charge"} amount={money(c.amount)} tone="text-slate-400" />
+                  <Step key={i} label={c.note || "Misc"} amount={money(c.amount)} tone="text-slate-400" />
                 ))}
               </>
             )}

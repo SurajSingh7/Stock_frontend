@@ -424,7 +424,7 @@ const AccountSummaryComp = () => {
                         value={r.billing}
                         onInfo={() => setBreakupRow({
                           title: r.vendorName,
-                          b: { basic: r.basic, extra: r.extraCharges, cgst: r.cgst, sgst: r.sgst, igst: r.igst, gst, billing: r.billing },
+                          b: { basic: r.basic, cgst: r.cgst, sgst: r.sgst, igst: r.igst, gst, billing: r.billing },
                         })}
                       />
                     </td>
@@ -482,7 +482,7 @@ const AccountSummaryComp = () => {
                     onInfo={() => setBreakupRow({
                       title: "All vendors",
                       b: {
-                        basic: totals.basic, extra: totals.extraCharges, cgst: totals.cgst,
+                        basic: totals.basic, cgst: totals.cgst,
                         sgst: totals.sgst, igst: totals.igst, gst: totals.gst, billing: totals.billing,
                       },
                     })}

@@ -616,7 +616,9 @@ const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
   // The whole bill — for an entry review the server sends it separately.
   const invoiceLines = invoice?.invoiceLines || invoice?.lines || [];
   const glance = invoice?.entry ? invoice.glance : null;
-  const amountDiff = round2((invoice?.invoiceAmount || 0) - (invoice?.grandTotal || 0));
+  // Billing + Misc is what the vendor's invoice adds up to.
+  const invoiceTotal = invoice?.invoiceTotal ?? invoice?.grandTotal ?? 0;
+  const amountDiff = round2((invoice?.invoiceAmount || 0) - invoiceTotal);
   const fileUrl = invoice?.invoiceFile ? `${API_BACKEND_URL.replace(/\/api\/v1$/, "")}${invoice.invoiceFile}` : "";
 
   return (
@@ -654,15 +656,15 @@ const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
         </div>
       )}
 
-      {glance && <BillGlance glance={glance} grandTotal={invoice?.grandTotal} currentEntryId={invoice?.entry?._id} entryStatus={invoice?.entry?.status} />}
+      {glance && <BillGlance glance={glance} grandTotal={invoiceTotal} currentEntryId={invoice?.entry?._id} entryStatus={invoice?.entry?.status} />}
 
       {isPending && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           {glance && (
             <p className="mb-3 rounded-lg bg-indigo-50/70 px-3 py-2 text-xs text-indigo-800">
               {glance.firstApproval
-                ? `Approving this entry accepts the whole bill (${money(invoice?.grandTotal)}) into the vendor ledger.`
-                : `This bill (${money(invoice?.grandTotal)}) is already in the vendor ledger — approving this entry adds its stock only, not money.`}
+                ? `Approving this entry accepts the whole bill (${money(invoiceTotal)}) into the vendor ledger.`
+                : `This bill (${money(invoiceTotal)}) is already in the vendor ledger — approving this entry adds its stock only, not money.`}
             </p>
           )}
           {!rejecting ? (
@@ -771,7 +773,7 @@ const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
           <div className="space-y-2 border-t border-slate-100 px-5 py-3 text-sm text-slate-700">
             {invoice?.extraCharges?.length > 0 && (
               <p>
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Extra charges: </span>
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Misc: </span>
                 {invoice.extraCharges.map((c, i) => (
                   <span key={i} className={c.includeInBilling === false ? "text-slate-400" : ""}>
                     {i > 0 && " · "}{c.note || "Charge"} {money(c.amount)}
@@ -802,9 +804,12 @@ const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
                 <div className="flex justify-between text-slate-600"><span>SGST</span><span className="tabular-nums">{money(invoice?.sgstAmount)}</span></div>
               </>
             )}
-            <div className="flex justify-between text-slate-600"><span>Extra</span><span className="tabular-nums">{money(invoice?.extraChargesTotal)}</span></div>
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 font-semibold text-slate-800">
+              <span>Billing</span><span className="tabular-nums">{money(invoice?.grandTotal)}</span>
+            </div>
+            <div className="flex justify-between text-slate-600"><span>+ Misc</span><span className="tabular-nums">{money(invoice?.miscTotal ?? invoice?.extraChargesTotal)}</span></div>
             <div className="flex justify-between border-t border-slate-200 pt-1.5 font-bold text-slate-900">
-              <span>Total (PO rates)</span><span className="tabular-nums">{money(invoice?.grandTotal)}</span>
+              <span>Total (PO rates)</span><span className="tabular-nums">{money(invoiceTotal)}</span>
             </div>
             <div className="flex justify-between text-slate-700"><span>Amount on invoice</span><span className="tabular-nums">{money(invoice?.invoiceAmount)}</span></div>
             <div className={`flex justify-between font-semibold ${Math.abs(amountDiff) > 1 ? "text-rose-600" : "text-emerald-700"}`}>

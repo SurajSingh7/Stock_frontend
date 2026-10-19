@@ -176,7 +176,9 @@ export const MiscChargePopup = ({ invoice, adjustment = null, onClose, onDone })
 /* uses this to explain why payable differs from the invoice;     */
 /* changing any of it happens on the Payments screen.             */
 /* ============================================================= */
-export const AdjustmentHistoryPopup = ({ invoice, basePath = "invoice-list", onClose }) => {
+// `type` narrows it to one kind (the Invoice List shows misc charges here;
+// debit notes have their own history popup).
+export const AdjustmentHistoryPopup = ({ invoice, basePath = "invoice-list", type = null, title = "Adjustments", onClose }) => {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
 
@@ -188,17 +190,17 @@ export const AdjustmentHistoryPopup = ({ invoice, basePath = "invoice-list", onC
       );
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
-      setRows(json.data || []);
+      setRows((json.data || []).filter((a) => !type || a.type === type));
     } catch (e) {
       setError(e.message);
       setRows([]);
     }
-  }, [invoice._id, basePath]);
+  }, [invoice._id, basePath, type]);
 
   useEffect(() => { load(); }, [load]);
 
   return (
-    <Modal onClose={onClose} title={`Adjustments · Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
+    <Modal onClose={onClose} title={`${title} · Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
       {error && (
         <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>
       )}

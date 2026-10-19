@@ -288,7 +288,7 @@ const InvoiceApprovalList = () => {
               <th className={thRight}>CGST</th>
               <th className={thRight}>SGST</th>
               <th className={thRight}>IGST</th>
-              <th className={thRight}>Extra </th>
+              <th className={thRight}>Misc</th>
               <th className={thRight}>Total</th>
               <th className={th}>Status</th>
               <th className={thRight}>Actions</th>
@@ -341,8 +341,8 @@ const InvoiceApprovalList = () => {
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.cgstAmount)}</td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.sgstAmount)}</td>
                     <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.igstAmount)}</td>
-                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.extraChargesTotal)}</td>
-                    <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900 tabular-nums">{money(inv.grandTotal)}</td>
+                    <td className="px-4 py-3 text-right text-sm text-slate-700 tabular-nums">{money(inv.miscTotal ?? inv.extraChargesTotal)}</td>
+                    <td className="px-4 py-3 text-right text-sm font-semibold text-slate-900 tabular-nums">{money(inv.invoiceTotal ?? inv.grandTotal)}</td>
                     <td className="px-4 py-3">
                       {partial && tab === STATUS.APPROVED && inv.status !== "APPROVED" ? (
                         <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">

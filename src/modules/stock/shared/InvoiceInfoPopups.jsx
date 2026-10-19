@@ -76,7 +76,6 @@ export const NetPayablePopup = ({ row, onClose }) => {
       </div>
       <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-3">
         <Line label="Basic" value={b.basicAmount} />
-        <Line label="+ Extra" value={b.extraChargesTotal} tone="text-slate-700" />
         <Line label="CGST" value={b.cgstAmount} tone="text-violet-700" />
         <Line label="SGST" value={b.sgstAmount} tone="text-violet-700" />
         <Line label="IGST" value={b.igstAmount} tone="text-violet-700" />

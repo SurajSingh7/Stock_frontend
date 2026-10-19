@@ -4,20 +4,22 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import {
-  RotateCcw, Send, Wallet, FileMinus, PlusCircle, Layers,
+  RotateCcw, Send, Wallet, PlusCircle, Layers,
   LayoutGrid, Clock, CheckCircle2, XCircle, CalendarClock,
-  Pencil, Trash2, AlertTriangle,
+  Pencil, AlertTriangle, Percent, Lock,
 } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import { paymentTermShort } from "@/modules/stock/shared/paymentTerms";
 import {
   APPROVAL_STATUS, approvalMeta, PAYMENT_STATE, paymentStateMeta,
-  PAYABLE_FILTER, PAYABLE_OPTIONS,
+  PAYABLE_FILTER,
 } from "@/modules/stock/shared/paymentStatus";
 import { usePermissions } from "@/context/PermissionContext";
-import DebitNoteView from "@/modules/stock/invoiceList/DebitNoteView";
+import { DebitNoteCell, DebitNoteHistoryPopup } from "@/modules/stock/invoiceList/DebitNoteParts";
+import DebitNoteQueue from "@/modules/stock/invoiceList/DebitNoteQueue";
 import RecordPaymentView from "@/modules/stock/payments/RecordPaymentView";
-import { MiscChargePopup, AdjustmentCard, ADJUSTMENT_META } from "@/modules/stock/invoiceList/AdjustmentPopups";
+import { AdjustmentCard } from "@/modules/stock/invoiceList/AdjustmentPopups";
+import MiscPopup from "@/modules/stock/shared/MiscPopup";
 
 /* ============================================================= */
 /* Payments — the account team's screen.                          */
@@ -31,6 +33,26 @@ import { MiscChargePopup, AdjustmentCard, ADJUSTMENT_META } from "@/modules/stoc
 /* this file renders them and never works the rule out a second    */
 /* time.                                                           */
 /* ============================================================= */
+
+/*
+  What moves the payable: misc charges, and debit notes once approved (one
+  with no status predates the approval chain and counts). A debit note still
+  in review or approval is shown on its own column, never in these sums.
+*/
+// Why a payment request is not offered yet (server decides; this only names it).
+const LOCK_REASON = {
+  ITEMS_PENDING: {
+    label: "Items pending",
+    hint: () => "Partial invoice — every entry must be approved before payment can be asked for",
+  },
+  DN_IN_PROGRESS: {
+    label: "DN in progress",
+    hint: (r) => `DN-${r.debitNote?.latest?.dnNumber} is still in review or approval`,
+  },
+  NOTHING_PAYABLE: { label: "Nothing payable", hint: () => "Net Payable is zero" },
+};
+
+const inPayable = (a) => a.type !== "DEBIT_NOTE" || !a.status || a.status === "APPROVED";
 
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
@@ -51,6 +73,16 @@ const tdRight = td + " text-right tabular-nums";
   ring on top of it, not by turning the colour on.
 */
 const APPROVAL_CHIPS = [
+  // In the order a payment moves: not sent, waiting, sent back, cleared.
+  {
+    key: "NONE", label: "Not Sent", icon: Send, count: "NONE",
+    off: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+    on: "border-slate-400 bg-slate-200 text-slate-900 ring-2 ring-slate-300",
+    badge: "bg-slate-200 text-slate-700",
+    badgeOn: "bg-white/70 text-slate-900",
+    // Joined "N ready" filter — see Chip.
+    ready: true,
+  },
   {
     key: APPROVAL_STATUS.PENDING, label: "Pending", icon: Clock, count: "PENDING",
     off: "border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-50",
@@ -59,18 +91,18 @@ const APPROVAL_CHIPS = [
     badgeOn: "bg-white/70 text-amber-900",
   },
   {
-    key: APPROVAL_STATUS.APPROVED, label: "Approved", icon: CheckCircle2, count: "APPROVED",
-    off: "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-50",
-    on: "border-emerald-400 bg-emerald-100 text-emerald-900 ring-2 ring-emerald-200",
-    badge: "bg-emerald-100 text-emerald-800",
-    badgeOn: "bg-white/70 text-emerald-900",
-  },
-  {
     key: APPROVAL_STATUS.REJECTED, label: "Rejected", icon: XCircle, count: "REJECTED",
     off: "border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-50",
     on: "border-rose-400 bg-rose-100 text-rose-900 ring-2 ring-rose-200",
     badge: "bg-rose-100 text-rose-800",
     badgeOn: "bg-white/70 text-rose-900",
+  },
+  {
+    key: APPROVAL_STATUS.APPROVED, label: "Approved", icon: CheckCircle2, count: "APPROVED",
+    off: "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-50",
+    on: "border-emerald-400 bg-emerald-100 text-emerald-900 ring-2 ring-emerald-200",
+    badge: "bg-emerald-100 text-emerald-800",
+    badgeOn: "bg-white/70 text-emerald-900",
   },
 ];
 
@@ -84,13 +116,13 @@ const APPROVAL_CHIPS = [
 const Chip = ({ chip, group, value, onPick, counts }) => {
   const active = value === chip.key;
   const Icon = chip.icon;
-  return (
+  const main = (
     <button
       type="button"
       onClick={() => onPick(active ? "" : chip.key)}
-      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
-        active ? chip.on : chip.off
-      }`}
+      className={`inline-flex items-center gap-1.5 border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
+        chip.ready ? "rounded-l-xl" : "rounded-xl"
+      } ${active ? chip.on : chip.off}`}
       aria-pressed={active}
       aria-label={`${group} ${chip.label}`}
     >
@@ -100,6 +132,35 @@ const Chip = ({ chip, group, value, onPick, counts }) => {
         {counts[chip.count] ?? 0}
       </span>
     </button>
+  );
+  if (!chip.ready) return main;
+
+  /*
+    "Ready" is its own filter, joined to Not Sent: of the invoices not sent,
+    only those that can be sent right now — so 2 ready out of 60 are one
+    click away instead of hunted for.
+  */
+  const readyOn = value === "READY";
+  const n = counts.READY ?? 0;
+  return (
+    <span className="inline-flex">
+      {main}
+      <button
+        type="button"
+        onClick={() => onPick(readyOn ? "" : "READY")}
+        aria-pressed={readyOn}
+        title="Not sent yet, and can be sent for approval now"
+        className={`-ml-px inline-flex items-center gap-1 rounded-r-xl border px-2.5 py-1.5 text-xs font-semibold shadow-sm transition ${
+          readyOn
+            ? "border-emerald-500 bg-emerald-600 text-white ring-2 ring-emerald-200"
+            : n > 0
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+              : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"
+        }`}
+      >
+        {n} ready
+      </button>
+    </span>
   );
 };
 
@@ -116,181 +177,38 @@ const Chip = ({ chip, group, value, onPick, counts }) => {
   is the whole reason they are two fields.
 */
 const STATE_OPTIONS = [
-  { key: PAYMENT_STATE.UNPAID, label: "Unpaid", count: "UNPAID" },
-  { key: PAYMENT_STATE.PARTIAL, label: "Partial Paid", count: "PARTIAL" },
-  { key: PAYMENT_STATE.PAID, label: "Paid", count: "PAID" },
+  // Only the VALUE takes the colour; the box stays neutral like the
+  // approval group beside it. hex is for the option list itself.
+  { key: "", label: "All", count: "STATE_ALL", dot: "bg-slate-400", text: "text-slate-700", hex: "#334155" },
+  { key: PAYMENT_STATE.UNPAID, label: "Unpaid", count: "UNPAID", dot: "bg-rose-500", text: "text-rose-600", hex: "#e11d48" },
+  { key: PAYMENT_STATE.PARTIAL, label: "Partly Paid", count: "PARTIAL", dot: "bg-amber-500", text: "text-amber-600", hex: "#d97706" },
+  { key: PAYMENT_STATE.PAID, label: "Paid", count: "PAID", dot: "bg-emerald-500", text: "text-emerald-600", hex: "#059669" },
 ];
 
-/* ── Everything raised on one invoice, with the buttons to change it ── */
-const ManageAdjustmentsPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChanged }) => {
-  const [rows, setRows] = useState(null);
-  const [error, setError] = useState(null);
-  const [confirming, setConfirming] = useState(null);
-  const [deleteReason, setDeleteReason] = useState("");
-  const [busy, setBusy] = useState(false);
+/*
+  When the money is due. The dropdown takes the picked option's colour: Now
+  (green — act on it), Later (blue — for information), All (purple).
+*/
+const PAYABLE_SEGMENTS = [
+  { key: PAYABLE_FILTER.NOW, label: "Payable Now", count: "PAYABLE_NOW", box: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  { key: PAYABLE_FILTER.LATER, label: "Payable Later", count: "PAYABLE_LATER", box: "border-blue-200 bg-blue-50 text-blue-700" },
+  { key: PAYABLE_FILTER.ALL, label: "All", count: "PAYABLE_ALL", box: "border-violet-200 bg-violet-50 text-violet-700" },
+];
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/adjustments`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
-      setRows(json.data || []);
-    } catch (e) {
-      setError(e.message);
-      setRows([]);
-    }
-  }, [invoice._id]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const remove = async () => {
-    setBusy(true); setError(null);
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/adjustments/${confirming._id}`, {
-        method: "DELETE", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ reason: deleteReason.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to withdraw");
-      setConfirming(null); setDeleteReason("");
-      onChanged();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal onClose={onClose} title={`Adjustments · Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
-      {error && (
-        <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>
-      )}
-
-      {canManage && invoice.canEditAdjustments && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            type="button" onClick={() => onAdd("DEBIT_NOTE")}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50"
-          >
-            <FileMinus className="h-3.5 w-3.5" /> Add debit note
-          </button>
-          <button
-            type="button" onClick={() => onAdd("MISC")}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50"
-          >
-            <PlusCircle className="h-3.5 w-3.5" /> Add misc charge
-          </button>
-        </div>
-      )}
-
-      {!invoice.canEditAdjustments && (
-        <p className="mb-4 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-inset ring-slate-200">
-          {invoice.approvalStatus === APPROVAL_STATUS.PENDING
-            ? "Waiting on payment approval — adjustments are frozen until it is decided."
-            : "Already approved for payment — adjustments can no longer be changed."}
-        </p>
-      )}
-
-      {rows === null ? (
-        <div className="space-y-2">
-          {Array.from({ length: 2 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />)}
-        </div>
-      ) : rows.length === 0 ? (
-        <p className="py-8 text-center text-sm text-slate-400">Nothing has been raised on this invoice.</p>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((a) => (
-            <AdjustmentCard
-              key={a._id}
-              adjustment={a}
-              actions={
-                canManage && invoice.canEditAdjustments ? (
-                  <span className="ml-2 flex gap-1">
-                    <button
-                      type="button" onClick={() => onEdit(a)} title="Edit"
-                      className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition hover:bg-slate-50"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button" onClick={() => setConfirming(a)} title="Withdraw"
-                      className="rounded-md border border-rose-200 bg-white p-1.5 text-rose-600 shadow-sm transition hover:bg-rose-50"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </span>
-                ) : null
-              }
-            />
-          ))}
-        </div>
-      )}
-
-      {confirming && (
-        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50/60 p-3">
-          <p className="text-sm font-semibold text-rose-800">
-            Withdraw this {(ADJUSTMENT_META[confirming.type] || {}).label?.toLowerCase() || "adjustment"} of {money(confirming.amount)}?
-          </p>
-          {confirming.type === "DEBIT_NOTE" && (
-            <p className="mt-1 text-xs text-rose-700">
-              Any units it marked faulty go back to available stock.
-            </p>
-          )}
-          <input
-            type="text" value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)}
-            placeholder="Reason (kept on the record)"
-            className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-100"
-          />
-          <div className="mt-3 flex justify-end gap-2">
-            <button
-              type="button" onClick={() => setConfirming(null)} disabled={busy}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-600 shadow-sm disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="button" onClick={remove} disabled={busy}
-              className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:opacity-60"
-            >
-              {busy ? "Withdrawing…" : "Withdraw"}
-            </button>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-};
-
-/* ── Fix & resend, after the approval team sent it back ───────── */
-/* A rejection means "something on this is wrong". This puts the   */
-/* reason, the adjustments and the resend button in one place, so  */
-/* the fix and the resubmission are one piece of work rather than  */
-/* two screens the user has to join up themselves.                 */
-const FixAndResendPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChanged, onResent }) => {
-  const [rows, setRows] = useState(null);
-  const [reason, setReason] = useState("");
+/* ── Fix & resend, after the approver sent it back ─────────────── */
+/* The reason it came back, and a note (required) saying what was  */
+/* done about it — the approver reads the two side by side.        */
+const FixAndResendPopup = ({ invoice, onClose, onResent }) => {
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/adjustments`, { credentials: "include" });
-      const json = await res.json();
-      setRows(res.ok && json.success ? json.data || [] : []);
-    } catch {
-      setRows([]);
-    }
-  }, [invoice._id]);
-
-  useEffect(() => { load(); }, [load]);
 
   const resend = async () => {
     setBusy(true); setError(null);
     try {
       const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/send-for-approval`, {
         method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ reason: reason.trim() }),
+        body: JSON.stringify({ reason: note.trim() }),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
@@ -303,7 +221,7 @@ const FixAndResendPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChang
   };
 
   return (
-    <Modal onClose={onClose} title={`Fix & resend · Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
+    <Modal onClose={onClose} title={`Fix & resend · Invoice ${invoice.invoiceNumber}`}>
       {error && (
         <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>
       )}
@@ -316,78 +234,38 @@ const FixAndResendPopup = ({ invoice, canManage, onClose, onEdit, onAdd, onChang
         <p className="mt-1 text-sm text-rose-900">{invoice.paymentApproval?.rejectedReason || "No reason given"}</p>
       </div>
 
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-bold uppercase tracking-wider text-slate-700">What is on this invoice</span>
-        {canManage && (
-          <span className="flex gap-2">
-            <button
-              type="button" onClick={() => onAdd("DEBIT_NOTE")}
-              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50"
-            >
-              <FileMinus className="h-3.5 w-3.5" /> Debit note
-            </button>
-            <button
-              type="button" onClick={() => onAdd("MISC")}
-              className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-white px-2.5 py-1 text-xs font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50"
-            >
-              <PlusCircle className="h-3.5 w-3.5" /> Misc
-            </button>
-          </span>
-        )}
-      </div>
-
-      {rows === null ? (
-        <div className="h-20 animate-pulse rounded-xl bg-slate-100" />
-      ) : rows.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-400">
-          No debit notes or misc charges on this invoice.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {rows.map((a) => (
-            <AdjustmentCard
-              key={a._id}
-              adjustment={a}
-              actions={
-                canManage ? (
-                  <button
-                    type="button" onClick={() => onEdit(a)} title="Edit"
-                    className="ml-2 rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm transition hover:bg-slate-50"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                ) : null
-              }
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="mt-4 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-        <span className="text-slate-500">Payable now</span>
+      <div className="mb-4 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+        <span className="text-slate-500">Net Payable</span>
         <span className="font-bold tabular-nums text-slate-900">{money(invoice.payable)}</span>
       </div>
 
-      <label htmlFor="resend-reason" className="mb-1.5 mt-4 block text-xs font-semibold text-slate-700">
-        Note for the approval team
+      <label htmlFor="resend-note" className="mb-1.5 block text-xs font-semibold text-slate-700">
+        Note for the approver <span className="text-rose-500">*</span>
       </label>
       <textarea
-        id="resend-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
-        placeholder="What was fixed…" className={inputCls}
+        id="resend-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+        placeholder="What was fixed, or why it should be paid as it is…" className={inputCls}
       />
+      <p className="mt-1 text-[11px] text-slate-400">The approver sees this note beside the reason it was sent back.</p>
+
+      {invoice.debitNoteLive && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
+          A debit note on this invoice is still in review or approval — it can be sent again once that is settled.
+        </p>
+      )}
 
       <div className="mt-5 flex justify-end gap-2">
         <button
           type="button" onClick={onClose} disabled={busy}
           className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
         >
-          Close
+          Cancel
         </button>
         <button
-          type="button" onClick={resend} disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-60"
+          type="button" onClick={resend} disabled={busy || !note.trim() || invoice.debitNoteLive}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          <Send className="h-4 w-4" /> {busy ? "Sending…" : "Send for approval again"}
+          <Send className="h-4 w-4" /> {busy ? "Sending…" : "Send again"}
         </button>
       </div>
     </Modal>
@@ -413,7 +291,7 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
     try {
       const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/adjustments`, { credentials: "include" });
       const json = await res.json();
-      setRows(res.ok && json.success ? json.data || [] : []);
+      setRows(res.ok && json.success ? (json.data || []).filter(inPayable) : []);
     } catch {
       // Non-fatal: the totals below still come off the row itself, so a failed
       // load costs the itemisation, not the figure being approved.
@@ -597,6 +475,60 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
   );
 };
 
+/* ── TDS on one invoice — accounts only, no approval, never silent ── */
+const TdsEditPopup = ({ invoice, onClose, onDone }) => {
+  const [rate, setRate] = useState(String(invoice.tdsRate ?? 0));
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const basic = invoice.breakup?.basicAmount || 0;
+  const n = Number(rate);
+  const valid = rate !== "" && Number.isFinite(n) && n >= 0 && n <= 100;
+  const newTds = valid ? Math.round(basic * n) / 100 : 0;
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/tds`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
+        body: JSON.stringify({ rate: n, reason: reason.trim() }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to update TDS");
+      onDone();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={`Edit TDS · Invoice ${invoice.invoiceNumber}`}>
+      <div className="mb-3 grid grid-cols-3 gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm">
+        <div><p className="text-xs text-slate-500">Basic</p><p className="font-semibold tabular-nums">{money(basic)}</p></div>
+        <div><p className="text-xs text-slate-500">Now</p><p className="font-semibold tabular-nums text-amber-700">{invoice.tdsRate || 0}% · {money(invoice.tdsAmount || 0)}</p></div>
+        <div><p className="text-xs text-slate-500">After</p><p className="font-semibold tabular-nums text-amber-700">{valid ? `${n}% · ${money(newTds)}` : "—"}</p></div>
+      </div>
+      <label className="mb-1 block text-xs font-semibold text-slate-600">New TDS rate (%)</label>
+      <input type="number" min="0" max="100" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} className={inputCls} />
+      <label className="mb-1 mt-3 block text-xs font-semibold text-slate-600">Reason <span className="text-rose-500">*</span></label>
+      <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputCls} placeholder="e.g. lower-deduction certificate" />
+      <p className="mt-2 text-xs text-slate-500">Changed by hand on this invoice only, with who and why kept on record. Locked once payment approval is asked for.</p>
+      {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50">Cancel</button>
+        <button
+          type="button" onClick={save} disabled={busy || !valid || !reason.trim() || n === (invoice.tdsRate || 0)}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {busy ? "Saving…" : "Save TDS"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
 /* ============================================================= */
 /* Main                                                           */
 /* ============================================================= */
@@ -612,6 +544,23 @@ const PaymentsComp = () => {
   const canManage = can("MANAGE_ADJUSTMENT");
   const canRequest = can("REQUEST_PAYMENT_APPROVAL");
   const canPay = can("ENTER_PAYMENT");
+  const canReviewDn = can("REVIEW_DEBIT_NOTE");
+
+  // Two views: the invoices themselves, and the debit notes waiting on review.
+  const [tab, setTab] = useState("invoices");
+  const [dnCounts, setDnCounts] = useState({});
+  // The review tab's badge, before that tab is ever opened.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`${API_BACKEND_URL}/stock/payments-debit-notes?limit=1&status=REVIEW_PENDING`, { credentials: "include" });
+        const j = await r.json();
+        if (j.success) setDnCounts(j.data?.counts || {});
+      } catch {
+        // Non-fatal — the badge just stays empty.
+      }
+    })();
+  }, []);
 
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({});
@@ -702,15 +651,6 @@ const PaymentsComp = () => {
     Payment   — one settlement can be five bank entries, each with its own
                 reference and its own receipt files.
   */
-  if (view.mode === "debitNote") {
-    return (
-      <DebitNoteView
-        invoice={view.row} adjustment={view.adjustment || null}
-        onBack={() => setView({ mode: "list" })} onDone={refresh}
-      />
-    );
-  }
-
   if (view.mode === "payment") {
     return (
       <RecordPaymentView
@@ -722,15 +662,42 @@ const PaymentsComp = () => {
 
 
   const anyFilter = !!approvalStatus || !!paymentState || payable !== PAYABLE_FILTER.ALL;
+  // "All" clears the approval and payment-status groups only (the Payable
+  // dropdown stays), so it reads as selected whenever those two are clear.
+  const allChipOn = !approvalStatus && !paymentState;
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mb-5">
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Payments</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          Raise debit notes and misc charges, ask for payment approval once an invoice is due, then record what was paid.
+          Review debit notes, add misc charges and TDS, ask for payment approval once an invoice is due, then record what was paid.
         </p>
       </div>
+
+      <div className="mb-5 flex gap-1 border-b border-slate-200">
+        {[
+          { key: "invoices", label: "Invoices" },
+          { key: "dn", label: "Debit Note Review", badge: dnCounts.REVIEW_PENDING },
+        ].map((t) => (
+          <button
+            key={t.key} type="button" onClick={() => setTab(t.key)}
+            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+              tab === t.key ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {t.label}
+            {t.badge > 0 && (
+              <span className="rounded-full bg-violet-100 px-1.5 text-xs tabular-nums text-violet-700">{t.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === "dn" ? (
+        <DebitNoteQueue mode="review" canAct={canReviewDn} onCounts={setDnCounts} />
+      ) : (
+      <>
 
       {(error || actionError) && (
         <div className="mb-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
@@ -773,16 +740,21 @@ const PaymentsComp = () => {
       <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
         <button
           type="button" onClick={clearChips}
+          aria-pressed={allChipOn}
           className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
-            anyFilter ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50" : "border-slate-300 bg-slate-100 text-slate-800"
+            !allChipOn
+              ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              : "border-slate-800 bg-slate-800 text-white ring-2 ring-slate-300"
           }`}
         >
           <LayoutGrid className="h-4 w-4" /> All
-          <span className="rounded-full bg-slate-200 px-1.5 text-xs tabular-nums text-slate-600">{counts.ALL ?? 0}</span>
+          <span className={`rounded-full px-1.5 text-xs tabular-nums ${!allChipOn ? "bg-slate-100 text-slate-600" : "bg-white/25 text-white"}`}>
+            {counts.ALL ?? 0}
+          </span>
         </button>
 
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
-          <span className="mr-1 text-sm font-semibold text-slate-600">Payment Approval</span>
+          <span className="mr-1 text-sm font-semibold text-slate-700">Payment Approval</span>
           {APPROVAL_CHIPS.map((c) => (
             <Chip
               key={c.key} chip={c} group="Payment approval"
@@ -792,42 +764,46 @@ const PaymentsComp = () => {
           ))}
         </div>
 
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
-          <span className="mr-1 text-sm font-semibold text-slate-600">Payment Status</span>
-          <select
-            value={paymentState}
-            onChange={(e) => { setPaymentState(e.target.value); setPage(1); }}
-            className="rounded-lg border-0 bg-transparent py-0.5 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-0"
-            aria-label="Payment status"
-          >
-            {/*
-              "All" is the three states added up, not counts.ALL — that one is
-              worked out without the approval filter applied, so it would
-              overcount here the moment an approval chip is on. Every row has
-              exactly one payment state, so the three sum to precisely what
-              clearing this dropdown would return.
-            */}
-            <option value="">
-              All · {(counts.UNPAID ?? 0) + (counts.PARTIAL ?? 0) + (counts.PAID ?? 0)}
-            </option>
-            {STATE_OPTIONS.map((o) => (
-              <option key={o.key} value={o.key}>
-                {o.label} · {counts[o.count] ?? 0}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Dropdowns, coloured by what is picked so the state reads at a glance. */}
+        {(() => {
+          const st = STATE_OPTIONS.find((o) => o.key === paymentState) || STATE_OPTIONS[0];
+          const all = (counts.UNPAID ?? 0) + (counts.PARTIAL ?? 0) + (counts.PAID ?? 0);
+          return (
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
+              <span className="text-sm font-semibold text-slate-700">Payment Status</span>
+              <select
+                value={paymentState}
+                onChange={(e) => { setPaymentState(e.target.value); setPage(1); }}
+                className={`cursor-pointer rounded-lg border-0 bg-transparent py-0.5 pr-7 text-sm font-bold focus:outline-none focus:ring-0 ${st.text}`}
+                aria-label="Payment status"
+              >
+                {STATE_OPTIONS.map((o) => (
+                  <option key={o.key || "all"} value={o.key} style={{ color: o.hex }}>
+                    {o.label} · {o.count === "STATE_ALL" ? all : counts[o.count] ?? 0}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        })()}
 
-        <div className="ml-auto flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
-          <CalendarClock className="h-4 w-4 text-slate-400" />
-          <select
-            value={payable} onChange={(e) => { setPayable(e.target.value); setPage(1); }}
-            className="rounded-lg border-0 bg-transparent py-0.5 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-0"
-            aria-label="Payable timing"
-          >
-            {PAYABLE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
+        {(() => {
+          const pv = PAYABLE_SEGMENTS.find((o) => o.key === payable) || PAYABLE_SEGMENTS[2];
+          return (
+            <label className={`ml-auto flex items-center gap-2 rounded-xl border px-3 py-1.5 transition ${pv.box}`}>
+              <CalendarClock className="h-4 w-4 opacity-80" />
+              <select
+                value={payable} onChange={(e) => { setPayable(e.target.value); setPage(1); }}
+                className="cursor-pointer rounded-lg border-0 bg-transparent py-0.5 pr-7 text-sm font-bold focus:outline-none focus:ring-0"
+                aria-label="Payable timing"
+              >
+                {PAYABLE_SEGMENTS.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label} · {counts[o.count] ?? 0}</option>
+                ))}
+              </select>
+            </label>
+          );
+        })()}
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -841,6 +817,7 @@ const PaymentsComp = () => {
               <th className={thRight}>Balance</th>
               <th className={th}>Terms</th>
               <th className={th}>Payable On</th>
+              <th className={th}>Debit Note</th>
               <th className={th}>Approval</th>
               <th className={th}>Payment</th>
               <th className={thRight}>Actions</th>
@@ -848,9 +825,9 @@ const PaymentsComp = () => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
                 Nothing here with these filters.
               </td></tr>
             ) : (
@@ -896,9 +873,18 @@ const PaymentsComp = () => {
                       ) : null}
                     </td>
                     <td className={td}>
+                      <DebitNoteCell summary={r.debitNote} onHistory={() => setPopup({ type: "dnHistory", row: r })} />
+                    </td>
+                    <td className={td}>
                       <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${am.chip}`}>
                         {am.label}
                       </span>
+                      {/* Pulled back because a debit note landed while it waited. */}
+                      {!r.approvalStatus && r.paymentApproval?.pulledBackNote && (
+                        <span className="mt-0.5 block max-w-[170px] text-[11px] text-orange-600" title={r.paymentApproval.pulledBackNote}>
+                          Pulled back: {r.paymentApproval.pulledBackNote}
+                        </span>
+                      )}
                       {r.approvalStatus === APPROVAL_STATUS.REJECTED && r.paymentApproval?.rejectedReason && (
                         <span className="mt-0.5 block max-w-[170px] truncate text-[11px] text-slate-400" title={r.paymentApproval.rejectedReason}>
                           {r.paymentApproval.rejectedReason}
@@ -941,15 +927,15 @@ const PaymentsComp = () => {
                         {canManage && r.canEditAdjustments && r.approvalStatus !== APPROVAL_STATUS.REJECTED && (
                           <>
                             <button
-                              type="button" onClick={() => setView({ mode: "debitNote", row: r })}
-                              title="Claim money back for faulty goods"
-                              className="inline-flex items-center rounded-lg border border-rose-200 bg-white px-2 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50"
+                              type="button" onClick={() => setPopup({ type: "tds", row: r })}
+                              title={`Edit TDS (now ${r.tdsRate || 0}%)`}
+                              className="inline-flex items-center rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs font-semibold text-amber-600 shadow-sm transition hover:bg-amber-50"
                             >
-                              <FileMinus className="h-3.5 w-3.5" />
+                              <Percent className="h-3.5 w-3.5" />
                             </button>
                             <button
                               type="button" onClick={() => setPopup({ type: "misc", row: r })}
-                              title="Add a charge to what is payable"
+                              title="Misc (extra charges) — edit"
                               className="inline-flex items-center rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50"
                             >
                               <PlusCircle className="h-3.5 w-3.5" />
@@ -960,6 +946,16 @@ const PaymentsComp = () => {
                             straight away — the payable after every debit note
                             and misc charge is what the approver acts on, and
                             this is the sender's only chance to see it. */}
+                        {/* Why there is no "Send for approval" yet — said, not left blank.
+                            Not-due is left out: the Payable On column already says it. */}
+                        {canRequest && !r.approvalStatus && LOCK_REASON[r.paymentLockReason] && (
+                          <span
+                            title={LOCK_REASON[r.paymentLockReason].hint(r)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-500"
+                          >
+                            <Lock className="h-3.5 w-3.5" /> {LOCK_REASON[r.paymentLockReason].label}
+                          </span>
+                        )}
                         {canRequest && r.canSendForApproval && r.approvalStatus !== APPROVAL_STATUS.REJECTED && (
                           <button
                             type="button" onClick={() => setPopup({ type: "send", row: r })}
@@ -976,13 +972,16 @@ const PaymentsComp = () => {
                             <Wallet className="h-3.5 w-3.5" /> {r.paidTotal > 0 ? "Add payment" : "Enter payment"}
                           </button>
                         )}
+                        {/* Read-only look at misc when it cannot be edited here. */}
+                        {!(canManage && r.canEditAdjustments) && (r.extraCharges || []).length > 0 && (
                         <button
-                          type="button" onClick={() => setPopup({ type: "adjustments", row: r })}
-                          title="Debit notes and misc charges on this invoice"
+                          type="button" onClick={() => setPopup({ type: "misc", row: r, readOnly: true })}
+                          title="Misc on this invoice"
                           className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
                         >
                           <Layers className="h-3.5 w-3.5" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -998,46 +997,20 @@ const PaymentsComp = () => {
         />
       </div>
 
-      {popup?.type === "adjustments" && (
-        <ManageAdjustmentsPopup
-          invoice={popup.row} canManage={canManage}
-          onClose={() => setPopup(null)}
-          onChanged={refresh}
-          onAdd={(type) =>
-            type === "DEBIT_NOTE"
-              ? setView({ mode: "debitNote", row: popup.row })
-              : setPopup({ type: "misc", row: popup.row })
-          }
-          onEdit={(adj) =>
-            adj.type === "DEBIT_NOTE"
-              ? setView({ mode: "debitNote", row: popup.row, adjustment: adj })
-              : setPopup({ type: "misc", row: popup.row, adjustment: adj })
-          }
-        />
+      </>
       )}
+
       {popup?.type === "fix" && (
-        <FixAndResendPopup
-          invoice={popup.row} canManage={canManage}
-          onClose={() => setPopup(null)}
-          onChanged={refresh}
-          onResent={refresh}
-          onAdd={(type) =>
-            type === "DEBIT_NOTE"
-              ? setView({ mode: "debitNote", row: popup.row })
-              : setPopup({ type: "misc", row: popup.row })
-          }
-          onEdit={(adj) =>
-            adj.type === "DEBIT_NOTE"
-              ? setView({ mode: "debitNote", row: popup.row, adjustment: adj })
-              : setPopup({ type: "misc", row: popup.row, adjustment: adj })
-          }
-        />
+        <FixAndResendPopup invoice={popup.row} onClose={() => setPopup(null)} onResent={refresh} />
       )}
       {popup?.type === "misc" && (
-        <MiscChargePopup
-          invoice={popup.row} adjustment={popup.adjustment || null}
-          onClose={() => setPopup(null)} onDone={refresh}
-        />
+        <MiscPopup invoice={popup.row} readOnly={!!popup.readOnly} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
+      {popup?.type === "dnHistory" && (
+        <DebitNoteHistoryPopup invoice={popup.row} basePath="payments" onClose={() => setPopup(null)} />
+      )}
+      {popup?.type === "tds" && (
+        <TdsEditPopup invoice={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
       )}
       {popup?.type === "send" && (
         <SendForApprovalPopup

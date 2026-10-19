@@ -503,7 +503,7 @@ const StatusChip = ({ status }) => {
   return <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${m.cls}`}>{m.label}</span>;
 };
 // What an invoice is worth on screen: as written on it, else at PO rates.
-const invoiceWorth = (inv) => (inv.invoiceAmount > 0 ? inv.invoiceAmount : inv.grandTotal || 0);
+const invoiceWorth = (inv) => (inv.invoiceAmount > 0 ? inv.invoiceAmount : inv.invoiceTotal ?? inv.grandTotal ?? 0);
 
 // One previous invoice — number, date, status, each product and the amount.
 const PreviousInvoiceRow = ({ inv }) => (
@@ -1074,7 +1074,7 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
               <div className="space-y-1 border-t border-slate-100 px-4 py-2.5 text-xs text-slate-600">
                 {invoice?.extraCharges?.length > 0 && (
                   <p>
-                    Extra:{" "}
+                    Misc:{" "}
                     {invoice.extraCharges.map((c, i) => (
                       <span key={i} className={c.includeInBilling === false ? "text-slate-400" : ""}>
                         {i > 0 && " · "}{c.note || "Charge"} {rupees(c.amount)}{c.includeInBilling === false ? " (not billed)" : ""}

@@ -4,14 +4,17 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createPortal } from "react-dom";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
-import { CalendarDays, RotateCcw, Lock, Layers, MoreVertical, Eye, Info } from "lucide-react";
+import { CalendarDays, RotateCcw, Lock, Layers, MoreVertical, Eye, Info, FileMinus, Pencil, Undo2, History } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import { paymentTermShort, paymentTermLabel } from "@/modules/stock/shared/paymentTerms";
 import { PAYMENT_STATE, PAYABLE_OPTIONS, PAYABLE_FILTER } from "@/modules/stock/shared/paymentStatus";
 import { usePermissions } from "@/context/PermissionContext";
 import { anchorRect } from "@/modules/stock/shared/anchorRect";
-import { AdjustmentHistoryPopup } from "./AdjustmentPopups";
+import MiscPopup from "@/modules/stock/shared/MiscPopup";
 import { InvoiceFilePopup, NetPayablePopup } from "@/modules/stock/shared/InvoiceInfoPopups";
+import DebitNoteView from "./DebitNoteView";
+import { DebitNoteCell, DebitNoteHistoryPopup, WithdrawDebitNotePopup } from "./DebitNoteParts";
+import { DN_STATUS } from "@/modules/stock/shared/debitNoteStatus";
 
 /* ============================================================= */
 /* The payment-side list of approved invoices: what is owed, and  */
@@ -352,15 +355,18 @@ const SchedulePaymentPopup = ({ row, onClose, onDone }) => {
 const InvoiceListComp = () => {
   const { permissions, isAdmin } = usePermissions();
   /*
-    One write on this screen, and it carries its own action: scheduling changes
-    WHEN money leaves. Debit notes and misc charges are not raised here at
-    all — that is the account team's screen.
+    Two writes on this screen, each with its own action: scheduling changes
+    WHEN money leaves, and a debit note claims money back for faulty goods
+    (then goes to review and approval). Misc charges are accounts' own.
   */
-  const canSchedule = useMemo(() => {
-    if (isAdmin) return true; // admins bypass server-side too
+  const myActions = useMemo(() => {
+    if (isAdmin) return null; // admins bypass server-side too
     const mod = (permissions || []).find((m) => m.moduleKey === "invoice-list");
-    return (mod?.actions || []).map((a) => String(a).toUpperCase()).includes("SCHEDULE_PAYMENT");
+    return new Set((mod?.actions || []).map((a) => String(a).toUpperCase()));
   }, [permissions, isAdmin]);
+  const canSchedule = myActions === null || myActions.has("SCHEDULE_PAYMENT");
+  const canRaiseDn = myActions === null || myActions.has("RAISE_DEBIT_NOTE");
+  const [dnView, setDnView] = useState(null); // { row, adjustment? } — the debit note page
 
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({ ALL: 0, NOT_DUE: 0, DUE: 0, OVERDUE: 0 });
@@ -441,7 +447,33 @@ const InvoiceListComp = () => {
     setPaymentState(""); setPayable(PAYABLE_FILTER.ALL); setPage(1);
   };
 
-  const refresh = () => { setEditing(null); setPopup(null); loadList(); };
+  const refresh = () => { setEditing(null); setPopup(null); setDnView(null); loadList(); };
+
+  // A debit note is picked unit by unit, so it gets the whole page.
+  if (dnView) {
+    return (
+      <DebitNoteView
+        invoice={dnView.row}
+        adjustment={dnView.adjustment || null}
+        onBack={() => setDnView(null)}
+        onDone={refresh}
+      />
+    );
+  }
+
+  // The latest note, fetched in full (lines + history) to edit it.
+  const openResubmit = async (r) => {
+    try {
+      const res = await fetch(`${API_BACKEND_URL}/stock/invoice-list/${r._id}/debit-notes`, { credentials: "include" });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load the debit note");
+      const dn = (json.data || []).find((d) => String(d._id) === String(r.debitNote?.latest?._id));
+      if (!dn) throw new Error("Debit note not found");
+      setDnView({ row: r, adjustment: dn });
+    } catch (e) {
+      setError(e.message);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -534,6 +566,7 @@ const InvoiceListComp = () => {
               <th className={th}>Vendor</th>
               <th className={thRight}>Net Payable</th>
               <th className={thRight}>Paid</th>
+              <th className={th}>Debit Note</th>
               <th className={th}>Terms</th>
               <th className={th}>Due On</th>
               <th className={th}>Scheduled On</th>
@@ -543,9 +576,9 @@ const InvoiceListComp = () => {
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
-              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+              <tr><td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
+              <tr><td colSpan={12} className="px-4 py-12 text-center text-sm text-slate-400">
                 No approved invoices match these filters.
               </td></tr>
             ) : (
@@ -585,6 +618,9 @@ const InvoiceListComp = () => {
                   <td className={tdRight}>
                     {r.paidTotal > 0 ? <span className="font-medium text-emerald-700">{money(r.paidTotal)}</span> : <span className="text-slate-300">—</span>}
                   </td>
+                  <td className={td}>
+                    <DebitNoteCell summary={r.debitNote} onHistory={() => setPopup({ type: "dnHistory", row: r })} />
+                  </td>
                   <td className={td}>{paymentTermShort(r.paymentTerms)}</td>
                   {/* The contract. Never edited, and shown next to the
                       decision so the two can be compared at a glance. */}
@@ -615,11 +651,50 @@ const InvoiceListComp = () => {
                             onClick: () => setEditing(r),
                           },
                           {
+                            icon: FileMinus,
+                            label: "Add debit note",
+                            hint: !canRaiseDn
+                              ? "You do not have permission"
+                              : !r.canRaiseDebitNote
+                                ? r.debitNoteLive
+                                  ? `DN-${r.debitNote?.latest?.dnNumber} is still in progress`
+                                  : "Payment already approved"
+                                : null,
+                            disabled: !canRaiseDn || !r.canRaiseDebitNote,
+                            onClick: () => setDnView({ row: r }),
+                          },
+                          // Only for the latest note, and only while review has it.
+                          ...(r.debitNote?.latest?.status === DN_STATUS.REVIEW_REJECTED
+                            ? [{
+                                icon: Pencil,
+                                label: `Edit & resubmit DN-${r.debitNote.latest.dnNumber}`,
+                                hint: canRaiseDn ? r.debitNote.latest.lastNote || null : "You do not have permission",
+                                disabled: !canRaiseDn,
+                                onClick: () => openResubmit(r),
+                              }]
+                            : []),
+                          ...([DN_STATUS.REVIEW_PENDING, DN_STATUS.REVIEW_REJECTED].includes(r.debitNote?.latest?.status)
+                            ? [{
+                                icon: Undo2,
+                                label: `Withdraw DN-${r.debitNote.latest.dnNumber}`,
+                                hint: canRaiseDn ? null : "You do not have permission",
+                                disabled: !canRaiseDn,
+                                onClick: () => setPopup({ type: "dnWithdraw", row: r }),
+                              }]
+                            : []),
+                          {
+                            icon: History,
+                            label: "Debit notes",
+                            hint: r.debitNote ? `${r.debitNote.count} on this invoice` : "None on this invoice",
+                            disabled: !r.debitNote,
+                            onClick: () => setPopup({ type: "dnHistory", row: r }),
+                          },
+                          {
                             icon: Layers,
-                            label: "Adjustments",
-                            hint: r.adjustmentTotal === 0 ? "None on this invoice" : undefined,
-                            disabled: r.adjustmentTotal === 0,
-                            onClick: () => setPopup({ type: "adjustments", row: r }),
+                            label: "Misc",
+                            hint: (r.extraCharges || []).length === 0 ? "None on this invoice" : undefined,
+                            disabled: (r.extraCharges || []).length === 0,
+                            onClick: () => setPopup({ type: "misc", row: r }),
                           },
                         ]}
                       />
@@ -638,6 +713,12 @@ const InvoiceListComp = () => {
       </div>
 
       {editing && <SchedulePaymentPopup row={editing} onClose={() => setEditing(null)} onDone={refresh} />}
+      {popup?.type === "dnHistory" && (
+        <DebitNoteHistoryPopup invoice={popup.row} basePath="invoice-list" onClose={() => setPopup(null)} />
+      )}
+      {popup?.type === "dnWithdraw" && (
+        <WithdrawDebitNotePopup invoice={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
       {popup?.type === "file" && (
         <InvoiceFilePopup
           invoiceNumber={popup.row.invoiceNumber} vendorName={popup.row.vendorName}
@@ -645,9 +726,7 @@ const InvoiceListComp = () => {
         />
       )}
       {popup?.type === "netPayable" && <NetPayablePopup row={popup.row} onClose={() => setPopup(null)} />}
-      {popup?.type === "adjustments" && (
-        <AdjustmentHistoryPopup invoice={popup.row} basePath="invoice-list" onClose={() => setPopup(null)} />
-      )}
+      {popup?.type === "misc" && <MiscPopup invoice={popup.row} readOnly onClose={() => setPopup(null)} />}
     </div>
   );
 };
