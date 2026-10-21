@@ -42,6 +42,10 @@ const DEFAULT_ITEMS_PER_PAGE = 10;
 // Requirement 5: max characters shown inline before "...more" kicks in
 const TRUNCATE_LIMIT = 30;
 
+// Same rule as the backend validator: a dropdown, date or colour is shared by
+// design, so only free-typed Text / Number values can identify one unit.
+const UNIQUE_INPUT_TYPES = ['text', 'number'];
+
 const EMPTY_FORM = {
   code: '',
   label: '',
@@ -50,6 +54,7 @@ const EMPTY_FORM = {
   isRequired: false,
   isFilterable: false,
   showList: false,
+  isUnique: false,
   order: 0,
   // Nothing pre-selected — the user must tick at least one before submitting.
   applicableTrackingMethods: [],
@@ -75,6 +80,7 @@ const FIELD_TABLE_COLUMNS = [
   { key: 'isRequired', label: 'Required', show: true, render: (item) => <BooleanDot value={item.isRequired} /> },
   // { key: 'isFilterable', label: 'Filterable', show: true, render: (item) => <BooleanDot value={item.isFilterable} /> },
   { key: 'showList', label: 'Show in list', show: true, render: (item) => <BooleanDot value={item.showList} /> },
+  { key: 'isUnique', label: 'Unique', show: true, render: (item) => <BooleanDot value={item.isUnique} /> },
   { key: 'isActive', label: 'Status', show: true, render: (item) => <StatusBadge isActive={item.isActive} /> },
   { key: 'actions', label: 'Action', show: true, render: null }, // rendered separately (icon buttons)
 ];
@@ -155,6 +161,7 @@ const mapFieldDefinitionResponse = (item) => ({
   isRequired: !!item.isRequired,
   isFilterable: !!item.isFilterable,
   showList: !!item.showList,
+  isUnique: !!item.isUnique,
   isActive: item.isActive !== false,
   order: item.order ?? 0,
   applicableTrackingMethods:
@@ -243,6 +250,11 @@ const Icon = {
   filter: (
     <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
       <path d="M3 4.5h14L11.5 10.8V16l-3-1.6v-3.6L3 4.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  ),
+  fingerprint: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
+      <path d="M6 8.5a4 4 0 0 1 8 0v1.5M10 8.5v4.5M7.5 16c.8-1.2 1-2.6 1-4M12.5 16c-.4-1-.5-2-.5-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
   list: (
@@ -862,6 +874,19 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             color="indigo"
             icon={Icon.list}
           />
+          <ToggleCard
+            label="Unique identifier"
+            hint={
+              UNIQUE_INPUT_TYPES.includes(formData.inputType)
+                ? 'Serial / MAC / IMEI — never repeats across units, and every unit needs at least one unique field.'
+                : 'Only Text or Number fields can be unique.'
+            }
+            checked={UNIQUE_INPUT_TYPES.includes(formData.inputType) && !!formData.isUnique}
+            onChange={(value) => onChange('isUnique', value)}
+            disabled={isView || !UNIQUE_INPUT_TYPES.includes(formData.inputType)}
+            color="violet"
+            icon={Icon.fingerprint}
+          />
         </div>
 
         {/* Row 4 — Applicable to (Tracking Method): check either or both */}
@@ -1005,6 +1030,7 @@ const FieldDefinition = () => {
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
       showList: item.showList,
+      isUnique: item.isUnique,
       order: item.order ?? 0,
       applicableTrackingMethods: item.applicableTrackingMethods,
     });
@@ -1022,6 +1048,7 @@ const FieldDefinition = () => {
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
       showList: item.showList,
+      isUnique: item.isUnique,
       order: item.order ?? 0,
       applicableTrackingMethods: item.applicableTrackingMethods,
     });
@@ -1080,6 +1107,8 @@ const FieldDefinition = () => {
         isRequired: formData.isRequired,
         isFilterable: formData.isFilterable,
         showList: formData.showList,
+        // Only a typed-in value can name one unit — see UNIQUE_INPUT_TYPES.
+        isUnique: UNIQUE_INPUT_TYPES.includes(formData.inputType) ? !!formData.isUnique : false,
         order: formData.order === '' ? 0 : Number(formData.order),
         applicableTrackingMethods: formData.applicableTrackingMethods,
       };

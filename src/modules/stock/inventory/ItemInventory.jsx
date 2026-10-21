@@ -5,9 +5,9 @@ import { useSearchParams } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Boxes, Info, Eye } from "lucide-react";
-import { SearchableSelect, Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, Modal, inputCls, unitLabel, money } from "@/modules/stock/shared/StockSharedUI";
+import { ConditionBadge, SourceBadge, ReservedBadge, AssignedBadge, WarrantyBadge, SOURCE_LABEL, fmtDate } from "./itemBadges";
 
-const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
@@ -27,7 +27,7 @@ const Col = ({ label, children, className = "" }) => (
 /* Batch breakdown — every receiving event that makes up a Group   */
 /* card's total, opened via the small "info" button next to Qty.   */
 /* ============================================================= */
-const BatchBreakdownModal = ({ productName, unitText, defId, branchId, fields = [], onClose }) => {
+const BatchBreakdownModal = ({ productName, unitText, defId, branchId, status, fields = [], onClose }) => {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
 
@@ -36,6 +36,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, fields = 
       try {
         const params = new URLSearchParams();
         if (branchId) params.set("branchId", branchId);
+        if (status) params.set("status", status);
         const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/history/${defId}?${params.toString()}`, { credentials: "include" });
         const json = await res.json();
         if (!res.ok || !json.success) throw new Error(json.message || "Failed to load batches");
@@ -45,7 +46,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, fields = 
         setRows([]);
       }
     })();
-  }, [defId, branchId]);
+  }, [defId, branchId, status]);
 
   return (
     <Modal onClose={onClose} title={`Batch Breakdown — ${productName}`} maxWidth={fields.length > 0 ? "max-w-2xl" : "max-w-lg"}>
@@ -59,7 +60,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, fields = 
           <table className="w-full min-w-full border-collapse text-sm">
             <thead className="bg-slate-50">
               <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <th className="px-3 py-2.5">Invoice</th>
+                <th className="px-3 py-2.5">Received via</th>
                 <th className="px-3 py-2.5">Date</th>
                 {fields.map((fd) => (
                   <th key={fd._id} className="px-3 py-2.5">{fd.label}</th>
@@ -69,9 +70,12 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, fields = 
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => (
-                <tr key={r.invoiceId || r.invoiceNumber}>
-                  <td className="px-3 py-2 font-medium text-slate-900">{r.invoiceNumber || "—"}</td>
-                  <td className="px-3 py-2 text-slate-600">{fmtDate(r.invoiceDate)}</td>
+                <tr key={r.refId || r.refNumber || "unknown"}>
+                  <td className="px-3 py-2 font-medium text-slate-900">
+                    {r.refNumber || "—"}
+                    {r.sourceType && <span className="ml-1.5 text-xs font-normal text-slate-500">{SOURCE_LABEL[r.sourceType] || r.sourceType}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-slate-600">{fmtDate(r.receivedAt)}</td>
                   {fields.map((fd) => (
                     <td key={fd._id} className="px-3 py-2 text-slate-700">{r.fieldValues?.[fd.code] ?? "—"}</td>
                   ))}
@@ -98,6 +102,76 @@ const DetailField = ({ label, value, valueCls = "text-slate-900" }) => (
   </div>
 );
 
+/* ============================================================= */
+/* Timeline — where this unit came from and everything since.     */
+/* ============================================================= */
+const REF_LABEL = { INVOICE: "Invoice", OPENING_STOCK: "Opening Stock", TRANSFER_REQUEST: "Transfer", ITEM_REQUEST: "Request" };
+const describeMovement = (m) => {
+  if (m.type === "RECEIVED")
+    return `Received via ${REF_LABEL[m.ref?.type] || "—"} ${m.ref?.refNumber || ""}${m.toBranchId?.name ? ` at ${m.toBranchId.name}` : ""}`;
+  if (m.type === "TRANSFERRED")
+    return `Transferred ${m.fromBranchId?.name || "—"} → ${m.toBranchId?.name || "—"}${m.ref?.refNumber ? ` (${m.ref.refNumber})` : ""}`;
+  if (m.type === "ISSUED") return `${m.note || "Issued"}${m.ref?.refNumber ? ` (${m.ref.refNumber})` : ""}`;
+  return m.type;
+};
+
+const ItemTimeline = ({ itemId }) => {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/${itemId}/timeline`, { credentials: "include" });
+        const json = await res.json();
+        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load history");
+        setData(json.data);
+      } catch (err) {
+        setError(err.message);
+      }
+    })();
+  }, [itemId]);
+
+  return (
+    <div className="mt-5 border-t border-slate-100 pt-4">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">History</p>
+      {error ? (
+        <p className="text-sm text-rose-600">{error}</p>
+      ) : !data ? (
+        <div className="h-12 animate-pulse rounded-lg bg-slate-100" />
+      ) : (
+        <ol className="relative ml-2 space-y-3 border-l border-slate-200 pl-5">
+          {data.preSystem && (
+            <li className="relative">
+              <span className="absolute -left-6.75 top-1 h-3 w-3 rounded-full border-2 border-slate-300 bg-white" />
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Before this system</p>
+              {data.preSystem.lastUsedBy && (
+                <p className="text-sm text-slate-700">Last used by: <b>{data.preSystem.lastUsedBy}</b></p>
+              )}
+              {data.preSystem.remarks && <p className="text-sm text-slate-600">“{data.preSystem.remarks}”</p>}
+            </li>
+          )}
+          {data.movements.map((m) => (
+            <li key={m._id} className="relative">
+              <span className="absolute -left-6.75 top-1 h-3 w-3 rounded-full bg-indigo-500 ring-4 ring-indigo-50" />
+              <p className="text-xs text-slate-400">
+                {fmtDate(m.at)}
+                {m.createdBy?.name ? ` · ${m.createdBy.name}` : ""}
+              </p>
+              <p className="text-sm font-medium text-slate-800">
+                {describeMovement(m)}
+                {m.quantity ? <span className="font-normal text-slate-500"> · {m.quantity}</span> : null}
+              </p>
+              {m.note && <p className="text-xs text-violet-700">{m.note}</p>}
+            </li>
+          ))}
+          {!data.preSystem && data.movements.length === 0 && <li className="text-sm text-slate-400">No history recorded yet.</li>}
+        </ol>
+      )}
+    </div>
+  );
+};
+
 const ViewDetailsModal = ({ card, onClose }) => {
   const def = card.productDefinitionId || {};
   const isGroup = card.cardType === "group";
@@ -119,9 +193,24 @@ const ViewDetailsModal = ({ card, onClose }) => {
           </>
         ) : (
           <>
-            <DetailField label="Invoice Number" value={card.invoiceId?.invoiceNumber} />
+            <DetailField
+              label="Came In Via"
+              value={card.source?.type ? `${SOURCE_LABEL[card.source.type] || card.source.type} · ${card.source.refNumber || "—"}` : card.invoiceId?.invoiceNumber}
+            />
+            <DetailField label="Condition" value={<ConditionBadge condition={card.condition} />} />
             <DetailField label="Vendor" value={card.vendorId?.name} />
-            <DetailField label="Received By" value={card.invoiceId?.receivedByName} />
+            <DetailField label="Warranty" value={<WarrantyBadge endDate={card.warranty?.endDate} />} />
+            <DetailField label="Purchase Date" value={fmtDate(card.purchaseDate)} />
+            <DetailField label="Purchase Cost" value={card.purchaseCost === null || card.purchaseCost === undefined ? "Not known" : money(card.purchaseCost)} />
+            {card.status === "RESERVED" && <DetailField label="Currently With" value={card.heldByNote || "—"} valueCls="text-violet-700" />}
+            {card.status === "ASSIGNED" && (
+              <DetailField
+                label="Issued To"
+                value={`${card.assignedTo?.orderId || "—"}${card.assignedTo?.username ? ` · ${card.assignedTo.username}` : ""} (${card.assignedTo?.requestNumber || "—"})`}
+                valueCls="text-indigo-700"
+              />
+            )}
+            {card.invoiceId?.receivedByName && <DetailField label="Received By" value={card.invoiceId.receivedByName} />}
             <DetailField label="Received Date" value={fmtDateTime(card.receivedAt)} />
             <DetailField
               label="Approval Status"
@@ -150,6 +239,8 @@ const ViewDetailsModal = ({ card, onClose }) => {
           </div>
         </div>
       )}
+
+      {!isGroup && <ItemTimeline itemId={card._id} />}
     </Modal>
   );
 };
@@ -205,6 +296,18 @@ const InventoryRow = ({ card, onView, onShowBatches }) => {
 
       <Col label="Branch" className="w-36">{card.branchId?.name || "—"}</Col>
 
+      {!isGroup && (
+        <Col label="Origin & Condition" className="min-w-56">
+          <span className="flex flex-wrap gap-1">
+            <ConditionBadge condition={card.condition} />
+            <SourceBadge source={card.source} />
+            <WarrantyBadge endDate={card.warranty?.endDate} />
+            {card.status === "RESERVED" && <ReservedBadge heldByNote={card.heldByNote} />}
+            {card.status === "ASSIGNED" && <AssignedBadge assignedTo={card.assignedTo} />}
+          </span>
+        </Col>
+      )}
+
       <div className="ml-auto shrink-0">
         <p className={colLabel}>Action</p>
         <button
@@ -231,6 +334,11 @@ const ItemInventory = () => {
   const [categoryId, setCategoryId] = useState("");
   const [productId, setProductId] = useState(initialProductId);
   const [branchId, setBranchId] = useState("");
+  // AVAILABLE = can be handed out; RESERVED = on the books but still with an
+  // employee (opening stock not yet assigned).
+  const [status, setStatus] = useState("AVAILABLE");
+  const [sourceType, setSourceType] = useState("");
+  const [condition, setCondition] = useState("");
 
   const [categories, setCategories] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
@@ -280,21 +388,26 @@ const ItemInventory = () => {
       if (categoryId) params.set("categoryId", categoryId);
       if (productId) params.set("productDefinitionId", productId);
       if (branchId) params.set("branchId", branchId);
+      params.set("status", status);
+      if (sourceType) params.set("sourceType", sourceType);
+      if (condition) params.set("condition", condition);
       const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/cards?${params.toString()}`, { credentials: "include" });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch items");
       setRows(json.data || []);
       setTotal(json.pagination?.total ?? 0);
     } catch (err) { setError(err.message); setRows([]); setTotal(0); } finally { setLoading(false); }
-  }, [page, limit, debouncedSearch, categoryId, productId, branchId]);
+  }, [page, limit, debouncedSearch, categoryId, productId, branchId, status, sourceType, condition]);
 
   useEffect(() => { loadList(); }, [loadList]);
-  useEffect(() => { setPage(1); }, [debouncedSearch, categoryId, productId, branchId]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, categoryId, productId, branchId, status, sourceType, condition]);
 
   const categoryOptions = useMemo(() => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })), [categories]);
 
-  const hasActiveFilters = !!search || !!categoryId || !!productId || !!branchId;
-  const clearFilters = () => { setSearch(""); setCategoryId(""); setProductId(""); setBranchId(""); setPage(1); };
+  const hasActiveFilters = !!search || !!categoryId || !!productId || !!branchId || !!sourceType || !!condition;
+  const clearFilters = () => {
+    setSearch(""); setCategoryId(""); setProductId(""); setBranchId(""); setSourceType(""); setCondition(""); setPage(1);
+  };
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -308,6 +421,42 @@ const ItemInventory = () => {
       {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
       <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+            {[
+              { value: "AVAILABLE", label: "Available" },
+              { value: "RESERVED", label: "Reserved (with employees)" },
+              { value: "ASSIGNED", label: "Assigned (with subscribers)" },
+            ].map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setStatus(t.value)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                  status === t.value ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="w-44">
+            <SearchableSelect
+              value={sourceType}
+              onChange={setSourceType}
+              options={[{ value: "PURCHASE", label: "Invoice" }, { value: "OPENING_STOCK", label: "Opening Stock" }]}
+              placeholder="Any origin"
+            />
+          </div>
+          <div className="w-36">
+            <SearchableSelect
+              value={condition}
+              onChange={setCondition}
+              options={[{ value: "NEW", label: "New" }, { value: "USED", label: "Used" }]}
+              placeholder="Any condition"
+            />
+          </div>
+        </div>
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
           <div className="lg:col-span-2">
             <input
@@ -361,6 +510,7 @@ const ItemInventory = () => {
           unitText={unitLabel(batchesFor.productDefinitionId?.unit)}
           defId={batchesFor.productDefinitionId?._id}
           branchId={batchesFor.branchId?._id}
+          status={status}
           fields={(batchesFor.productDefinitionId?.selectedFields || []).map((sf) => sf.fieldDefId).filter(Boolean)}
           onClose={() => setBatchesFor(null)}
         />

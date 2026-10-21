@@ -6,6 +6,7 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, History, Eye, ArrowLeft } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { SOURCE_LABEL } from "./itemBadges";
 
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-700";
 const thRight = "px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-700";
@@ -64,12 +65,14 @@ const ProductInventoryHistory = ({ product, onBack }) => {
         ) : (
           <ol className="relative space-y-5 border-l-2 border-dashed border-slate-200 pl-5">
             {[...rows].reverse().map((r, i) => (
-              <li key={r.invoiceId || i} className="relative">
+              <li key={r.refId || i} className="relative">
                 <span className="absolute -left-[27px] top-1 h-3 w-3 rounded-full border-2 border-white bg-indigo-500 shadow" />
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">Invoice {r.invoiceNumber || "—"}</p>
-                    <p className="text-xs text-slate-500">{fmtDate(r.invoiceDate)}</p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {SOURCE_LABEL[r.sourceType] || "Received"} {r.refNumber || "—"}
+                    </p>
+                    <p className="text-xs text-slate-500">{fmtDate(r.receivedAt)}</p>
                   </div>
                   <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
                     Received {r.quantity} {unitLabel(product.unit)}

@@ -212,6 +212,45 @@ export const navCategories = [
         moduleKey: "inventory-items",
         action: ["VIEW_MENU"],
       },
+      // Stock that was already on hand before this system.
+      {
+        name: "Opening Stock",
+        path: "/stock/opening-stock",
+        moduleKey: "opening-stock",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+
+  // Subscribers' requests for stock, from the NOC / broadband website.
+  {
+    category: "Requests",
+    items: [
+      {
+        name: "Item Requests",
+        path: "/stock/item-requests",
+        moduleKey: "item-requests",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Subscriber Items",
+        path: "/stock/subscriber-items",
+        moduleKey: "item-requests",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+
+  // 🧪 TEST ONLY — remove when the real website is connected.
+  {
+    category: "🧪 Test",
+    items: [
+      {
+        name: "Request Simulator (Test)",
+        path: "/test/request-simulator",
+        moduleKey: "test-simulator",
+        action: ["VIEW_MENU"],
+      },
     ],
   },
 
