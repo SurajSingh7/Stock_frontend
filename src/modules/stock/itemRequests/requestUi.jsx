@@ -20,6 +20,26 @@ export const RequestStatusBadge = ({ status }) => {
 
 export const fmtQty = (n) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 1000) / 1000));
 
+export const REQUEST_TYPE = {
+  ISSUE: { label: "Issue", cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
+  RETURN: { label: "Return", cls: "bg-teal-50 text-teal-700 ring-teal-200" },
+  REPLACE: { label: "Replace", cls: "bg-orange-50 text-orange-700 ring-orange-200" },
+};
+
+export const RequestTypeBadge = ({ type }) => {
+  const t = REQUEST_TYPE[type || "ISSUE"] || REQUEST_TYPE.ISSUE;
+  return <span className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ring-1 ring-inset ${t.cls}`}>{t.label}</span>;
+};
+
+export const hasIssueSide = (type) => !type || type === "ISSUE" || type === "REPLACE";
+export const hasReturnSide = (type) => type === "RETURN" || type === "REPLACE";
+
+// The one-line "what is this request" for lists.
+export const requestSummary = (r) =>
+  hasReturnSide(r.type)
+    ? (r.returnLines || []).map((l) => l.label || l.productName).join(", ")
+    : r.categoryPath;
+
 // "2 / 5" with a bar — how much of a request has been handed over.
 export const IssuedProgress = ({ issued, requested }) => {
   const pct = requested > 0 ? Math.min(100, Math.round((issued / requested) * 100)) : 0;
@@ -42,6 +62,7 @@ export const fmtDateTime = (d) =>
 const HISTORY_LABEL = {
   CREATED: "Request raised",
   ISSUED: "Items issued",
+  RECEIVED: "Items received back",
   COMPLETED: "Completed",
   SHORT_CLOSED: "Short-closed",
   REJECTED: "Rejected",

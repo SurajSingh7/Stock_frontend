@@ -6,7 +6,7 @@
 export const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
-export const SOURCE_LABEL = { PURCHASE: "Invoice", OPENING_STOCK: "Opening Stock" };
+export const SOURCE_LABEL = { PURCHASE: "Invoice", OPENING_STOCK: "Opening Stock", VENDOR_REPLACEMENT: "Vendor Replacement" };
 export const CONDITION_LABEL = { NEW: "New", USED: "Used" };
 
 const pill = "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset";
@@ -45,8 +45,13 @@ export const WarrantyBadge = ({ endDate }) => {
   return <span className={`${pill} ${w.cls}`}>{w.label}</span>;
 };
 
+// With a subscriber (order id) or one of our employees (name).
+export const assigneeText = (a) =>
+  a?.kind === "EMPLOYEE" ? `${a.employeeName || ""}${a.employeeCode ? ` (${a.employeeCode})` : ""}` : a?.orderId || "";
+
 export const AssignedBadge = ({ assignedTo }) => (
-  <span className={`${pill} bg-indigo-50 text-indigo-700 ring-indigo-200`} title={assignedTo?.requestNumber || ""}>
-    Assigned{assignedTo?.orderId ? ` · ${assignedTo.orderId}` : ""}
+  <span className={`${pill} bg-indigo-50 text-indigo-700 ring-indigo-200`} title={assignedTo?.requestNumber || assignedTo?.note || ""}>
+    {assignedTo?.kind === "EMPLOYEE" ? "With employee" : "Assigned"}
+    {assigneeText(assignedTo) ? ` · ${assigneeText(assignedTo)}` : ""}
   </span>
 );

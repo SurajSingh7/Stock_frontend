@@ -18,6 +18,7 @@ const call = async (url, { method = "GET", body } = {}, fallback = "Request fail
 export const fetchMeta = () => call(`${BASE}/meta`, {}, "Failed to load branches and categories");
 export const fetchSubscribers = (search = "") =>
   call(`${BASE}/subscribers?${new URLSearchParams(search ? { search } : {})}`, {}, "Failed to load subscribers");
+export const fetchHoldings = (subscriberId) => call(`${BASE}/subscribers/${subscriberId}/items`, {}, "Failed to load what the subscriber holds");
 export const addSubscriber = (body) => call(`${BASE}/subscribers`, { method: "POST", body }, "Failed to add the subscriber");
 export const sendRequest = (subscriberId, body) =>
   call(`${BASE}/subscribers/${subscriberId}/requests`, { method: "POST", body }, "Failed to send the request");

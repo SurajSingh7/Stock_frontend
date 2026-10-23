@@ -13,8 +13,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { FlaskConical, Plus, PackagePlus, Undo2, Repeat, ListChecks, Search } from "lucide-react";
 import { Modal, SearchableSelect, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
-import { RequestStatusBadge, IssuedProgress, RequestHistory, fmtDateTime, fmtQty } from "@/modules/stock/itemRequests/requestUi";
-import { fetchMeta, fetchSubscribers, addSubscriber, sendRequest, resendRequest } from "./simulatorApi";
+import { RequestStatusBadge, RequestTypeBadge, IssuedProgress, RequestHistory, fmtDateTime, fmtQty, hasReturnSide } from "@/modules/stock/itemRequests/requestUi";
+import { fetchMeta, fetchSubscribers, fetchHoldings, addSubscriber, sendRequest, resendRequest } from "./simulatorApi";
 
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap";
 const label = "text-xs font-semibold text-slate-600";
@@ -142,6 +142,138 @@ const RequestModal = ({ meta, subscriber, existing, onClose, onSent }) => {
   );
 };
 
+/* ── Return / Replace — picked from what the subscriber holds ──── */
+const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
+  const isReplace = type === "REPLACE";
+  const [items, setItems] = useState(null);
+  const [picked, setPicked] = useState(() =>
+    Object.fromEntries((existing?.returnLines || []).map((l) => [String(l.inventoryItemId), String(l.requestedQty)]))
+  );
+  const [branchId, setBranchId] = useState(existing ? String(existing.branchId) : "");
+  const [remarks, setRemarks] = useState(existing?.remarks || "");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetchHoldings(subscriber._id)
+      .then((h) => setItems(h.items || []))
+      .catch((err) => { toast.error(err.message); setItems([]); });
+  }, [subscriber._id]);
+
+  const chosen = (items || []).filter((i) => picked[String(i.inventoryItemId)] !== undefined);
+  // A replace works on one category — once something is ticked, only its
+  // category stays pickable.
+  const lockedCategory = isReplace && chosen[0] ? String(chosen[0].categoryId) : null;
+
+  const toggle = (i) => {
+    const id = String(i.inventoryItemId);
+    setPicked((p) => {
+      const n = { ...p };
+      if (n[id] !== undefined) delete n[id];
+      else n[id] = i.trackingMethod === "quantity" ? String(i.quantity) : "1";
+      return n;
+    });
+    if (!branchId && i.branchId) setBranchId(String(i.branchId));
+  };
+
+  const valid =
+    branchId &&
+    chosen.length > 0 &&
+    chosen.every((i) => i.trackingMethod !== "quantity" || (Number(picked[String(i.inventoryItemId)]) > 0 && Number(picked[String(i.inventoryItemId)]) <= i.quantity));
+
+  const send = async () => {
+    setBusy(true);
+    try {
+      const body = {
+        type,
+        branchId,
+        remarks,
+        items: chosen.map((i) => ({
+          inventoryItemId: i.inventoryItemId,
+          ...(i.trackingMethod === "quantity" ? { quantity: Number(picked[String(i.inventoryItemId)]) } : {}),
+        })),
+      };
+      const r = existing ? await resendRequest(existing._id, body) : await sendRequest(subscriber._id, body);
+      toast.success(`${r.requestNumber} sent to the store`);
+      onSent();
+      onClose();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      onClose={onClose}
+      title={existing ? `Edit & resend ${existing.requestNumber}` : `${isReplace ? "Replace Item" : "Return Item"} — ${subscriber.orderId}`}
+      maxWidth="max-w-2xl"
+    >
+      {existing?.rejection?.reason && <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">Store rejected it: {existing.rejection.reason}</p>}
+      <p className="mb-3 text-sm text-slate-500">
+        {isReplace
+          ? "Tick the faulty item(s) to swap — one category at a time. The store takes them back and gives as many of the same category."
+          : "Tick what the subscriber is giving back."}
+      </p>
+      <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200">
+        {items === null ? (
+          <p className="px-4 py-6 text-center text-sm text-slate-400">Loading…</p>
+        ) : items.length === 0 ? (
+          <p className="px-4 py-6 text-center text-sm text-slate-400">This subscriber holds nothing from the store.</p>
+        ) : (
+          items.map((i) => {
+            const id = String(i.inventoryItemId);
+            const on = picked[id] !== undefined;
+            const claimed = i.claimedBy && !(existing && existing.returnLines?.some((l) => String(l.inventoryItemId) === id));
+            const wrongCategory = lockedCategory && String(i.categoryId) !== lockedCategory;
+            const disabled = !!claimed || (!!wrongCategory && !on);
+            return (
+              <div key={id} className={`flex items-center gap-3 border-b border-slate-50 px-3 py-2 last:border-0 ${on ? "bg-indigo-50/50" : ""} ${disabled ? "opacity-50" : ""}`}>
+                <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(i)} className="h-4 w-4 accent-indigo-600" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-mono text-sm text-slate-900">{i.label}</span>
+                  <span className="block text-xs text-slate-500">
+                    {i.productName} · {i.categoryPath}
+                    {claimed ? ` · already on ${i.claimedBy}` : ""}
+                  </span>
+                </span>
+                {i.trackingMethod === "quantity" && (
+                  <span className="flex items-center gap-1">
+                    <input
+                      type="number" min="0" step="any" disabled={!on} value={picked[id] ?? ""}
+                      onChange={(e) => setPicked((p) => ({ ...p, [id]: e.target.value }))}
+                      className={`${inputCls} w-24`}
+                    />
+                    <span className="text-xs text-slate-400">/ {fmtQty(i.quantity)} {unitLabel(i.unit)}</span>
+                  </span>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className={label}>Back to branch *</label>
+          <div className="mt-1">
+            <SearchableSelect value={branchId} onChange={setBranchId} options={meta.branches.map((b) => ({ value: String(b._id), label: b.name }))} placeholder="Select branch" />
+          </div>
+        </div>
+        <div>
+          <label className={label}>Remarks</label>
+          <input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={isReplace ? "e.g. ONT not powering on" : "e.g. Connection closed"} className={`${inputCls} mt-1`} />
+        </div>
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button>
+        <button type="button" disabled={!valid || busy} onClick={send} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          {busy ? "Sending…" : existing ? "Send again" : `Send ${isReplace ? "Replace" : "Return"} (${chosen.length})`}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
 /* ── A subscriber's requests, as the website would show them ──── */
 const RequestsModal = ({ subscriber, onClose, onResend }) => (
   <Modal onClose={onClose} title={`Requests — ${subscriber.orderId}`} maxWidth="max-w-2xl">
@@ -154,17 +286,29 @@ const RequestsModal = ({ subscriber, onClose, onResend }) => (
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="font-mono font-semibold text-slate-900">{r.requestNumber}</span>
+                <RequestTypeBadge type={r.type} />
                 <RequestStatusBadge status={r.status} />
               </div>
-              <IssuedProgress issued={r.issuedQty} requested={r.requestedQty} />
+              <div className="flex gap-4">
+                {hasReturnSide(r.type) && <IssuedProgress issued={r.returnReceivedQty} requested={r.returnRequestedQty} />}
+                {r.type !== "RETURN" && <IssuedProgress issued={r.issuedQty} requested={r.requestedQty} />}
+              </div>
             </div>
-            <p className="mt-1 text-xs text-slate-500">{r.categoryPath} · {r.branchName || ""} · {fmtDateTime(r.createdAt)}</p>
-            <p className="mt-2 text-sm text-slate-700">
-              Asked <b>{fmtQty(r.requestedQty)}</b> {r.trackingMethod === "quantity" ? unitLabel(r.unit) : "units"}
-              {r.issuedByProduct.length > 0 && (
-                <> · given {r.issuedByProduct.map((g) => `${g.productName} ×${fmtQty(g.quantity)}`).join(", ")}</>
-              )}
-            </p>
+            <p className="mt-1 text-xs text-slate-500">{r.categoryPath ? `${r.categoryPath} · ` : ""}{r.branchName || ""} · {fmtDateTime(r.createdAt)}</p>
+            {hasReturnSide(r.type) && (
+              <p className="mt-2 text-sm text-slate-700">
+                Back: {r.returnLines.map((l) => `${l.label} ${fmtQty(l.receivedQty)}/${fmtQty(l.requestedQty)}`).join(", ")}
+                {r.receipts.some((rc) => rc.lines.some((l) => l.condition === "FAULTY")) && <span className="ml-1 text-rose-600">(some faulty)</span>}
+              </p>
+            )}
+            {r.type !== "RETURN" && (
+              <p className="mt-2 text-sm text-slate-700">
+                {r.type === "REPLACE" ? "New ones:" : "Asked"} <b>{fmtQty(r.requestedQty)}</b> {r.trackingMethod === "quantity" ? unitLabel(r.unit) : "units"}
+                {r.issuedByProduct.length > 0 && (
+                  <> · given {r.issuedByProduct.map((g) => `${g.productName} ×${fmtQty(g.quantity)}`).join(", ")}</>
+                )}
+              </p>
+            )}
             {r.issues.length > 0 && (
               <p className="mt-2 font-mono text-xs text-slate-500">
                 Given: {r.issues.flatMap((i) => i.lines.flatMap((l) => l.units)).join(", ")}
@@ -217,7 +361,6 @@ const RequestSimulator = () => {
 
   // Keep the open "Requests" popup in step after a resend.
   const viewingRow = useMemo(() => (viewing ? rows?.find((r) => r._id === viewing) : null), [viewing, rows]);
-  const soon = () => toast("Coming in the next phase", { icon: "🚧" });
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -286,10 +429,10 @@ const RequestSimulator = () => {
                       <button type="button" disabled={!meta} onClick={() => setRequesting({ subscriber: s })} className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
                         <PackagePlus className="h-3.5 w-3.5" /> Issue Item
                       </button>
-                      <button type="button" onClick={soon} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-400" title="Next phase">
+                      <button type="button" disabled={!meta} onClick={() => setRequesting({ subscriber: s, type: "RETURN" })} className="inline-flex items-center gap-1 rounded-lg bg-teal-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">
                         <Undo2 className="h-3.5 w-3.5" /> Return Item
                       </button>
-                      <button type="button" onClick={soon} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-400" title="Next phase">
+                      <button type="button" disabled={!meta} onClick={() => setRequesting({ subscriber: s, type: "REPLACE" })} className="inline-flex items-center gap-1 rounded-lg bg-orange-500 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-orange-600">
                         <Repeat className="h-3.5 w-3.5" /> Replace Item
                       </button>
                     </div>
@@ -302,14 +445,17 @@ const RequestSimulator = () => {
       </div>
 
       {adding && meta && <AddSubscriberModal serviceTypes={meta.serviceTypes} onClose={() => setAdding(false)} onAdded={load} />}
-      {requesting && meta && (
+      {requesting && meta && (requesting.type || "ISSUE") === "ISSUE" && (
         <RequestModal meta={meta} subscriber={requesting.subscriber} existing={requesting.existing} onClose={() => setRequesting(null)} onSent={load} />
+      )}
+      {requesting && meta && hasReturnSide(requesting.type) && (
+        <ReturnModal meta={meta} subscriber={requesting.subscriber} type={requesting.type} existing={requesting.existing} onClose={() => setRequesting(null)} onSent={load} />
       )}
       {viewingRow && (
         <RequestsModal
           subscriber={viewingRow}
           onClose={() => setViewing(null)}
-          onResend={(r) => { setViewing(null); setRequesting({ subscriber: viewingRow, existing: r }); }}
+          onResend={(r) => { setViewing(null); setRequesting({ subscriber: viewingRow, existing: r, type: r.type }); }}
         />
       )}
     </div>

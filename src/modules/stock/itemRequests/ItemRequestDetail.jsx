@@ -7,8 +7,8 @@ import { ArrowLeft, PackageCheck, Search, Ban, CircleSlash } from "lucide-react"
 import { usePermissions } from "@/context/PermissionContext";
 import { Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { ConditionBadge, SourceBadge, WarrantyBadge } from "@/modules/stock/inventory/itemBadges";
-import { fetchRequest, fetchAvailableUnits, issueItems, shortCloseRequest, rejectRequest } from "./itemRequestApi";
-import { RequestStatusBadge, IssuedProgress, RequestHistory, fmtDateTime, fmtQty } from "./requestUi";
+import { fetchRequest, fetchAvailableUnits, issueItems, receiveItems, shortCloseRequest, rejectRequest } from "./itemRequestApi";
+import { RequestStatusBadge, RequestTypeBadge, IssuedProgress, RequestHistory, fmtDateTime, fmtQty, hasIssueSide, hasReturnSide } from "./requestUi";
 
 export const canDo = (permissions, isAdmin, action) => {
   if (isAdmin) return true;
@@ -169,6 +169,107 @@ const IssueModal = ({ request, onClose, onIssued }) => {
   );
 };
 
+/* ============================================================= */
+/* Receive — what came back from the subscriber, each with the   */
+/* condition it came back in. Good → shelf, Faulty → FAULTY.     */
+/* ============================================================= */
+const ReceiveModal = ({ request, onClose, onReceived }) => {
+  const open = request.returnLines.filter((l) => l.remainingQty > 0);
+  const [rows, setRows] = useState(() =>
+    Object.fromEntries(open.map((l) => [l._id, { on: false, condition: "GOOD", note: "", quantity: String(l.remainingQty) }]))
+  );
+  const [busy, setBusy] = useState(false);
+  const set = (id, patch) => setRows((r) => ({ ...r, [id]: { ...r[id], ...patch } }));
+  const picked = open.filter((l) => rows[l._id]?.on);
+  const valid =
+    picked.length > 0 &&
+    picked.every((l) => {
+      const r = rows[l._id];
+      if (r.condition === "FAULTY" && !r.note.trim()) return false;
+      if (l.trackingMethod === "quantity") return Number(r.quantity) > 0 && Number(r.quantity) <= l.remainingQty;
+      return true;
+    });
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await receiveItems(
+        request._id,
+        picked.map((l) => ({
+          returnLineId: l._id,
+          condition: rows[l._id].condition,
+          note: rows[l._id].note.trim(),
+          ...(l.trackingMethod === "quantity" ? { quantity: Number(rows[l._id].quantity) } : {}),
+        }))
+      );
+      toast.success(`Received ${picked.length} item(s) from ${request.subscriber?.orderId}`);
+      onReceived();
+      onClose();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={`Receive back — ${request.subscriber?.orderId}`} maxWidth="max-w-2xl">
+      <p className="mb-3 text-sm text-slate-500">
+        Tick what has physically come back to <b className="text-slate-800">{request.branchId?.name}</b>. Good goes back on the shelf; faulty goes to Faulty items with your note.
+      </p>
+      <div className="max-h-96 space-y-2 overflow-y-auto">
+        {open.map((l) => {
+          const r = rows[l._id];
+          return (
+            <div key={l._id} className={`rounded-xl border px-3 py-2.5 ${r.on ? "border-indigo-200 bg-indigo-50/40" : "border-slate-200"}`}>
+              <label className="flex cursor-pointer items-center gap-3">
+                <input type="checkbox" checked={r.on} onChange={() => set(l._id, { on: !r.on })} className="h-4 w-4 accent-indigo-600" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-mono text-sm text-slate-900">{l.label}</span>
+                  <span className="block text-xs text-slate-500">{l.productName} · due {fmtQty(l.remainingQty)}{l.trackingMethod === "quantity" ? ` ${unitLabel(l.unit)}` : ""}</span>
+                </span>
+              </label>
+              {r.on && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 pl-7">
+                  {l.trackingMethod === "quantity" && (
+                    <input type="number" min="0" step="any" value={r.quantity} onChange={(e) => set(l._id, { quantity: e.target.value })} className={`${inputCls} w-24`} />
+                  )}
+                  <div className="inline-flex rounded-lg border border-slate-200 p-0.5">
+                    {["GOOD", "FAULTY"].map((c) => (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => set(l._id, { condition: c })}
+                        className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+                          r.condition === c ? (c === "GOOD" ? "bg-emerald-600 text-white" : "bg-rose-600 text-white") : "text-slate-600"
+                        }`}
+                      >
+                        {c === "GOOD" ? "Good" : "Faulty"}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    value={r.note}
+                    onChange={(e) => set(l._id, { note: e.target.value })}
+                    placeholder={r.condition === "FAULTY" ? "What is wrong? (required)" : "Note (optional)"}
+                    className={`${inputCls} min-w-40 flex-1 ${r.condition === "FAULTY" && !r.note.trim() ? "border-rose-300" : ""}`}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button>
+        <button type="button" disabled={!valid || busy} onClick={submit} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">
+          {busy ? "Saving…" : `Receive ${picked.length}`}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
 const ReasonModal = ({ title, hint, confirmLabel, onClose, onConfirm }) => {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -210,6 +311,7 @@ const ItemRequestDetail = ({ requestId }) => {
   const [request, setRequest] = useState(null);
   const [error, setError] = useState(null);
   const [issuing, setIssuing] = useState(false);
+  const [receiving, setReceiving] = useState(false);
   const [asking, setAsking] = useState(null); // "close" | "reject"
 
   const load = useCallback(async () => {
@@ -224,7 +326,8 @@ const ItemRequestDetail = ({ requestId }) => {
   useEffect(() => { load(); }, [load]);
 
   const open = request && ["PENDING", "PARTIAL"].includes(request.status);
-  const canIssue = open && request.remainingQty > 0 && canDo(permissions, isAdmin, "ISSUE");
+  const canIssue = open && hasIssueSide(request.type) && request.remainingQty > 0 && canDo(permissions, isAdmin, "ISSUE");
+  const canReceive = open && hasReturnSide(request.type) && request.returnRemainingQty > 0 && canDo(permissions, isAdmin, "RECEIVE");
   const canClose = request?.status === "PARTIAL" && canDo(permissions, isAdmin, "SHORT_CLOSE");
   const canReject = request?.status === "PENDING" && canDo(permissions, isAdmin, "REJECT");
   const extra = useMemo(() => Object.entries(request?.subscriber?.extraFields || {}).filter(([, v]) => v), [request]);
@@ -242,12 +345,13 @@ const ItemRequestDetail = ({ requestId }) => {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="font-mono text-xl font-semibold text-slate-900">{request.requestNumber}</h1>
+            <RequestTypeBadge type={request.type} />
             <RequestStatusBadge status={request.status} />
             {request.revision > 1 && <span className="text-xs font-semibold text-slate-400">revision {request.revision}</span>}
             {request.channel === "TEST_SIMULATOR" && <span className="rounded bg-yellow-100 px-1.5 py-0.5 text-[11px] font-bold text-yellow-800">TEST</span>}
           </div>
           <p className="mt-1 text-sm text-slate-500">
-            from <b className="text-slate-700">{request.branchId?.name}</b> · raised {fmtDateTime(request.createdAt)}
+            {request.type === "RETURN" ? "back to" : "branch"} <b className="text-slate-700">{request.branchId?.name}</b> · raised {fmtDateTime(request.createdAt)}
             {request.requestedBy?.name ? ` by ${request.requestedBy.name}` : ""}
           </p>
           {request.remarks && <p className="mt-1 text-sm text-slate-600">“{request.remarks}”</p>}
@@ -279,10 +383,68 @@ const ItemRequestDetail = ({ requestId }) => {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
+          {hasReturnSide(request.type) && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Coming back from the subscriber</p>
+                  <p className="mt-0.5 text-sm text-slate-500">to {request.branchId?.name}</p>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="w-40"><IssuedProgress issued={request.returnReceivedQty} requested={request.returnRequestedQty} /></div>
+                  {canReceive && (
+                    <button type="button" onClick={() => setReceiving(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">
+                      <PackageCheck className="h-4 w-4" /> Receive
+                    </button>
+                  )}
+                </div>
+              </div>
+              <table className="mt-4 w-full text-sm">
+                <thead className="text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                  <tr className="border-b border-slate-100">
+                    <th className="py-2">Item</th>
+                    <th className="py-2">Product</th>
+                    <th className="py-2 text-right">Due</th>
+                    <th className="py-2 text-right">Received</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {request.returnLines.map((l) => (
+                    <tr key={l._id}>
+                      <td className="py-2 font-mono text-slate-900">{l.label}</td>
+                      <td className="py-2 text-slate-700">{l.productName}</td>
+                      <td className="py-2 text-right tabular-nums text-slate-700">{fmtQty(l.requestedQty)}{l.trackingMethod === "quantity" ? ` ${unitLabel(l.unit)}` : ""}</td>
+                      <td className={`py-2 text-right tabular-nums ${l.receivedQty >= l.requestedQty ? "text-emerald-700" : "text-slate-700"}`}>{fmtQty(l.receivedQty)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {request.receipts.length > 0 && (
+                <div className="mt-4 space-y-2">
+                  {[...request.receipts].reverse().map((rc) => (
+                    <div key={rc._id} className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-2.5">
+                      <p className="text-xs text-slate-500">{fmtDateTime(rc.at)}{rc.by?.name ? ` · ${rc.by.name}` : ""}</p>
+                      {rc.lines.map((l, k) => (
+                        <p key={k} className="mt-0.5 text-sm text-slate-800">
+                          <span className="font-mono">{l.label}</span> ×{fmtQty(l.quantity)}{" "}
+                          <span className={`ml-1 rounded px-1.5 text-[11px] font-semibold ${l.condition === "GOOD" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                            {l.condition === "GOOD" ? "Good" : "Faulty"}
+                          </span>
+                          {l.note && <span className="ml-2 text-xs text-slate-500">{l.note}</span>}
+                        </p>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {hasIssueSide(request.type) && (<>
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Requested</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{request.type === "REPLACE" ? "Going out in their place" : "Requested"}</p>
                 <p className="mt-0.5 text-lg font-semibold text-slate-900">{request.categoryPath}</p>
               </div>
               <div className="flex items-center gap-6">
@@ -352,6 +514,7 @@ const ItemRequestDetail = ({ requestId }) => {
               </div>
             )}
           </div>
+          </>)}
         </div>
 
         <div className="space-y-4">
@@ -377,6 +540,7 @@ const ItemRequestDetail = ({ requestId }) => {
       </div>
 
       {issuing && <IssueModal request={request} onClose={() => setIssuing(false)} onIssued={load} />}
+      {receiving && <ReceiveModal request={request} onClose={() => setReceiving(false)} onReceived={load} />}
       {asking === "reject" && (
         <ReasonModal
           title="Reject this request?"

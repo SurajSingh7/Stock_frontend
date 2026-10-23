@@ -12,6 +12,7 @@ import AddInvoicePopup from "./AddInvoicePopup";
 import { EntriesContent } from "./InvoiceEntries";
 import { usePermissions } from "@/context/PermissionContext";
 import { anchorRect } from "@/modules/stock/shared/anchorRect";
+import { MAIL_MODE_META } from "@/modules/stock/purchaseOrder/SendMailPopup";
 import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -1127,38 +1128,48 @@ const gstSummaryLabel = (row) => {
 /*
   How this PO reached the vendor.
 
-  Two genuinely different things wear the same green tick on the card: the
-  system emailed it, or somebody handled it outside and marked it done. The
-  card only promises "it went"; this says which, and to whom.
+  Three different things can sit behind the mail icon on the card: the system
+  emailed it (Mail Sent), somebody sent it outside the system (Sent Manually),
+  or nobody sent it and the order moved on anyway (Mail Skipped). The icon's
+  colour hints which; this says which, and to whom.
 */
+const MAIL_INFO_COPY = {
+  SENT: {
+    heading: "Mail Sent — emailed by the system",
+    body: "The PO was emailed from here and the delivery was recorded, so the addresses below are exactly what it went to.",
+    at: "Sent at",
+  },
+  MANUAL: {
+    heading: "Sent Manually — outside the system",
+    body: "Somebody sent this PO themselves — by their own email, WhatsApp, or by hand — and marked it done. Nothing was sent from this system, so there are no delivery details beyond what they recorded.",
+    at: "Recorded at",
+  },
+  SKIPPED: {
+    heading: "Mail Skipped — not sent to the vendor",
+    body: "No mail went to the vendor. The order was allowed to move on without it, and the mail can still be sent from Purchase Orders.",
+    at: "Skipped at",
+  },
+};
+
 const MailInfoPopup = ({ row, onClose }) => {
   const mr = row.mailResult || {};
   const bySystem = mr.mode === "SENT";
+  const copy = MAIL_INFO_COPY[mr.mode] || MAIL_INFO_COPY.MANUAL;
+  const meta = MAIL_MODE_META[mr.mode] || MAIL_MODE_META.MANUAL;
   const list = (arr) => (arr && arr.length ? arr.join(", ") : "—");
 
   return (
     <Modal onClose={onClose} title={`Mail · ${row.poNumber || row.vendorName}`}>
-      <div
-        className={`mb-4 flex items-center gap-2 rounded-xl px-3 py-2.5 ring-1 ring-inset ${
-          bySystem
-            ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
-            : "bg-amber-50 text-amber-800 ring-amber-200"
-        }`}
-      >
+      <div className={`mb-4 flex items-center gap-2 rounded-xl px-3 py-2.5 ring-1 ring-inset ${meta.badge}`}>
         <MailCheck className="h-4 w-4 shrink-0" />
-        <p className="text-sm font-semibold">
-          {bySystem ? "Emailed by the system" : "Sent manually, outside the system"}
-        </p>
+        <p className="text-sm font-semibold">{copy.heading}</p>
       </div>
 
-      <p className="mb-3 text-sm text-slate-600">
-        {bySystem
-          ? "The PO was emailed from here and the delivery was recorded, so the addresses below are exactly what it went to."
-          : "Somebody sent this PO themselves — by their own email, WhatsApp, or by hand — and marked it done. Nothing was sent from this system, so there are no delivery details beyond what they recorded."}
-      </p>
+      <p className="mb-3 text-sm text-slate-600">{copy.body}</p>
 
       <div className="space-y-2 rounded-xl border border-slate-200 p-3">
-        <SummaryField label="Sent at" value={mr.sentAt ? `${fmt(mr.sentAt)} ${fmtTime(mr.sentAt)}` : "—"} />
+        <SummaryField label={copy.at} value={mr.sentAt ? `${fmt(mr.sentAt)} ${fmtTime(mr.sentAt)}` : "—"} />
+        {mr.note ? <SummaryField label="Note" value={mr.note} /> : null}
         {bySystem && <SummaryField label="From" value={mr.from || "—"} />}
         {bySystem && <SummaryField label="To" value={list(mr.to)} />}
         {bySystem && mr.cc?.length ? <SummaryField label="Cc" value={list(mr.cc)} /> : null}
@@ -1383,8 +1394,8 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
           {row.mailResult?.mode && (
             <button
               type="button" onClick={() => setPopup({ type: "mailInfo" })}
-              title="How this PO reached the vendor"
-              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-emerald-700 ring-1 ring-inset ring-emerald-200 transition hover:bg-emerald-100"
+              title={`${(MAIL_MODE_META[row.mailResult.mode] || MAIL_MODE_META.MANUAL).label} — click for details`}
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-1 ring-1 ring-inset transition hover:brightness-95 ${(MAIL_MODE_META[row.mailResult.mode] || MAIL_MODE_META.MANUAL).badge}`}
             >
               <MailCheck className="h-4 w-4" />
             </button>

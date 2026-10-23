@@ -7,7 +7,18 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { SearchableSelect, inputCls } from "@/modules/stock/shared/StockSharedUI";
 import { fetchRequests, fetchStatusCounts } from "./itemRequestApi";
-import { REQUEST_STATUS, REQUEST_STATUS_TABS, RequestStatusBadge, IssuedProgress, fmtDateTime } from "./requestUi";
+import {
+  REQUEST_STATUS,
+  REQUEST_STATUS_TABS,
+  REQUEST_TYPE,
+  RequestStatusBadge,
+  RequestTypeBadge,
+  IssuedProgress,
+  fmtDateTime,
+  hasIssueSide,
+  hasReturnSide,
+  requestSummary,
+} from "./requestUi";
 
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap";
 
@@ -22,6 +33,7 @@ const ItemRequestList = () => {
   // Open work first — that is what the store comes here for.
   const [status, setStatus] = useState("PENDING");
   const [branchId, setBranchId] = useState("");
+  const [type, setType] = useState("");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [branches, setBranches] = useState([]);
@@ -51,6 +63,7 @@ const ItemRequestList = () => {
     try {
       const base = {};
       if (branchId) base.branchId = branchId;
+      if (type) base.type = type;
       if (debounced) base.search = debounced;
       const [list, c] = await Promise.all([
         fetchRequests({ ...base, ...(status ? { status } : {}), page: String(page), limit: String(limit) }),
@@ -66,7 +79,7 @@ const ItemRequestList = () => {
     } finally {
       setLoading(false);
     }
-  }, [status, branchId, debounced, page, limit]);
+  }, [status, branchId, type, debounced, page, limit]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -106,10 +119,18 @@ const ItemRequestList = () => {
           <div className="w-56">
             <SearchableSelect value={branchId} onChange={changeFilter(setBranchId)} options={branches.map((b) => ({ value: b._id, label: b.name }))} placeholder="All branches" />
           </div>
-          {(branchId || search) && (
+          <div className="w-40">
+            <SearchableSelect
+              value={type}
+              onChange={changeFilter(setType)}
+              options={Object.entries(REQUEST_TYPE).map(([value, t]) => ({ value, label: t.label }))}
+              placeholder="All types"
+            />
+          </div>
+          {(branchId || search || type) && (
             <button
               type="button"
-              onClick={() => { setBranchId(""); setSearch(""); setPage(1); }}
+              onClick={() => { setBranchId(""); setSearch(""); setType(""); setPage(1); }}
               className="inline-flex items-center gap-1 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-100"
             >
               <RotateCcw className="h-4 w-4" /> Reset
@@ -123,12 +144,13 @@ const ItemRequestList = () => {
           <thead className="bg-slate-50">
             <tr>
               <th className={th}>Request No.</th>
+              <th className={th}>Type</th>
               <th className={th}>Order ID</th>
               <th className={th}>Username</th>
               <th className={th}>Service Type</th>
-              <th className={th}>Category</th>
+              <th className={th}>Items</th>
               <th className={th}>Branch</th>
-              <th className={th}>Given</th>
+              <th className={th}>Progress</th>
               <th className={th}>Status</th>
               <th className={th}>Raised</th>
             </tr>
@@ -136,11 +158,11 @@ const ItemRequestList = () => {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}><td colSpan={9} className="px-4 py-3"><div className="h-5 animate-pulse rounded bg-slate-100" /></td></tr>
+                <tr key={i}><td colSpan={10} className="px-4 py-3"><div className="h-5 animate-pulse rounded bg-slate-100" /></td></tr>
               ))
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-14 text-center">
+                <td colSpan={10} className="px-4 py-14 text-center">
                   <Inbox className="mx-auto h-10 w-10 text-slate-300" />
                   <p className="mt-3 text-sm font-medium text-slate-700">No requests here</p>
                 </td>
@@ -153,12 +175,20 @@ const ItemRequestList = () => {
                     {r.revision > 1 && <span className="ml-1 text-[10px] font-semibold text-slate-400">rev {r.revision}</span>}
                     {r.channel === "TEST_SIMULATOR" && <span className="ml-1 rounded bg-yellow-100 px-1 text-[10px] font-bold text-yellow-800">TEST</span>}
                   </td>
+                  <td className="px-4 py-3"><RequestTypeBadge type={r.type} /></td>
                   <td className="px-4 py-3 font-medium text-slate-800">{r.subscriber?.orderId}</td>
                   <td className="px-4 py-3 text-slate-700">{r.subscriber?.username || "—"}</td>
                   <td className="px-4 py-3 text-slate-700">{r.subscriber?.serviceType || "—"}</td>
-                  <td className="px-4 py-3 text-slate-600">{r.categoryPath}</td>
+                  <td className="max-w-56 truncate px-4 py-3 text-slate-600" title={requestSummary(r)}>{requestSummary(r)}</td>
                   <td className="px-4 py-3 text-slate-700">{r.branchId?.name || "—"}</td>
-                  <td className="px-4 py-3"><IssuedProgress issued={r.issuedQty} requested={r.requestedQty} /></td>
+                  <td className="space-y-1 px-4 py-3">
+                    {hasReturnSide(r.type) && (
+                      <div><span className="text-[10px] font-semibold uppercase text-slate-400">Back</span><IssuedProgress issued={r.returnReceivedQty} requested={r.returnRequestedQty} /></div>
+                    )}
+                    {hasIssueSide(r.type) && (
+                      <div>{r.type === "REPLACE" && <span className="text-[10px] font-semibold uppercase text-slate-400">Out</span>}<IssuedProgress issued={r.issuedQty} requested={r.requestedQty} /></div>
+                    )}
+                  </td>
                   <td className="px-4 py-3"><RequestStatusBadge status={r.status} /></td>
                   <td className="px-4 py-3 text-xs text-slate-500">
                     {fmtDateTime(r.createdAt)}

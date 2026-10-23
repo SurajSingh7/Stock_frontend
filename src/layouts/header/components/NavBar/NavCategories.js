@@ -219,6 +219,27 @@ export const navCategories = [
         moduleKey: "opening-stock",
         action: ["VIEW_MENU"],
       },
+      // Our broken units — repair, warranty claim, scrap.
+      {
+        name: "Repair & Warranty",
+        path: "/stock/repairs",
+        moduleKey: "repairs",
+        action: ["VIEW_MENU"],
+      },
+      // Stock with our own people.
+      {
+        name: "Employee Items",
+        path: "/stock/employee-items",
+        moduleKey: "employee-items",
+        action: ["VIEW_MENU"],
+      },
+      // Inventory reports (the Reports menu is billing).
+      {
+        name: "Stock Reports",
+        path: "/stock/stock-reports",
+        moduleKey: "stock-reports",
+        action: ["VIEW_MENU"],
+      },
     ],
   },
 
@@ -306,12 +327,6 @@ export const navCategories = [
         action: ["VIEW_MENU"],
       },
       {
-        name: "Notification",
-        path: "/master/notification",
-        moduleKey: "notifications",
-        action: ["VIEW_MENU"],
-      },
-      {
         name: "Branches",
         path: "/master/branch",
         moduleKey: "branches",
@@ -323,6 +338,20 @@ export const navCategories = [
         moduleKey: "gst-rates",
         action: ["VIEW_MENU"],
       },
+    ],
+  },
+
+  // One module per tab, so each page is granted on its own; the pages also
+  // carry a tab bar showing just the tabs the user may open.
+  {
+    category: "Alerts & Escalations",
+    items: [
+      { name: "Rules", path: "/alerts/rules", moduleKey: "alert-rules", action: ["VIEW_MENU"] },
+      { name: "Templates", path: "/alerts/templates", moduleKey: "alert-templates", action: ["VIEW_MENU"] },
+      { name: "Contacts & Groups", path: "/alerts/contacts", moduleKey: "alert-contacts", action: ["VIEW_MENU"] },
+      { name: "Escalations", path: "/alerts/escalations", moduleKey: "alert-escalations", action: ["VIEW_MENU"] },
+      { name: "Message Log", path: "/alerts/log", moduleKey: "alert-log", action: ["VIEW_MENU"] },
+      { name: "Channels", path: "/alerts/channels", moduleKey: "alert-channels", action: ["VIEW_MENU"] },
     ],
   },
 ];

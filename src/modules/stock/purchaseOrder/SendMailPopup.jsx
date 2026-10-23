@@ -83,12 +83,42 @@ const EmailChips = ({ value, onChange, placeholder }) => {
 };
 
 /**
+ * The three things that can happen to a PO mail (mailResult.mode). One place
+ * for the label and colour so the PO list, both popups and the tracking card
+ * all say the same thing.
+ */
+export const MAIL_MODE_META = {
+  SENT: {
+    label: "Mail Sent",
+    badge: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+    done: "The PO was emailed to the vendor.",
+  },
+  MANUAL: {
+    label: "Sent Manually",
+    badge: "bg-sky-50 text-sky-700 ring-sky-200",
+    done: "Recorded as sent outside the system — no email went from here.",
+  },
+  SKIPPED: {
+    label: "Mail Skipped",
+    badge: "bg-amber-50 text-amber-700 ring-amber-200",
+    done: "No mail was sent. The order moves on, and the mail can still be sent later.",
+  },
+};
+
+/** True once the vendor actually holds the PO (not for a skipped mail). */
+export const mailReachedVendor = (mailResult) => ["SENT", "MANUAL"].includes(mailResult?.mode);
+
+/**
  * Send-mail form state — the toggle, the To address and the CC list.
  * Exported so the PO review popup can host the very same fields and approve
  * + send in one step instead of making the accounts team come back for it.
  */
 export const useSendMailForm = (row) => {
   const [sendEmail, setSendEmail] = useState(true);
+  // With the toggle OFF the user must pick one: "MANUAL" (Sent Manually) or
+  // "SKIPPED" (Skip Mail). No default — guessing would record the wrong thing.
+  const [skipMode, setSkipMode] = useState(null);
+  const [note, setNote] = useState("");
 
   // Recipients come from the VENDOR's contacts, split by the Recipient Type
   // set on each one — not from a single primary email. A vendor can address
@@ -98,35 +128,39 @@ export const useSendMailForm = (row) => {
   const vendorCc = (row.mailCc || []).map((c) => c.email).filter(Boolean);
 
   const [to, setTo] = useState(vendorTo);
-  // Internal CC is OUR side — colleagues copied on every mail under this
-  // notification. Kept separate from the vendor's own CC so it is obvious
-  // which addresses are the vendor's and which are ours.
+  // Internal CC is OUR side — colleagues copied on every PO mail. Kept
+  // separate from the vendor's own CC so it is obvious which addresses are
+  // the vendor's and which are ours.
   const [internalCc, setInternalCc] = useState([]);
+  // What Alerts & Escalations will send: the PO's Manual rule (subject, text,
+  // PDF) and its CC list; also whether Email is on and sandbox active.
+  const [preview, setPreview] = useState(null);
 
-  // CC defaults from the vendor-assigned (or default) Email notification —
-  // the From address is no longer configured per-notification; sending
-  // always goes out as the server's MAIL_FROM_DEFAULT.
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/notifications/resolve/${row.vendorId}?channel=EMAIL`, {
-          credentials: "include",
-        });
-        const json = await res.json();
-        if (res.ok && json.success) {
-          setInternalCc(json.data?.notification?.ccEmails || []);
-        }
-      } catch {
-        // non-fatal — send still works without a resolved default
-      }
-    })();
-  }, [row.vendorId]);
+    if (!row.poId) return undefined;
+    let alive = true;
+    fetch(`${API_BACKEND_URL}/stock/alerts/manual/PO_SEND_TO_VENDOR/${row.poId}/preview`, { credentials: "include" })
+      .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
+      .then(({ ok, json }) => {
+        if (!alive || !ok || !json.success) return;
+        setPreview(json.data);
+        setInternalCc(json.data?.internalCc || []);
+      })
+      // Non-fatal: the send itself still works, the server builds the same mail.
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [row.poId]);
 
   return {
     sendEmail, setSendEmail,
+    skipMode, setSkipMode,
+    note, setNote,
     to, setTo,
     internalCc, setInternalCc,
     vendorCc,
+    preview,
     // What actually goes on the wire: the vendor's CC contacts plus ours.
     cc: [...new Set([...vendorCc, ...internalCc])],
   };
@@ -150,25 +184,35 @@ const RecipientList = ({ items, empty, tone = "slate" }) => {
   );
 };
 
-/** Fires the send-mail action. Resolves to the resulting mode: "SENT" | "MANUAL". */
-export const submitSendMail = async (poId, { sendEmail, to, cc }) => {
+/** Toggle OFF but neither option picked — the save is held back. */
+export const needsSkipChoice = (form) => !form.sendEmail && !form.skipMode;
+
+/** Fires the send-mail action. Resolves to the resulting mode: "SENT" | "MANUAL" | "SKIPPED". */
+export const submitSendMail = async (poId, { sendEmail, to, cc, skipMode, note }) => {
   const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}/send-mail`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     credentials: "include",
     // `to` is a list now — a vendor can have several contacts marked To.
-    body: JSON.stringify({ sendEmail, to, cc }),
+    body: JSON.stringify(sendEmail ? { sendEmail, to, cc } : { sendEmail, to, cc, skipMode, note }),
   });
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
-  return json.data?.mailResult?.mode || (sendEmail ? "SENT" : "MANUAL");
+  return json.data?.mailResult?.mode || (sendEmail ? "SENT" : skipMode);
 };
+
+const SKIP_OPTIONS = [
+  { mode: "MANUAL", label: "Sent Manually", hint: "The vendor got the PO outside the system — by hand, own email or WhatsApp." },
+  { mode: "SKIPPED", label: "Skip Mail", hint: "Not sending it now. The order moves on, and the mail can be sent later." },
+];
 
 /** Vendor details + send toggle + To/CC — the whole body of this popup, also
  *  embedded verbatim in the PO review popup. */
 export const SendMailFields = ({ row, form }) => {
-  const { sendEmail, setSendEmail, internalCc, setInternalCc } = form;
+  const { sendEmail, setSendEmail, skipMode, setSkipMode, note, setNote, internalCc, setInternalCc } = form;
   const missingTo = hasNoRecipient(row);
+  // A PO the vendor already holds can't be recorded as skipped.
+  const skipLocked = mailReachedVendor(row.mailResult);
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -203,7 +247,43 @@ export const SendMailFields = ({ row, form }) => {
             </button>
           </label>
           {!sendEmail && (
-            <p className="mt-2 text-xs text-slate-500">Email sending will be skipped — this PO will be marked <span className="font-medium">Manual</span>.</p>
+            <div className="mt-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-700">No email will be sent. What happened?</p>
+              {SKIP_OPTIONS.map((o) => {
+                const disabled = o.mode === "SKIPPED" && skipLocked;
+                const picked = skipMode === o.mode;
+                return (
+                  <label
+                    key={o.mode}
+                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 transition ${
+                      disabled
+                        ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60"
+                        : picked
+                          ? "cursor-pointer border-indigo-300 bg-indigo-50/60"
+                          : "cursor-pointer border-slate-200 bg-white hover:bg-slate-50"
+                    }`}
+                  >
+                    <input
+                      type="radio" name={`skipMode-${row.poId}`} value={o.mode}
+                      checked={picked} disabled={disabled}
+                      onChange={() => setSkipMode(o.mode)}
+                      className="mt-0.5 h-4 w-4 accent-indigo-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-slate-900">{o.label}</span>
+                      <span className="block text-xs text-slate-500">
+                        {disabled ? "This PO has already reached the vendor." : o.hint}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+              <input
+                value={note} onChange={(e) => setNote(e.target.value)} maxLength={500}
+                placeholder="Note (optional) — e.g. handed over at site"
+                className={inputCls}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -234,9 +314,31 @@ export const SendMailFields = ({ row, form }) => {
 
         <div className={cardCls}>
           <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-700">Internal CC Emails</p>
-          <p className="mb-3 text-xs text-slate-400">Our own people, copied on every mail under this notification.</p>
+          <p className="mb-3 text-xs text-slate-400">Our own people, copied on every PO mail. Set in Alerts &amp; Escalations → Rules.</p>
           <EmailChips value={internalCc} onChange={setInternalCc} placeholder="Add internal CC email…" />
         </div>
+
+        {form.preview && sendEmail && (
+          <div className={cardCls}>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">The mail</p>
+            {!form.preview.emailEnabled && (
+              <p className="mb-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-inset ring-rose-100">
+                Email is switched off in Alerts &amp; Escalations → Channels — sending will be refused.
+              </p>
+            )}
+            {form.preview.sandbox && (
+              <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+                Sandbox is on — this goes to {form.preview.sandbox.email || "the test email (not set yet)"}, not the vendor.
+              </p>
+            )}
+            <p className="text-sm font-medium text-slate-900">{form.preview.subject}</p>
+            <p className="mt-1 line-clamp-3 text-xs text-slate-500">{String(form.preview.body || "").replace(/<[^>]+>/g, " ")}</p>
+            <p className="mt-2 text-xs text-slate-400">
+              {form.preview.attachment ? `📎 ${form.preview.attachment} · ` : ""}
+              {form.preview.ruleName ? `Rule: ${form.preview.ruleName}` : "Built-in text — add a Manual rule to change it"}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -246,15 +348,16 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
   const form = useSendMailForm(row);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [result, setResult] = useState(null); // "SENT" | "MANUAL"
+  const [result, setResult] = useState(null); // "SENT" | "MANUAL" | "SKIPPED"
 
   // First sends happen inside Review PO, so this popup is normally a resend.
-  // The mailResult (not the status — APPROVED is terminal) says which it is.
-  const isResend = !!row.mailResult?.mode;
+  // The mailResult (not the status — APPROVED is terminal) says which it is;
+  // a skipped mail never reached the vendor, so sending it now is a first send.
+  const isResend = mailReachedVendor(row.mailResult);
   const title = `${isResend ? "Resend Mail" : "Send Mail"} · ${row.poNumber}`;
 
-  // Only blocks an actual send — "Manual" is still allowed, because marking a
-  // PO as handled outside the system does not need a recipient.
+  // Only blocks an actual send — Sent Manually / Skip Mail are still allowed,
+  // because neither needs a recipient.
   const missingTo = hasNoRecipient(row);
 
   const submit = async () => {
@@ -278,16 +381,15 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
   };
 
   if (result) {
+    const meta = MAIL_MODE_META[result] || MAIL_MODE_META.SENT;
     return (
       <Modal onClose={onDone} title={title} maxWidth="max-w-md">
         <div className="flex flex-col items-center gap-2 py-6 text-center">
-          <span className={`inline-flex h-12 w-12 items-center justify-center rounded-full ${result === "SENT" ? "bg-emerald-50 text-emerald-600" : "bg-slate-100 text-slate-500"}`}>
+          <span className={`inline-flex h-12 w-12 items-center justify-center rounded-full ring-1 ring-inset ${meta.badge}`}>
             <Mail className="h-6 w-6" />
           </span>
-          <p className="text-base font-semibold text-slate-900">{result === "SENT" ? "Mail Sent" : "Manual"}</p>
-          <p className="text-sm text-slate-500">
-            {result === "SENT" ? "The PO was emailed to the vendor." : "Marked as manually handled — no email was sent."}
-          </p>
+          <p className="text-base font-semibold text-slate-900">{meta.label}</p>
+          <p className="text-sm text-slate-500">{meta.done}</p>
         </div>
       </Modal>
     );
@@ -302,7 +404,7 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
           <span className="mt-0.5 shrink-0">⚠</span>
           <span>
             <strong>{row.vendorName || "This vendor"}</strong> has no contact marked <strong>To</strong>.
-            Edit the vendor and set one, or switch off Send Email Notification to mark this PO manual.
+            Edit the vendor and set one, or switch off Send Email Notification to record it as Sent Manually or Skip Mail.
           </span>
         </div>
       )}
@@ -314,10 +416,12 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
           Cancel
         </button>
         <button
-          type="button" disabled={saving || (form.sendEmail && missingTo)} onClick={submit}
+          type="button" disabled={saving || (form.sendEmail && missingTo) || needsSkipChoice(form)} onClick={submit}
           className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? (isResend ? "Resending…" : "Sending…") : isResend ? "Resend" : "Send"}
+          {!form.sendEmail
+            ? saving ? "Saving…" : "Save"
+            : saving ? (isResend ? "Resending…" : "Sending…") : isResend ? "Resend" : "Send"}
         </button>
       </div>
     </Modal>

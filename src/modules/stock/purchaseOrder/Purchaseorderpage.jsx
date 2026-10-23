@@ -17,7 +17,9 @@ import {
   CheckCircle2,
   History,
 } from "lucide-react";
-import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields, hasNoRecipient } from "./SendMailPopup";
+import SendMailPopup, {
+  useSendMailForm, submitSendMail, SendMailFields, hasNoRecipient, needsSkipChoice, mailReachedVendor, MAIL_MODE_META,
+} from "./SendMailPopup";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 // Shared with the Tracking Orders page on purpose: both boards show the same
 // reset history, and two copies of it would drift.
@@ -440,7 +442,7 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
   const [reason, setReason] = useState("");
   const [error, setError] = useState(null);
   const [approved, setApproved] = useState(false); // approve landed — only the send is left
-  const [result, setResult] = useState(null);      // "SENT" | "MANUAL"
+  const [result, setResult] = useState(null);      // "SENT" | "MANUAL" | "SKIPPED"
 
   const patch = async (path, body) => {
     const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/${path}`, {
@@ -489,11 +491,9 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
             <CheckCircle2 className="h-6 w-6" />
           </span>
-          <p className="text-base font-semibold text-slate-900">Approved &amp; {result === "SENT" ? "Mail Sent" : "Marked Manual"}</p>
+          <p className="text-base font-semibold text-slate-900">Approved &amp; {(MAIL_MODE_META[result] || MAIL_MODE_META.SENT).label}</p>
           <p className="text-sm text-slate-500">
-            {result === "SENT"
-              ? "The PO was approved and emailed to the vendor."
-              : "The PO was approved and marked as manually handled — no email was sent."}
+            The PO was approved. {(MAIL_MODE_META[result] || MAIL_MODE_META.SENT).done}
           </p>
         </div>
       </Modal>
@@ -531,7 +531,7 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
               <span className="mt-0.5 shrink-0">⚠</span>
               <span>
                 <strong>{row.vendorName || "This vendor"}</strong> has no contact marked <strong>To</strong>.
-                Edit the vendor and set one, or switch off Send Email Notification to mark this PO manual.
+                Edit the vendor and set one, or switch off Send Email Notification to record it as Sent Manually or Skip Mail.
               </span>
             </div>
           )}
@@ -542,11 +542,11 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
             <button type="button" onClick={() => setRejecting(true)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50">Reject</button>
             <button
               type="button"
-              disabled={busy || (mail.sendEmail && hasNoRecipient(row))}
+              disabled={busy || (mail.sendEmail && hasNoRecipient(row)) || needsSkipChoice(mail)}
               onClick={approveAndSend}
               className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {busy ? "Working…" : approved ? "Retry send" : "Approve & Send PO"}
+              {busy ? "Working…" : !mail.sendEmail ? (approved ? "Retry save" : "Approve & Save") : approved ? "Retry send" : "Approve & Send PO"}
             </button>
           </div>
         </>
@@ -689,13 +689,13 @@ const buildRowActions = (row) => {
   }
 
   // APPROVED is terminal — there is no SENT status. Whether the PO already
-  // reached the vendor is told by mailResult: once it exists the action is a
-  // resend, and it stays available indefinitely. Without it the PO was
-  // approved but the send that follows never landed, so offer the first send.
+  // reached the vendor is told by mailResult (Mail Sent / Sent Manually):
+  // then the action is a resend, and it stays available indefinitely. With no
+  // mailResult, or a skipped mail, the vendor doesn't have it — first send.
   if (s === "APPROVED") {
     inline.push({
       type: "icon", key: "sendMail", icon: Mail, tone: "green",
-      label: row.mailResult?.mode ? "Resend Mail" : "Send Mail",
+      label: mailReachedVendor(row.mailResult) ? "Resend Mail" : "Send Mail",
     });
   }
 
@@ -1075,10 +1075,13 @@ const PurchaseOrderPage = () => {
                       <TruncateText text={row.entityAlias} title="Entity" />
                     </div>
                     <div className="col-span-3 flex flex-wrap items-center justify-end gap-1.5">
-                      {row.mailResult?.mode && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                      {MAIL_MODE_META[row.mailResult?.mode] && (
+                        <span
+                          title={row.mailResult.note || undefined}
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${MAIL_MODE_META[row.mailResult.mode].badge}`}
+                        >
                           <CheckCircle2 className="h-3 w-3" />
-                          {row.mailResult.mode === "SENT" ? "Mail Sent" : "Manual"}
+                          {MAIL_MODE_META[row.mailResult.mode].label}
                         </span>
                       )}
                       <ActionBar row={row} on={(type, r) => onAction(type, r, q)} />

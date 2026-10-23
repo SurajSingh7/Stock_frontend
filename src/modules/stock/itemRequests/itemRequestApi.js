@@ -43,6 +43,8 @@ export const fetchAvailableUnits = async (id, { search = "", productId = "" } = 
 
 // individual: { inventoryItemIds } · batch: { quantities: [{ productDefinitionId, quantity }] }
 export const issueItems = (id, body) => patch(`${BASE}/${id}/issue`, body, "Failed to issue");
+// lines: [{ returnLineId, quantity? (batch), condition: "GOOD" | "FAULTY", note? }]
+export const receiveItems = (id, lines) => patch(`${BASE}/${id}/receive`, { lines }, "Failed to receive");
 export const shortCloseRequest = (id, reason) => patch(`${BASE}/${id}/short-close`, { reason }, "Failed to short-close");
 export const rejectRequest = (id, reason) => patch(`${BASE}/${id}/reject`, { reason }, "Failed to reject");
 

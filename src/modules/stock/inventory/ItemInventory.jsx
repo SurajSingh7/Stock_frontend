@@ -3,10 +3,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { usePermissions } from "@/context/PermissionContext";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Boxes, Info, Eye } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, unitLabel, money } from "@/modules/stock/shared/StockSharedUI";
-import { ConditionBadge, SourceBadge, ReservedBadge, AssignedBadge, WarrantyBadge, SOURCE_LABEL, fmtDate } from "./itemBadges";
+import { ConditionBadge, SourceBadge, ReservedBadge, AssignedBadge, WarrantyBadge, SOURCE_LABEL, fmtDate, assigneeText } from "./itemBadges";
 
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -111,8 +112,25 @@ const describeMovement = (m) => {
     return `Received via ${REF_LABEL[m.ref?.type] || "—"} ${m.ref?.refNumber || ""}${m.toBranchId?.name ? ` at ${m.toBranchId.name}` : ""}`;
   if (m.type === "TRANSFERRED")
     return `Transferred ${m.fromBranchId?.name || "—"} → ${m.toBranchId?.name || "—"}${m.ref?.refNumber ? ` (${m.ref.refNumber})` : ""}`;
-  if (m.type === "ISSUED") return `${m.note || "Issued"}${m.ref?.refNumber ? ` (${m.ref.refNumber})` : ""}`;
-  return m.type;
+  if (m.type === "ISSUED" || m.type === "RETURNED")
+    return `${m.note || (m.type === "ISSUED" ? "Issued" : "Returned")}${m.ref?.refNumber ? ` (${m.ref.refNumber})` : ""}`;
+  const label = MOVEMENT_LABEL[m.type] || m.type;
+  return m.note && !m.note.startsWith(label) ? `${label}: ${m.note}` : m.note || label;
+};
+
+// Repair & Warranty steps — the note says the rest.
+const MOVEMENT_LABEL = {
+  REPORTED_FAULTY: "Reported faulty",
+  SENT_FOR_REPAIR: "Sent for repair",
+  REPAIRED: "Repaired",
+  REPAIR_FAILED: "Repair failed",
+  CLAIM_SENT: "Warranty claim sent",
+  CLAIM_RETURNED: "Back from vendor, repaired",
+  CLAIM_REJECTED: "Warranty claim refused",
+  VENDOR_REPLACED: "Replaced by vendor",
+  MARKED_OK: "Checked — working",
+  SCRAPPED: "Scrapped",
+  ASSIGNED: "Assigned",
 };
 
 const ItemTimeline = ({ itemId }) => {
@@ -172,7 +190,56 @@ const ItemTimeline = ({ itemId }) => {
   );
 };
 
-const ViewDetailsModal = ({ card, onClose }) => {
+/* Found broken on the shelf → Repair & Warranty. */
+const ReportFaulty = ({ itemId, onReported }) => {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  if (!open)
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+        Report faulty
+      </button>
+    );
+  return (
+    <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50/50 p-3">
+      <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="What is wrong with it? (required)" className={inputCls} />
+      {error && <p className="mt-1 text-xs text-rose-700">{error}</p>}
+      <div className="mt-2 flex justify-end gap-2">
+        <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600">Cancel</button>
+        <button
+          type="button"
+          disabled={busy || !note.trim()}
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              const res = await fetch(`${API_BACKEND_URL}/stock/repairs/${itemId}/report-faulty`, {
+                method: "PATCH",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ note: note.trim() }),
+              });
+              const json = await res.json();
+              if (!res.ok || !json.success) throw new Error(json.message || "Failed to report");
+              onReported();
+            } catch (err) {
+              setError(err.message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+          className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+        >
+          {busy ? "Saving…" : "Move to Faulty"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const ViewDetailsModal = ({ card, onClose, canReport, onReported }) => {
   const def = card.productDefinitionId || {};
   const isGroup = card.cardType === "group";
   const fields = (def.selectedFields || []).map((sf) => sf.fieldDefId).filter(Boolean);
@@ -205,8 +272,12 @@ const ViewDetailsModal = ({ card, onClose }) => {
             {card.status === "RESERVED" && <DetailField label="Currently With" value={card.heldByNote || "—"} valueCls="text-violet-700" />}
             {card.status === "ASSIGNED" && (
               <DetailField
-                label="Issued To"
-                value={`${card.assignedTo?.orderId || "—"}${card.assignedTo?.username ? ` · ${card.assignedTo.username}` : ""} (${card.assignedTo?.requestNumber || "—"})`}
+                label={card.assignedTo?.kind === "EMPLOYEE" ? "With Employee" : "Issued To"}
+                value={
+                  card.assignedTo?.kind === "EMPLOYEE"
+                    ? `${assigneeText(card.assignedTo)}${card.assignedTo?.note ? ` · ${card.assignedTo.note}` : ""}`
+                    : `${card.assignedTo?.orderId || "—"}${card.assignedTo?.username ? ` · ${card.assignedTo.username}` : ""} (${card.assignedTo?.requestNumber || "—"})`
+                }
                 valueCls="text-indigo-700"
               />
             )}
@@ -240,6 +311,11 @@ const ViewDetailsModal = ({ card, onClose }) => {
         </div>
       )}
 
+      {!isGroup && canReport && card.status === "AVAILABLE" && (
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <ReportFaulty itemId={card._id} onReported={onReported} />
+        </div>
+      )}
       {!isGroup && <ItemTimeline itemId={card._id} />}
     </Modal>
   );
@@ -323,6 +399,10 @@ const InventoryRow = ({ card, onView, onShowBatches }) => {
 
 const ItemInventory = () => {
   const searchParams = useSearchParams();
+  const { permissions, isAdmin } = usePermissions();
+  const canReportFaulty =
+    isAdmin ||
+    ((permissions || []).find((m) => m.moduleKey === "repairs")?.actions || []).map((a) => String(a).toUpperCase()).includes("REPORT");
   const initialProductId = searchParams.get("productDefinitionId") || "";
 
   const [rows, setRows] = useState([]);
@@ -426,7 +506,7 @@ const ItemInventory = () => {
             {[
               { value: "AVAILABLE", label: "Available" },
               { value: "RESERVED", label: "Reserved (with employees)" },
-              { value: "ASSIGNED", label: "Assigned (with subscribers)" },
+              { value: "ASSIGNED", label: "Assigned (subscribers / employees)" },
             ].map((t) => (
               <button
                 key={t.value}
@@ -444,7 +524,7 @@ const ItemInventory = () => {
             <SearchableSelect
               value={sourceType}
               onChange={setSourceType}
-              options={[{ value: "PURCHASE", label: "Invoice" }, { value: "OPENING_STOCK", label: "Opening Stock" }]}
+              options={Object.entries(SOURCE_LABEL).map(([value, label]) => ({ value, label }))}
               placeholder="Any origin"
             />
           </div>
@@ -503,7 +583,14 @@ const ItemInventory = () => {
         <Pagination currentPage={page} totalItems={total} itemsPerPage={limit} onPageChange={setPage} onItemsPerPageChange={(n) => { setLimit(n); setPage(1); }} />
       </div>
 
-      {viewing && <ViewDetailsModal card={viewing} onClose={() => setViewing(null)} />}
+      {viewing && (
+        <ViewDetailsModal
+          card={viewing}
+          onClose={() => setViewing(null)}
+          canReport={canReportFaulty}
+          onReported={() => { setViewing(null); loadList(); }}
+        />
+      )}
       {batchesFor && (
         <BatchBreakdownModal
           productName={batchesFor.productDefinitionId?.name}
