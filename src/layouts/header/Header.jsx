@@ -6,6 +6,7 @@ import { Navbar } from "./components/NavBar/Navbar";
 import { usePermissions } from "@/context/PermissionContext";
 import ZoomButtons from "./components/zoom/ZoomButton";
 import NotificationBell from "@/modules/alerts/inbox/NotificationBell";
+import SettingsMenu from "./components/NavBar/SettingsMenu";
 
 const Header = () => {
     const { userData } = usePermissions();
@@ -38,6 +39,8 @@ const Header = () => {
                         <div className="flex-1 flex justify-center">
                             <Navbar />
                         </div>
+                        {/* ⚙ Settings (Alerts & Escalations, Access Control, Testing) */}
+                        <SettingsMenu />
                         {/* Website bell — Alerts & Escalations In-App channel */}
                         <NotificationBell />
                         <div>

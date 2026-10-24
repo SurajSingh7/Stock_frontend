@@ -21,7 +21,7 @@ import { SHOW_DEV } from "@/config/getEnvVariables";
  */
 export const navCategories = [
    {
-    category: "Tracking Orders",
+    category: "Tracking",
     items: [
       {
         name: "track",
@@ -199,6 +199,10 @@ export const navCategories = [
 
   {
     category: "Inventory",
+    // group: shown as one column of the "Inventory" mega menu (with Requests
+    // and Transfer). Section names may change later — only here.
+    group: "Inventory",
+    icon: "stock",
     items: [
       {
         name: "Product Inventory",
@@ -246,6 +250,8 @@ export const navCategories = [
   // Subscribers' requests for stock, from the NOC / broadband website.
   {
     category: "Requests",
+    group: "Inventory",
+    icon: "requests",
     items: [
       {
         name: "Item Requests",
@@ -263,8 +269,11 @@ export const navCategories = [
   },
 
   // 🧪 TEST ONLY — remove when the real website is connected.
+  // section "settings": shown under the ⚙ menu, not in the main bar.
   {
-    category: "🧪 Test",
+    category: "Testing",
+    section: "settings",
+    icon: "test",
     items: [
       {
         name: "Request Simulator (Test)",
@@ -277,6 +286,8 @@ export const navCategories = [
 
   {
     category: "Transfer",
+    group: "Inventory",
+    icon: "transfer",
     items: [
       {
         name: "Transfer Requests",
@@ -345,6 +356,8 @@ export const navCategories = [
   // carry a tab bar showing just the tabs the user may open.
   {
     category: "Alerts & Escalations",
+    section: "settings",
+    icon: "alerts",
     items: [
       { name: "Rules", path: "/alerts/rules", moduleKey: "alert-rules", action: ["VIEW_MENU"] },
       { name: "Templates", path: "/alerts/templates", moduleKey: "alert-templates", action: ["VIEW_MENU"] },
@@ -362,6 +375,8 @@ export const navCategories = [
 export const adminNavCategories = [
   {
     category: "Access Control",
+    section: "settings",
+    icon: "access",
     // Ordered the way an admin actually sets someone up: see what exists,
     // grant it to a role, narrow it per department, then handle the one person
     // who is an exception.

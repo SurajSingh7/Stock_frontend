@@ -217,7 +217,7 @@ const GroupModal = ({ group, onClose, onSaved }) => {
 
         <div className="sm:col-span-2">
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600">
-            Members {form.type === "LIST" ? "*" : "(used for Email — a WhatsApp group has no email)"} · {form.members.length} picked
+            Members {form.type === "LIST" ? "*" : "(optional — they get Email and the bell; WhatsApp goes into the group itself)"} · {form.members.length} picked
           </label>
           <input className={`${inputCls} mb-2`} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter contacts…" />
           <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200">
