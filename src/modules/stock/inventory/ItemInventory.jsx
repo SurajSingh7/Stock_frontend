@@ -7,7 +7,7 @@ import { usePermissions } from "@/context/PermissionContext";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Boxes, Info, Eye } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, unitLabel, money } from "@/modules/stock/shared/StockSharedUI";
-import { ConditionBadge, SourceBadge, ReservedBadge, AssignedBadge, WarrantyBadge, SOURCE_LABEL, fmtDate, assigneeText } from "./itemBadges";
+import { ConditionBadge, SourceBadge, AssignedBadge, WarrantyBadge, SOURCE_LABEL, fmtDate, assigneeText } from "./itemBadges";
 
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -159,16 +159,6 @@ const ItemTimeline = ({ itemId }) => {
         <div className="h-12 animate-pulse rounded-lg bg-slate-100" />
       ) : (
         <ol className="relative ml-2 space-y-3 border-l border-slate-200 pl-5">
-          {data.preSystem && (
-            <li className="relative">
-              <span className="absolute -left-6.75 top-1 h-3 w-3 rounded-full border-2 border-slate-300 bg-white" />
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Before this system</p>
-              {data.preSystem.lastUsedBy && (
-                <p className="text-sm text-slate-700">Last used by: <b>{data.preSystem.lastUsedBy}</b></p>
-              )}
-              {data.preSystem.remarks && <p className="text-sm text-slate-600">“{data.preSystem.remarks}”</p>}
-            </li>
-          )}
           {data.movements.map((m) => (
             <li key={m._id} className="relative">
               <span className="absolute -left-6.75 top-1 h-3 w-3 rounded-full bg-indigo-500 ring-4 ring-indigo-50" />
@@ -183,7 +173,7 @@ const ItemTimeline = ({ itemId }) => {
               {m.note && <p className="text-xs text-violet-700">{m.note}</p>}
             </li>
           ))}
-          {!data.preSystem && data.movements.length === 0 && <li className="text-sm text-slate-400">No history recorded yet.</li>}
+          {data.movements.length === 0 && <li className="text-sm text-slate-400">No history recorded yet.</li>}
         </ol>
       )}
     </div>
@@ -269,7 +259,6 @@ const ViewDetailsModal = ({ card, onClose, canReport, onReported }) => {
             <DetailField label="Warranty" value={<WarrantyBadge endDate={card.warranty?.endDate} />} />
             <DetailField label="Purchase Date" value={fmtDate(card.purchaseDate)} />
             <DetailField label="Purchase Cost" value={card.purchaseCost === null || card.purchaseCost === undefined ? "Not known" : money(card.purchaseCost)} />
-            {card.status === "RESERVED" && <DetailField label="Currently With" value={card.heldByNote || "—"} valueCls="text-violet-700" />}
             {card.status === "ASSIGNED" && (
               <DetailField
                 label={card.assignedTo?.kind === "EMPLOYEE" ? "With Employee" : "Issued To"}
@@ -378,7 +367,6 @@ const InventoryRow = ({ card, onView, onShowBatches }) => {
             <ConditionBadge condition={card.condition} />
             <SourceBadge source={card.source} />
             <WarrantyBadge endDate={card.warranty?.endDate} />
-            {card.status === "RESERVED" && <ReservedBadge heldByNote={card.heldByNote} />}
             {card.status === "ASSIGNED" && <AssignedBadge assignedTo={card.assignedTo} />}
           </span>
         </Col>
@@ -414,8 +402,7 @@ const ItemInventory = () => {
   const [categoryId, setCategoryId] = useState("");
   const [productId, setProductId] = useState(initialProductId);
   const [branchId, setBranchId] = useState("");
-  // AVAILABLE = can be handed out; RESERVED = on the books but still with an
-  // employee (opening stock not yet assigned).
+  // AVAILABLE = can be handed out; ASSIGNED = with a subscriber or an employee.
   const [status, setStatus] = useState("AVAILABLE");
   const [sourceType, setSourceType] = useState("");
   const [condition, setCondition] = useState("");
@@ -505,7 +492,6 @@ const ItemInventory = () => {
           <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
             {[
               { value: "AVAILABLE", label: "Available" },
-              { value: "RESERVED", label: "Reserved (with employees)" },
               { value: "ASSIGNED", label: "Assigned (subscribers / employees)" },
             ].map((t) => (
               <button

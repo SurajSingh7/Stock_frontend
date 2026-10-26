@@ -26,12 +26,6 @@ export const SourceBadge = ({ source }) =>
     </span>
   ) : null;
 
-export const ReservedBadge = ({ heldByNote }) => (
-  <span className={`${pill} bg-violet-50 text-violet-700 ring-violet-200`} title="With an employee — not available until assigned">
-    Reserved{heldByNote ? ` · ${heldByNote}` : ""}
-  </span>
-);
-
 // "In warranty till …", "Expired …" or "Unknown" — from the unit's own end date.
 export const warrantyState = (endDate) => {
   if (!endDate) return { key: "UNKNOWN", label: "Warranty unknown", cls: "bg-slate-50 text-slate-500 ring-slate-200" };

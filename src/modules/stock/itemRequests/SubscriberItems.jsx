@@ -133,9 +133,14 @@ const SubscriberItems = () => {
                           <td className="px-4 py-2.5"><SourceBadge source={it.source} /></td>
                           <td className="px-4 py-2.5"><WarrantyBadge endDate={it.warranty?.endDate} /></td>
                           <td className="px-4 py-2.5">
-                            <button type="button" onClick={() => router.push(`/stock/item-requests/${it.assignedTo?.requestId}`)} className="font-mono text-indigo-600 hover:underline">
-                              {it.assignedTo?.requestNumber}
-                            </button>
+                            {/* No request behind it = entered as Opening Issued Stock (OI-…). */}
+                            {it.assignedTo?.requestId ? (
+                              <button type="button" onClick={() => router.push(`/stock/item-requests/${it.assignedTo.requestId}`)} className="font-mono text-indigo-600 hover:underline">
+                                {it.assignedTo?.requestNumber}
+                              </button>
+                            ) : (
+                              <span className="font-mono text-slate-600" title="Entered as opening issued stock">{it.assignedTo?.requestNumber || "—"}</span>
+                            )}
                           </td>
                           <td className="px-4 py-2.5 text-xs text-slate-500">{fmtDateTime(it.assignedTo?.assignedAt)}<div>{it.branch?.name}</div></td>
                         </tr>

@@ -11,7 +11,8 @@ const TRACKING_LABEL = { individual: "Individual", quantity: "Group" };
 /* Product picker — name search; each result shows the fields     */
 /* its lines will ask for, so the right product is obvious.       */
 /* ============================================================= */
-export const ProductPicker = ({ value, onPick, placeholder = "Search product…" }) => {
+// `search` is the screen's own product search (each kind has its module).
+export const ProductPicker = ({ value, onPick, placeholder = "Search product…", search = searchProducts }) => {
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -21,7 +22,7 @@ export const ProductPicker = ({ value, onPick, placeholder = "Search product…"
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const rows = await searchProducts(q.trim());
+        const rows = await search(q.trim());
         if (alive) setResults(rows);
       } catch {
         if (alive) setResults([]);
@@ -30,7 +31,7 @@ export const ProductPicker = ({ value, onPick, placeholder = "Search product…"
       }
     }, 250);
     return () => { alive = false; clearTimeout(t); };
-  }, [q]);
+  }, [q, search]);
 
   return (
     <div>
@@ -71,9 +72,9 @@ export const ProductPicker = ({ value, onPick, placeholder = "Search product…"
   );
 };
 
-export const ProductPickerModal = ({ onClose, onPick }) => (
+export const ProductPickerModal = ({ onClose, onPick, search }) => (
   <Modal onClose={onClose} title="Add item — choose the product" maxWidth="max-w-xl">
-    <ProductPicker onPick={(p) => { onPick(p); onClose(); }} />
+    <ProductPicker search={search} onPick={(p) => { onPick(p); onClose(); }} />
   </Modal>
 );
 
@@ -212,29 +213,6 @@ export const ExcelUploadModal = ({ onClose, onAdd }) => {
               </div>
             </>
           )}
-        </div>
-      )}
-    </Modal>
-  );
-};
-
-/* ============================================================= */
-/* Pre-system notes for one line                                  */
-/* ============================================================= */
-export const NotesModal = ({ line, readOnly, onClose, onSave }) => {
-  const [lastUsedBy, setLastUsedBy] = useState(line.lastUsedBy || "");
-  const [historyRemarks, setHistoryRemarks] = useState(line.historyRemarks || "");
-  return (
-    <Modal onClose={onClose} title="Before this system" maxWidth="max-w-md">
-      <p className="mb-3 text-xs text-slate-500">Optional. Shown as a note at the top of the unit&apos;s history — free text, since past users may no longer be in HRMS.</p>
-      <label className="text-xs font-semibold text-slate-600">Last used by</label>
-      <input disabled={readOnly} value={lastUsedBy} onChange={(e) => setLastUsedBy(e.target.value)} placeholder="e.g. Amit Sharma (EMP102)" className={`${inputCls} mb-3 mt-1`} />
-      <label className="text-xs font-semibold text-slate-600">Past history / remarks</label>
-      <textarea disabled={readOnly} rows={4} value={historyRemarks} onChange={(e) => setHistoryRemarks(e.target.value)} placeholder="e.g. Rahul used it in 2023, then Amit till 2024" className={`${inputCls} mt-1`} />
-      {!readOnly && (
-        <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button>
-          <button type="button" onClick={() => { onSave({ lastUsedBy, historyRemarks }); onClose(); }} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Save</button>
         </div>
       )}
     </Modal>

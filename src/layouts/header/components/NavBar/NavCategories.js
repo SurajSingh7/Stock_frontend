@@ -223,6 +223,13 @@ export const navCategories = [
         moduleKey: "opening-stock",
         action: ["VIEW_MENU"],
       },
+      // …and stock that was already with someone (employee / subscriber).
+      {
+        name: "Opening Issued Stock",
+        path: "/stock/opening-issued",
+        moduleKey: "opening-issued-stock",
+        action: ["VIEW_MENU"],
+      },
       // Our broken units — repair, warranty claim, scrap.
       {
         name: "Repair & Warranty",

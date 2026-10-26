@@ -6,15 +6,15 @@ import { Search, UserCheck, Undo2 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
 import { usePermissions } from "@/context/PermissionContext";
 import { Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
-import { Picker } from "@/modules/accessControl/shared";
-import { searchHrmsUsers } from "@/modules/accessControl/hrmsDirectory";
+import { PersonSearch, PersonCard } from "@/modules/stock/people/PersonSearch";
 import { ConditionBadge, SourceBadge, WarrantyBadge, fmtDate } from "@/modules/stock/inventory/itemBadges";
 
 /*
   Employee Items — stock with our own people.
-    Pending Assignment   opening stock entered as "currently with …" (RESERVED)
-    Assign from Stock    any free unit on the shelf
+    Assign from Stock    any free unit on the shelf, to an employee from the
+                         People Directory (or one added there by hand)
     With Employees       who has what; take it back good or faulty
+  Stock someone already had before this system goes in Opening Issued Stock.
 */
 
 const BASE = `${API_BACKEND_URL}/stock/employee-items`;
@@ -37,63 +37,34 @@ const canDo = (permissions, isAdmin, action) => {
 };
 
 const TABS = [
-  { value: "pending", label: "Pending Assignment" },
   { value: "stock", label: "Assign from Stock" },
   { value: "employees", label: "With Employees" },
 ];
 
-/* ── Who gets it: an HRMS user, or typed in when HRMS search isn't available ── */
-const EmployeeChooser = ({ value, onChange }) => {
-  const [manual, setManual] = useState(false);
-  if (manual)
-    return (
-      <div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <input value={value?.name || ""} onChange={(e) => onChange({ ...value, userId: null, name: e.target.value })} placeholder="Employee name *" className={inputCls} />
-          <input value={value?.employeeCode || ""} onChange={(e) => onChange({ ...value, userId: null, employeeCode: e.target.value })} placeholder="Employee code" className={inputCls} />
-        </div>
-        <button type="button" onClick={() => { setManual(false); onChange(null); }} className="mt-1 text-xs font-semibold text-indigo-600 hover:underline">Search HRMS instead</button>
-      </div>
-    );
-  return (
-    <div>
-      <Picker
-        fetcher={searchHrmsUsers}
-        placeholder="Search employee in HRMS…"
-        selected={value?.userId ? { label: value.name, description: value.employeeCode } : null}
-        onSelect={(u) => {
-          const code = String(u.description || "").split(" · ")[0];
-          onChange({ userId: u.id, name: u.label, employeeCode: code.includes("@") ? "" : code });
-        }}
-        onClear={() => onChange(null)}
-      />
-      <button type="button" onClick={() => { setManual(true); onChange(null); }} className="mt-1 text-xs font-semibold text-indigo-600 hover:underline">
-        Not in HRMS / no access? Type name and code
-      </button>
-    </div>
-  );
-};
-
-const AssignModal = ({ units, suggestion, onClose, onDone }) => {
+const AssignModal = ({ units, onClose, onDone }) => {
   const [employee, setEmployee] = useState(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   return (
     <Modal onClose={onClose} title={`Assign ${units.length} unit(s) to an employee`} maxWidth="max-w-lg">
-      {suggestion && <p className="mb-3 rounded-lg bg-violet-50 px-3 py-2 text-sm text-violet-800">Opening stock said: currently with <b>{suggestion}</b></p>}
-      <p className="mb-2 text-xs text-slate-500">{units.map((u) => u.label).join(", ")}</p>
-      <EmployeeChooser value={employee} onChange={setEmployee} />
+      <p className="mb-3 text-xs text-slate-500">{units.map((u) => u.label).join(", ")}</p>
+      <label className="mb-1 block text-xs font-semibold text-slate-600">Employee *</label>
+      {employee ? (
+        <PersonCard person={employee} compact onClear={() => setEmployee(null)} />
+      ) : (
+        <PersonSearch module="employee-items" kind="EMPLOYEE" autoFocus onPick={setEmployee} />
+      )}
       <label className="mt-3 block text-xs font-semibold text-slate-600">Note</label>
       <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Field laptop" className={`${inputCls} mt-1`} />
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button>
         <button
           type="button"
-          disabled={busy || !employee?.name?.trim()}
+          disabled={busy || !employee}
           onClick={async () => {
             setBusy(true);
             try {
-              await call(`${BASE}/assign`, { method: "POST", body: { itemIds: units.map((u) => u._id), employee, note } }, "Failed to assign");
+              await call(`${BASE}/assign`, { method: "POST", body: { itemIds: units.map((u) => u._id), personId: employee.personId, note } }, "Failed to assign");
               toast.success(`Assigned to ${employee.name}`);
               onDone();
               onClose();
@@ -193,7 +164,7 @@ const EmployeeItems = () => {
   const { permissions, isAdmin } = usePermissions();
   const canAssign = canDo(permissions, isAdmin, "ASSIGN");
   const canReturn = canDo(permissions, isAdmin, "RETURN");
-  const [tab, setTab] = useState("pending");
+  const [tab, setTab] = useState("stock");
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [rows, setRows] = useState([]);
@@ -213,8 +184,7 @@ const EmployeeItems = () => {
     setPicked(new Set());
     const q = debounced ? `?${new URLSearchParams({ search: debounced })}` : "";
     try {
-      if (tab === "pending") setRows(await call(`${BASE}/pending${q}`));
-      else if (tab === "stock") setRows(await call(`${BASE}/available${q}`));
+      if (tab === "stock") setRows(await call(`${BASE}/available${q}`));
       else {
         const list = await call(`${BASE}/employees${q}`);
         setEmployees(list);
@@ -239,7 +209,6 @@ const EmployeeItems = () => {
   };
   const toggle = (id) => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const pickedRows = rows.filter((r) => picked.has(r._id));
-  const suggestion = tab === "pending" && pickedRows.length ? [...new Set(pickedRows.map((r) => r.heldByNote).filter(Boolean))].join(", ") : "";
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -261,7 +230,7 @@ const EmployeeItems = () => {
         <div className="flex items-center gap-2">
           <div className="relative w-64">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "employees" ? "Employee name or code…" : "Serial / MAC or note…"} className={`${inputCls} pl-9`} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={tab === "employees" ? "Employee name or code…" : "Serial / MAC…"} className={`${inputCls} pl-9`} />
           </div>
           {tab !== "employees" && canAssign && (
             <button type="button" disabled={!picked.size} onClick={() => setModal("assign")} className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">
@@ -286,7 +255,7 @@ const EmployeeItems = () => {
                 <button key={e.key} type="button" onClick={() => pickEmployee(e)}
                   className={`mb-1 block w-full rounded-xl px-3 py-2 text-left ${selectedEmp?.key === e.key ? "bg-indigo-50 ring-1 ring-indigo-200" : "hover:bg-slate-50"}`}>
                   <p className="font-semibold text-slate-900">{e.employeeName}</p>
-                  <p className="text-xs text-slate-500">{e.employeeCode || "—"} · {e.units} unit(s)</p>
+                  <p className="text-xs text-slate-500">{e.employeeCode || "—"} · {e.units} unit(s){e.phone ? ` · ${e.phone}` : ""}</p>
                 </button>
               ))
             )}
@@ -296,15 +265,10 @@ const EmployeeItems = () => {
           </div>
         </div>
       ) : (
-        <UnitTable
-          rows={rows}
-          picked={picked}
-          onToggle={toggle}
-          extraColumn={tab === "pending" ? { label: "Currently with (as entered)", render: (r) => <span className="font-medium text-violet-700">{r.heldByNote || "—"}</span> } : null}
-        />
+        <UnitTable rows={rows} picked={picked} onToggle={toggle} />
       )}
 
-      {modal === "assign" && <AssignModal units={pickedRows} suggestion={suggestion} onClose={() => setModal(null)} onDone={load} />}
+      {modal === "assign" && <AssignModal units={pickedRows} onClose={() => setModal(null)} onDone={load} />}
       {modal === "return" && <ReturnModal units={pickedRows} employeeName={selectedEmp?.employeeName || "employee"} onClose={() => setModal(null)} onDone={load} />}
     </div>
   );

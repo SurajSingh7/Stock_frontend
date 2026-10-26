@@ -29,7 +29,7 @@ const TABS = [
 ];
 
 const STATUS_LABEL = {
-  AVAILABLE: "Available", RESERVED: "Reserved", ASSIGNED: "Assigned", IN_TRANSIT: "In transit", FAULTY: "Faulty",
+  AVAILABLE: "Available", ASSIGNED: "Assigned", IN_TRANSIT: "In transit", FAULTY: "Faulty",
   IN_REPAIR: "In repair", AT_VENDOR: "At vendor", VENDOR_REPLACED: "Vendor replaced", DEBITED: "Debited", SCRAPPED: "Scrapped",
 };
 

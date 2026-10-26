@@ -1,17 +1,19 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, PackageOpen, RotateCcw } from "lucide-react";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { usePermissions } from "@/context/PermissionContext";
 import { SearchableSelect, inputCls } from "@/modules/stock/shared/StockSharedUI";
-import { fetchEntries, fetchFormOptions } from "./openingStockApi";
+import { entryApi } from "./openingStockApi";
+import { kindConfig } from "./openingKinds";
 import { fmtDate } from "@/modules/stock/inventory/itemBadges";
+import { KindBadge, personSummary } from "@/modules/stock/people/PersonSearch";
 
-export const canDo = (permissions, isAdmin, action) => {
+export const canDo = (permissions, isAdmin, action, moduleKey = "opening-stock") => {
   if (isAdmin) return true;
-  const mod = (permissions || []).find((m) => m.moduleKey === "opening-stock");
+  const mod = (permissions || []).find((m) => m.moduleKey === moduleKey);
   return (mod?.actions || []).map((a) => String(a).toUpperCase()).includes(action);
 };
 
@@ -33,10 +35,17 @@ const STATUS_TABS = [
 
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600";
 
-const OpeningStockList = () => {
+// Faulty / beyond-repair lines on a store entry, as one short label.
+const notWorking = (r) =>
+  [r.faultyCount ? `${r.faultyCount} faulty` : "", r.beyondRepairCount ? `${r.beyondRepairCount} dead` : ""].filter(Boolean).join(" · ") || "—";
+
+const OpeningStockList = ({ kind = "STORE" }) => {
   const router = useRouter();
+  const cfg = kindConfig(kind);
+  const api = useMemo(() => entryApi(cfg.kind), [cfg.kind]);
+  const issued = cfg.kind === "ISSUED";
   const { permissions, isAdmin } = usePermissions();
-  const canCreate = canDo(permissions, isAdmin, "CREATE");
+  const canCreate = canDo(permissions, isAdmin, "CREATE", cfg.moduleKey);
 
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -57,8 +66,8 @@ const OpeningStockList = () => {
   }, [search]);
 
   useEffect(() => {
-    fetchFormOptions().then((o) => setBranches(o.branches || [])).catch(() => setBranches([]));
-  }, []);
+    api.fetchFormOptions().then((o) => setBranches(o.branches || [])).catch(() => setBranches([]));
+  }, [api]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,7 +77,7 @@ const OpeningStockList = () => {
       if (status) query.status = status;
       if (branchId) query.branchId = branchId;
       if (debounced) query.search = debounced;
-      const { rows: r, total: t } = await fetchEntries(query);
+      const { rows: r, total: t } = await api.fetchEntries(query);
       setRows(r);
       setTotal(t);
     } catch (err) {
@@ -78,7 +87,7 @@ const OpeningStockList = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, status, branchId, debounced]);
+  }, [api, page, limit, status, branchId, debounced]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setPage(1); }, [status, branchId, debounced]);
@@ -89,15 +98,13 @@ const OpeningStockList = () => {
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Opening Stock</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
-            Stock that was already on hand before this system — entered once, with whatever is known about it.
-          </p>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">{cfg.title}</h1>
+          <p className="mt-0.5 max-w-3xl text-sm text-slate-500">{cfg.subtitle}</p>
         </div>
         {canCreate && (
           <button
             type="button"
-            onClick={() => router.push("/stock/opening-stock/new")}
+            onClick={() => router.push(`${cfg.path}/new`)}
             className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
           >
             <Plus className="h-4 w-4" /> New Entry
@@ -123,8 +130,8 @@ const OpeningStockList = () => {
               </button>
             ))}
           </div>
-          <div className="w-56">
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search OS number…" className={inputCls} />
+          <div className={issued ? "w-72" : "w-56"}>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={cfg.searchPlaceholder} className={inputCls} />
           </div>
           <div className="w-56">
             <SearchableSelect
@@ -147,14 +154,16 @@ const OpeningStockList = () => {
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-[800px] border-collapse text-sm">
+        <table className="w-full min-w-[900px] border-collapse text-sm">
           <thead className="bg-slate-50">
             <tr>
               <th className={th}>Entry No.</th>
+              {issued && <th className={th}>With</th>}
               <th className={th}>Branch</th>
               <th className={th}>Entry Date</th>
+              {issued && <th className={th}>Issued Since</th>}
               <th className={`${th} text-right`}>Lines</th>
-              <th className={`${th} text-right`}>Reserved</th>
+              {!issued && <th className={`${th} text-right`}>Not Working</th>}
               <th className={th}>Status</th>
               <th className={th}>Created By</th>
               <th className={th}>Posted</th>
@@ -164,14 +173,14 @@ const OpeningStockList = () => {
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
                 <tr key={i}>
-                  <td colSpan={8} className="px-4 py-3"><div className="h-5 animate-pulse rounded bg-slate-100" /></td>
+                  <td colSpan={issued ? 9 : 8} className="px-4 py-3"><div className="h-5 animate-pulse rounded bg-slate-100" /></td>
                 </tr>
               ))
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-14 text-center">
+                <td colSpan={issued ? 9 : 8} className="px-4 py-14 text-center">
                   <PackageOpen className="mx-auto h-10 w-10 text-slate-300" />
-                  <p className="mt-3 text-sm font-medium text-slate-700">No opening stock entries yet</p>
+                  <p className="mt-3 text-sm font-medium text-slate-700">{cfg.empty}</p>
                   {canCreate && <p className="mt-1 text-sm text-slate-400">Start one with “New Entry”.</p>}
                 </td>
               </tr>
@@ -179,14 +188,30 @@ const OpeningStockList = () => {
               rows.map((r) => (
                 <tr
                   key={r._id}
-                  onClick={() => router.push(`/stock/opening-stock/${r._id}`)}
+                  onClick={() => router.push(`${cfg.path}/${r._id}`)}
                   className="cursor-pointer transition hover:bg-indigo-50/40"
                 >
                   <td className="px-4 py-3 font-mono font-semibold text-indigo-700">{r.entryNumber}</td>
+                  {issued && (
+                    <td className="px-4 py-3">
+                      {r.issuedTo ? (
+                        <>
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-medium text-slate-900">{r.issuedTo.name || r.issuedTo.username}</span>
+                            <KindBadge kind={r.issuedTo.kind} />
+                          </span>
+                          <span className="text-xs text-slate-500">{personSummary(r.issuedTo)}</span>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-slate-700">{r.branchId?.name || "—"}</td>
                   <td className="px-4 py-3 text-slate-600">{fmtDate(r.entryDate)}</td>
+                  {issued && <td className="px-4 py-3 text-slate-600">{r.issuedSince ? fmtDate(r.issuedSince) : "—"}</td>}
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700">{r.lineCount}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-700">{r.reservedCount || "—"}</td>
+                  {!issued && <td className="px-4 py-3 text-right text-slate-700">{notWorking(r)}</td>}
                   <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
                   <td className="px-4 py-3 text-slate-600">{r.createdBy?.name || "—"}</td>
                   <td className="px-4 py-3 text-slate-600">
