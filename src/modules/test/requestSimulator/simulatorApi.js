@@ -22,4 +22,6 @@ export const fetchHoldings = (subscriberId) => call(`${BASE}/subscribers/${subsc
 export const addSubscriber = (body) => call(`${BASE}/subscribers`, { method: "POST", body }, "Failed to add the subscriber");
 export const sendRequest = (subscriberId, body) =>
   call(`${BASE}/subscribers/${subscriberId}/requests`, { method: "POST", body }, "Failed to send the request");
+export const withdrawRequest = (requestId, reason = "") =>
+  call(`${BASE}/requests/${requestId}/withdraw`, { method: "POST", body: { reason } }, "Failed to withdraw the request");
 export const resendRequest = (requestId, body) => call(`${BASE}/requests/${requestId}`, { method: "PUT", body }, "Failed to send the request again");

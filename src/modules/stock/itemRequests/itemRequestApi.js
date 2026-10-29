@@ -31,20 +31,29 @@ export const fetchRequests = async (query) => {
 export const fetchStatusCounts = async (query) =>
   (await get(`${BASE}/status-counts?${new URLSearchParams(query)}`, "Failed to load counts")).data || {};
 
+// Open requests per type — for the Issue / Replace / Return tabs.
+export const fetchTypeCounts = async (query) =>
+  (await get(`${BASE}/type-counts?${new URLSearchParams(query)}`, "Failed to load counts")).data || {};
+
 export const fetchRequest = async (id) => (await get(`${BASE}/${id}`, "Failed to load the request")).data;
 
-// Free stock of every product in the request's category, at its branch.
-export const fetchAvailableUnits = async (id, { search = "", productId = "" } = {}) => {
+// Free stock of every product in one line's category, at the request's branch.
+export const fetchAvailableUnits = async (id, { lineId = "", search = "", productId = "" } = {}) => {
   const params = new URLSearchParams();
+  if (lineId) params.set("lineId", lineId);
   if (search) params.set("search", search);
   if (productId) params.set("productId", productId);
   return (await get(`${BASE}/${id}/units?${params}`, "Failed to load available stock")).data;
 };
 
-// individual: { inventoryItemIds } · batch: { quantities: [{ productDefinitionId, quantity }] }
+// One handover for any open lines:
+// { lines: [{ requestLineId, inventoryItemIds } | { requestLineId, quantities: [{ productDefinitionId, quantity }] }] }
 export const issueItems = (id, body) => patch(`${BASE}/${id}/issue`, body, "Failed to issue");
+export const closeRequestLine = (id, lineId, reason) => patch(`${BASE}/${id}/lines/${lineId}/close`, { reason }, "Failed to close the item");
 // lines: [{ returnLineId, quantity? (batch), condition: "GOOD" | "FAULTY", note? }]
 export const receiveItems = (id, lines) => patch(`${BASE}/${id}/receive`, { lines }, "Failed to receive");
+// Replace one row: { returnLineId, receive?: { condition, note, quantity? }, give?: { inventoryItemIds } | { quantities } }
+export const swapItem = (id, body) => patch(`${BASE}/${id}/swap`, body, "Failed to replace the item");
 export const shortCloseRequest = (id, reason) => patch(`${BASE}/${id}/short-close`, { reason }, "Failed to short-close");
 export const rejectRequest = (id, reason) => patch(`${BASE}/${id}/reject`, { reason }, "Failed to reject");
 

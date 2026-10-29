@@ -11,10 +11,23 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
-import { FlaskConical, Plus, PackagePlus, Undo2, Repeat, ListChecks, Search } from "lucide-react";
+import { FlaskConical, Plus, PackagePlus, Undo2, Repeat, ListChecks, Search, Trash2 } from "lucide-react";
 import { Modal, SearchableSelect, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
-import { RequestStatusBadge, RequestTypeBadge, IssuedProgress, RequestHistory, fmtDateTime, fmtQty, hasReturnSide } from "@/modules/stock/itemRequests/requestUi";
-import { fetchMeta, fetchSubscribers, fetchHoldings, addSubscriber, sendRequest, resendRequest } from "./simulatorApi";
+import {
+  RequestStatusBadge,
+  RequestTypeBadge,
+  LineStatusBadge,
+  SwapStatusBadge,
+  replaceRows,
+  ReasonChip,
+  IssuedProgress,
+  RequestHistory,
+  fmtDateTime,
+  fmtQty,
+  lineQty,
+  hasReturnSide,
+} from "@/modules/stock/itemRequests/requestUi";
+import { fetchMeta, fetchSubscribers, fetchHoldings, addSubscriber, sendRequest, resendRequest, withdrawRequest } from "./simulatorApi";
 
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap";
 const label = "text-xs font-semibold text-slate-600";
@@ -64,25 +77,62 @@ const AddSubscriberModal = ({ serviceTypes, onClose, onAdded }) => {
 };
 
 /* ── Issue Item request (new, or edit & resend a rejected one) ──
-   A category and how many — which product goes out is the store's call. */
-const RequestModal = ({ meta, subscriber, existing, onClose, onSent }) => {
+   Up to 20 items, each a category and how many — which product goes out is
+   the store's call. The same category twice is added up into one row. */
+const MAX_ITEMS = 20;
+let rowSeq = 0;
+const newRow = (categoryId = "", quantity = "") => ({ key: `r${++rowSeq}`, categoryId, quantity });
+
+const RequestModal = ({ meta, subscriber, existing, onClose, onSent, onOpenRequest }) => {
   const [branchId, setBranchId] = useState(existing ? String(existing.branchId) : "");
-  const [categoryId, setCategoryId] = useState(existing ? String(existing.categoryId) : "");
-  const [quantity, setQuantity] = useState(existing ? String(existing.requestedQty) : "");
+  const [rows, setRows] = useState(() =>
+    existing?.lines?.length ? existing.lines.map((l) => newRow(String(l.categoryId), String(l.requestedQty))) : [newRow()]
+  );
   const [remarks, setRemarks] = useState(existing?.remarks || "");
   const [busy, setBusy] = useState(false);
 
-  const category = meta.categories.find((c) => String(c._id) === categoryId);
-  const isUnits = category?.trackingMethod !== "quantity";
-  const qtyNum = Number(quantity);
-  const valid = branchId && category && qtyNum > 0 && (!isUnits || Number.isInteger(qtyNum));
+  const catById = useMemo(() => new Map(meta.categories.map((c) => [String(c._id), c])), [meta.categories]);
+  const setRow = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const rowOk = (r) => {
+    const c = catById.get(r.categoryId);
+    const q = Number(r.quantity);
+    return !!c && q > 0 && (c.trackingMethod === "quantity" || Number.isInteger(q));
+  };
+  const filled = rows.filter((r) => r.categoryId || r.quantity);
+  const dupes = new Set(filled.map((r) => r.categoryId).filter((id, i, a) => id && a.indexOf(id) !== i));
+  // Categories this subscriber cannot ask for again from the chosen branch:
+  // still owed on an open issue request (until done or closed), or on a
+  // rejected one (resend or withdraw that instead). The store refuses both.
+  const openOn = new Map(); // categoryId → { request, rejected }
+  (subscriber.requests || [])
+    .filter((r) => (r.type || "ISSUE") === "ISSUE" && ["PENDING", "PARTIAL", "REJECTED"].includes(r.status) && String(r.branchId) === branchId && r._id !== existing?._id)
+    .forEach((r) =>
+      (r.lines || [])
+        .filter((l) => r.status === "REJECTED" || ["PENDING", "PARTIAL"].includes(l.status))
+        .forEach((l) => openOn.set(String(l.categoryId), { request: r, rejected: r.status === "REJECTED" }))
+    );
+  const blocked = filled.filter((r) => openOn.has(r.categoryId));
+  // …and from OTHER branches: allowed, but shown, so it is not asked for twice by mistake.
+  const openElsewhere = new Map();
+  (subscriber.requests || [])
+    .filter((r) => (r.type || "ISSUE") === "ISSUE" && ["PENDING", "PARTIAL"].includes(r.status) && branchId && String(r.branchId) !== branchId && r._id !== existing?._id)
+    .forEach((r) =>
+      (r.lines || [])
+        .filter((l) => ["PENDING", "PARTIAL"].includes(l.status))
+        .forEach((l) => {
+          const k = String(l.categoryId);
+          openElsewhere.set(k, [...(openElsewhere.get(k) || []), `${r.requestNumber} at ${r.branchName || "another branch"}`]);
+        })
+    );
+  const valid = branchId && filled.length > 0 && filled.every(rowOk) && blocked.length === 0;
 
   const send = async () => {
     setBusy(true);
     try {
-      const body = { branchId, categoryId, quantity: qtyNum, remarks };
+      const body = { branchId, items: filled.map((r) => ({ categoryId: r.categoryId, quantity: Number(r.quantity) })), remarks };
       const r = existing ? await resendRequest(existing._id, body) : await sendRequest(subscriber._id, body);
       toast.success(`${r.requestNumber} sent to the store`);
+      (r.warnings || []).forEach((w) => toast(`⚠ ${w}`, { duration: 6000 }));
       onSent();
       onClose();
     } catch (err) {
@@ -93,40 +143,122 @@ const RequestModal = ({ meta, subscriber, existing, onClose, onSent }) => {
   };
 
   return (
-    <Modal onClose={onClose} title={existing ? `Edit & resend ${existing.requestNumber}` : `Issue Item — ${subscriber.orderId}`} maxWidth="max-w-xl">
+    <Modal onClose={onClose} title={existing ? `Edit & resend ${existing.requestNumber}` : `Issue Item — ${subscriber.orderId}`} maxWidth="max-w-2xl">
       {existing?.rejection?.reason && (
         <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">Store rejected it: {existing.rejection.reason}</p>
       )}
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div>
           <label className={label}>Branch (stock is given from here) *</label>
           <div className="mt-1">
             <SearchableSelect value={branchId} onChange={setBranchId} options={meta.branches.map((b) => ({ value: String(b._id), label: b.name }))} placeholder="Select branch" />
           </div>
         </div>
+
         <div>
-          <label className={label}>Category *</label>
-          <div className="mt-1">
-            <SearchableSelect value={categoryId} onChange={setCategoryId} options={meta.categories.map((c) => ({ value: String(c._id), label: c.path }))} placeholder="Select category" />
+          <div className="mb-1 flex items-center justify-between">
+            <label className={label}>Items * <span className="font-normal text-slate-400">— category and quantity, up to {MAX_ITEMS}</span></label>
+            <span className="text-xs text-slate-400">{filled.length} item(s)</span>
           </div>
+          <div className="rounded-xl border border-slate-200">
+            <div className="grid grid-cols-[1fr_9rem_2.25rem] gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <span>Category</span>
+              <span>Quantity</span>
+              <span />
+            </div>
+            <div className="divide-y divide-slate-50">
+              {rows.map((r) => {
+                const c = catById.get(r.categoryId);
+                const isUnits = c?.trackingMethod !== "quantity";
+                const q = Number(r.quantity);
+                const badQty = r.quantity !== "" && !(q > 0 && (!c || !isUnits || Number.isInteger(q)));
+                return (
+                  <div key={r.key} className="grid grid-cols-[1fr_9rem_2.25rem] items-start gap-2 px-3 py-2">
+                    <div>
+                      <SearchableSelect
+                        value={r.categoryId}
+                        onChange={(v) => setRow(r.key, { categoryId: v })}
+                        options={meta.categories.map((x) => ({
+                          value: String(x._id),
+                          label: openOn.has(String(x._id))
+                            ? `${x.path} — ${openOn.get(String(x._id)).rejected ? "rejected on" : "on"} ${openOn.get(String(x._id)).request.requestNumber}`
+                            : x.path,
+                        }))}
+                        placeholder="Select category"
+                      />
+                      {openOn.has(r.categoryId) ? (
+                        openOn.get(r.categoryId).rejected ? (
+                          <div className="mt-1 rounded-lg bg-rose-50 px-2 py-1.5 text-[11px] text-rose-700">
+                            <p className="font-medium">
+                              On rejected request {openOn.get(r.categoryId).request.requestNumber} from this branch — edit &amp; resend it, or withdraw it, instead of a new request.
+                            </p>
+                            {onOpenRequest && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenRequest(openOn.get(r.categoryId).request)}
+                                className="mt-1 rounded-md bg-rose-600 px-2 py-0.5 font-semibold text-white hover:bg-rose-700"
+                              >
+                                Open {openOn.get(r.categoryId).request.requestNumber}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="mt-0.5 text-[11px] font-medium text-rose-600">
+                            Already on open request {openOn.get(r.categoryId).request.requestNumber} from this branch — wait till it is issued or closed
+                          </p>
+                        )
+                      ) : (
+                        <>
+                          {openElsewhere.has(r.categoryId) && (
+                            <p className="mt-0.5 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">
+                              ⚠ Also pending for this subscriber on {openElsewhere.get(r.categoryId).join(", ")} — make sure it isn&apos;t asked twice
+                            </p>
+                          )}
+                          {dupes.has(r.categoryId) && <p className="mt-0.5 text-[11px] text-amber-700">Listed again — the quantities are added up</p>}
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number" min="0" step={isUnits ? "1" : "any"} disabled={!c}
+                        value={r.quantity} onChange={(e) => setRow(r.key, { quantity: e.target.value })}
+                        placeholder={c ? "" : "—"}
+                        className={`${inputCls} ${badQty ? "border-rose-400" : ""}`}
+                      />
+                      <span className="w-12 shrink-0 text-xs text-slate-500">{c ? (isUnits ? "units" : unitLabel(c.unit)) : ""}</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={rows.length === 1}
+                      onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
+                      title="Remove"
+                      className="mt-1 inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-30"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-slate-100 px-3 py-2">
+              <button
+                type="button"
+                disabled={rows.length >= MAX_ITEMS}
+                onClick={() => setRows((rs) => [...rs, newRow()])}
+                className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-600 hover:underline disabled:text-slate-400 disabled:no-underline"
+              >
+                <Plus className="h-4 w-4" /> Add item
+              </button>
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-slate-400">The store decides which product(s) of each category to give.</p>
           {meta.mixedCategories?.length > 0 && (
             <p className="mt-1 text-xs text-amber-700">
               Not requestable until their products are counted the same way (units vs metres): {meta.mixedCategories.map((c) => c.path).join(", ")}
             </p>
           )}
         </div>
-        <div>
-          <label className={label}>Quantity *</label>
-          <div className="mt-1 flex items-center gap-2">
-            <input
-              type="number" min="0" step={isUnits ? "1" : "any"} disabled={!category}
-              value={quantity} onChange={(e) => setQuantity(e.target.value)}
-              placeholder={category ? "" : "Pick a category first"} className={`${inputCls} w-40`}
-            />
-            <span className="text-sm text-slate-500">{category ? (isUnits ? "units" : unitLabel(category.unit)) : ""}</span>
-          </div>
-          <p className="mt-1 text-xs text-slate-400">The store decides which product(s) of this category to give.</p>
-        </div>
+
         <div>
           <label className={label}>Remarks</label>
           <input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="e.g. New fiber connection" className={`${inputCls} mt-1`} />
@@ -135,7 +267,7 @@ const RequestModal = ({ meta, subscriber, existing, onClose, onSent }) => {
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button>
         <button type="button" disabled={!valid || busy} onClick={send} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {busy ? "Sending…" : existing ? "Send again" : "Send Request"}
+          {busy ? "Sending…" : existing ? "Send again" : `Send Request (${filled.length} item${filled.length === 1 ? "" : "s"})`}
         </button>
       </div>
     </Modal>
@@ -151,6 +283,9 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
   );
   const [branchId, setBranchId] = useState(existing ? String(existing.branchId) : "");
   const [remarks, setRemarks] = useState(existing?.remarks || "");
+  const [reason, setReason] = useState(existing?.reason?.code || "");
+  const [reasonNote, setReasonNote] = useState(existing?.reason?.note || "");
+  const reasons = meta.reasons?.[isReplace ? "REPLACE" : "RETURN"] || [];
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -160,9 +295,13 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
   }, [subscriber._id]);
 
   const chosen = (items || []).filter((i) => picked[String(i.inventoryItemId)] !== undefined);
-  // A replace works on one category — once something is ticked, only its
-  // category stays pickable.
-  const lockedCategory = isReplace && chosen[0] ? String(chosen[0].categoryId) : null;
+  // A replace swaps each ticked item for a new one of its category, same quantity.
+  const outgoing = chosen.map((i) => ({
+    label: i.label,
+    path: i.categoryPath,
+    qty: Number(picked[String(i.inventoryItemId)]) || 0,
+    unit: i.trackingMethod === "quantity" ? i.unit : null,
+  }));
 
   const toggle = (i) => {
     const id = String(i.inventoryItemId);
@@ -177,6 +316,8 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
 
   const valid =
     branchId &&
+    reason &&
+    (reason !== "OTHER" || reasonNote.trim()) &&
     chosen.length > 0 &&
     chosen.every((i) => i.trackingMethod !== "quantity" || (Number(picked[String(i.inventoryItemId)]) > 0 && Number(picked[String(i.inventoryItemId)]) <= i.quantity));
 
@@ -187,6 +328,7 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
         type,
         branchId,
         remarks,
+        reason: { code: reason, note: reasonNote.trim() },
         items: chosen.map((i) => ({
           inventoryItemId: i.inventoryItemId,
           ...(i.trackingMethod === "quantity" ? { quantity: Number(picked[String(i.inventoryItemId)]) } : {}),
@@ -212,7 +354,7 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
       {existing?.rejection?.reason && <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">Store rejected it: {existing.rejection.reason}</p>}
       <p className="mb-3 text-sm text-slate-500">
         {isReplace
-          ? "Tick the faulty item(s) to swap — one category at a time. The store takes them back and gives as many of the same category."
+          ? "Tick the faulty item(s) to swap — any categories. The store takes them back and gives as many of each one's category."
           : "Tick what the subscriber is giving back."}
       </p>
       <div className="max-h-72 overflow-y-auto rounded-xl border border-slate-200">
@@ -225,8 +367,7 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
             const id = String(i.inventoryItemId);
             const on = picked[id] !== undefined;
             const claimed = i.claimedBy && !(existing && existing.returnLines?.some((l) => String(l.inventoryItemId) === id));
-            const wrongCategory = lockedCategory && String(i.categoryId) !== lockedCategory;
-            const disabled = !!claimed || (!!wrongCategory && !on);
+            const disabled = !!claimed;
             return (
               <div key={id} className={`flex items-center gap-3 border-b border-slate-50 px-3 py-2 last:border-0 ${on ? "bg-indigo-50/50" : ""} ${disabled ? "opacity-50" : ""}`}>
                 <input type="checkbox" checked={on} disabled={disabled} onChange={() => toggle(i)} className="h-4 w-4 accent-indigo-600" />
@@ -252,6 +393,31 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
           })
         )}
       </div>
+      {isReplace && outgoing.length > 0 && (
+        <div className="mt-2 rounded-lg bg-orange-50 px-3 py-2 text-xs text-orange-800">
+          <p className="font-semibold">Each one is swapped — store takes it back, then gives a new one in its place:</p>
+          {outgoing.map((o, k) => (
+            <p key={k} className="mt-0.5"><span className="font-mono">{o.label}</span> → new {o.path}{o.unit ? ` ×${fmtQty(o.qty)} ${unitLabel(o.unit)}` : ""}</p>
+          ))}
+        </div>
+      )}
+      <div className="mt-3">
+        <label className={label}>{isReplace ? "Why replace? *" : "Why return? *"}</label>
+        <div className="mt-1 grid gap-1.5 sm:grid-cols-2">
+          {reasons.map((r) => (
+            <label
+              key={r.code}
+              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${reason === r.code ? "border-indigo-300 bg-indigo-50 font-semibold text-indigo-800" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+            >
+              <input type="radio" name="reason" checked={reason === r.code} onChange={() => setReason(r.code)} className="h-4 w-4 accent-indigo-600" />
+              {r.label}
+            </label>
+          ))}
+        </div>
+        {reason === "OTHER" && (
+          <input value={reasonNote} onChange={(e) => setReasonNote(e.target.value)} placeholder="What is the reason? *" className={`${inputCls} mt-2 ${!reasonNote.trim() ? "border-rose-300" : ""}`} />
+        )}
+      </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div>
           <label className={label}>Back to branch *</label>
@@ -261,7 +427,7 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
         </div>
         <div>
           <label className={label}>Remarks</label>
-          <input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={isReplace ? "e.g. ONT not powering on" : "e.g. Connection closed"} className={`${inputCls} mt-1`} />
+          <input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder={isReplace ? "e.g. red light since Monday" : "e.g. customer moving to Pune"} className={`${inputCls} mt-1`} />
         </div>
       </div>
       <div className="mt-4 flex justify-end gap-2">
@@ -275,7 +441,40 @@ const ReturnModal = ({ meta, subscriber, type, existing, onClose, onSent }) => {
 };
 
 /* ── A subscriber's requests, as the website would show them ──── */
-const RequestsModal = ({ subscriber, onClose, onResend }) => (
+/* A rejected request the subscriber no longer wants — gone for good, and its
+   categories can be asked for afresh. Asks once more before doing it. */
+const WithdrawButton = ({ request, onDone }) => {
+  const [sure, setSure] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    try {
+      await withdrawRequest(request._id);
+      toast.success(`${request.requestNumber} withdrawn`);
+      onDone();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+      setSure(false);
+    }
+  };
+  return sure ? (
+    <span className="inline-flex items-center gap-1.5 text-xs">
+      <span className="text-slate-600">Withdraw for good?</span>
+      <button type="button" disabled={busy} onClick={go} className="rounded-lg bg-rose-600 px-2.5 py-1 font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
+        {busy ? "…" : "Yes, withdraw"}
+      </button>
+      <button type="button" onClick={() => setSure(false)} className="rounded-lg border border-slate-200 px-2.5 py-1 font-semibold text-slate-600">No</button>
+    </span>
+  ) : (
+    <button type="button" onClick={() => setSure(true)} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+      Withdraw
+    </button>
+  );
+};
+
+const RequestsModal = ({ subscriber, onClose, onResend, onChanged }) => (
   <Modal onClose={onClose} title={`Requests — ${subscriber.orderId}`} maxWidth="max-w-2xl">
     {subscriber.requests.length === 0 ? (
       <p className="py-6 text-center text-sm text-slate-400">No requests yet</p>
@@ -290,26 +489,49 @@ const RequestsModal = ({ subscriber, onClose, onResend }) => (
                 <RequestStatusBadge status={r.status} />
               </div>
               <div className="flex gap-4">
-                {hasReturnSide(r.type) && <IssuedProgress issued={r.returnReceivedQty} requested={r.returnRequestedQty} />}
-                {r.type !== "RETURN" && <IssuedProgress issued={r.issuedQty} requested={r.requestedQty} />}
+                {r.type === "RETURN" ? (
+                  <IssuedProgress issued={r.returnReceivedQty} requested={r.returnRequestedQty} />
+                ) : (
+                  <IssuedProgress issued={r.issuedQty} requested={r.requestedQty} />
+                )}
               </div>
             </div>
-            <p className="mt-1 text-xs text-slate-500">{r.categoryPath ? `${r.categoryPath} · ` : ""}{r.branchName || ""} · {fmtDateTime(r.createdAt)}</p>
-            {hasReturnSide(r.type) && (
+            <p className="mt-1 text-xs text-slate-500">{r.branchName || ""} · {fmtDateTime(r.createdAt)}</p>
+            {r.reason?.code && <div className="mt-1"><ReasonChip type={r.type} reason={r.reason} /></div>}
+            {r.type === "REPLACE" && (
+              <div className="mt-2 overflow-hidden rounded-lg border border-slate-100">
+                {replaceRows(r).map(({ old, line, given }) => (
+                  <div key={old._id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-slate-50 px-3 py-1.5 text-sm last:border-0">
+                    <span className="min-w-0 flex-1 truncate font-mono text-slate-800">{old.label}</span>
+                    <span className="font-mono text-xs text-slate-600">→ {given.length ? given.join(", ") : "—"}</span>
+                    {line && <SwapStatusBadge status={line.swapStatus} />}
+                    {line?.closure?.reason && <span className="w-full text-xs text-slate-500">closed by store: {line.closure.reason}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {r.type === "RETURN" && (
               <p className="mt-2 text-sm text-slate-700">
                 Back: {r.returnLines.map((l) => `${l.label} ${fmtQty(l.receivedQty)}/${fmtQty(l.requestedQty)}`).join(", ")}
                 {r.receipts.some((rc) => rc.lines.some((l) => l.condition === "FAULTY")) && <span className="ml-1 text-rose-600">(some faulty)</span>}
               </p>
             )}
-            {r.type !== "RETURN" && (
-              <p className="mt-2 text-sm text-slate-700">
-                {r.type === "REPLACE" ? "New ones:" : "Asked"} <b>{fmtQty(r.requestedQty)}</b> {r.trackingMethod === "quantity" ? unitLabel(r.unit) : "units"}
-                {r.issuedByProduct.length > 0 && (
-                  <> · given {r.issuedByProduct.map((g) => `${g.productName} ×${fmtQty(g.quantity)}`).join(", ")}</>
-                )}
-              </p>
+            {r.type !== "RETURN" && r.type !== "REPLACE" && r.lines?.length > 0 && (
+              <div className="mt-2 overflow-hidden rounded-lg border border-slate-100">
+                {r.lines.map((l) => (
+                  <div key={l._id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-slate-50 px-3 py-1.5 text-sm last:border-0">
+                    <span className="min-w-0 flex-1 truncate text-slate-800">{l.categoryPath}</span>
+                    <span className="tabular-nums text-slate-600">{fmtQty(l.issuedQty)} / {lineQty(l.requestedQty, l)}</span>
+                    <LineStatusBadge status={l.status} />
+                    {l.issuedByProduct.length > 0 && (
+                      <span className="w-full text-xs text-slate-500">given {l.issuedByProduct.map((g) => `${g.productName} ×${fmtQty(g.quantity)}`).join(", ")}</span>
+                    )}
+                    {l.closure?.reason && <span className="w-full text-xs text-slate-500">closed by store: {l.closure.reason}</span>}
+                  </div>
+                ))}
+              </div>
             )}
-            {r.issues.length > 0 && (
+            {r.issues.length > 0 && r.type !== "REPLACE" && (
               <p className="mt-2 font-mono text-xs text-slate-500">
                 Given: {r.issues.flatMap((i) => i.lines.flatMap((l) => l.units)).join(", ")}
               </p>
@@ -321,9 +543,13 @@ const RequestsModal = ({ subscriber, onClose, onResend }) => (
               <div className="mt-2"><RequestHistory history={r.history} /></div>
             </details>
             {r.status === "REJECTED" && (
-              <button type="button" onClick={() => onResend(r)} className="mt-3 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
-                Edit &amp; resend
-              </button>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => onResend(r)} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700">
+                  Edit &amp; resend
+                </button>
+                <WithdrawButton request={r} onDone={onChanged} />
+                <span className="text-[11px] text-slate-400">Until one of these, its items can&apos;t be asked for in a new request from this branch.</span>
+              </div>
             )}
           </div>
         ))}
@@ -446,7 +672,14 @@ const RequestSimulator = () => {
 
       {adding && meta && <AddSubscriberModal serviceTypes={meta.serviceTypes} onClose={() => setAdding(false)} onAdded={load} />}
       {requesting && meta && (requesting.type || "ISSUE") === "ISSUE" && (
-        <RequestModal meta={meta} subscriber={requesting.subscriber} existing={requesting.existing} onClose={() => setRequesting(null)} onSent={load} />
+        <RequestModal
+          meta={meta}
+          subscriber={requesting.subscriber}
+          existing={requesting.existing}
+          onClose={() => setRequesting(null)}
+          onSent={load}
+          onOpenRequest={() => { setViewing(requesting.subscriber._id); setRequesting(null); }}
+        />
       )}
       {requesting && meta && hasReturnSide(requesting.type) && (
         <ReturnModal meta={meta} subscriber={requesting.subscriber} type={requesting.type} existing={requesting.existing} onClose={() => setRequesting(null)} onSent={load} />
@@ -456,6 +689,7 @@ const RequestSimulator = () => {
           subscriber={viewingRow}
           onClose={() => setViewing(null)}
           onResend={(r) => { setViewing(null); setRequesting({ subscriber: viewingRow, existing: r, type: r.type }); }}
+          onChanged={load}
         />
       )}
     </div>

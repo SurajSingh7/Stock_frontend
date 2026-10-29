@@ -8,6 +8,7 @@ import { usePermissions } from "@/context/PermissionContext";
 import { Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { PersonSearch, PersonCard } from "@/modules/stock/people/PersonSearch";
 import { ConditionBadge, SourceBadge, WarrantyBadge, fmtDate } from "@/modules/stock/inventory/itemBadges";
+import { ReturnStateFields, emptyReturnState, returnStateOk, returnStateBody } from "@/modules/stock/itemRequests/requestUi";
 
 /*
   Employee Items — stock with our own people.
@@ -84,31 +85,22 @@ const AssignModal = ({ units, onClose, onDone }) => {
 };
 
 const ReturnModal = ({ units, employeeName, onClose, onDone }) => {
-  const [condition, setCondition] = useState("GOOD");
-  const [note, setNote] = useState("");
+  const [state, setState] = useState(emptyReturnState);
   const [busy, setBusy] = useState(false);
   return (
     <Modal onClose={onClose} title={`Take back ${units.length} unit(s) from ${employeeName}`} maxWidth="max-w-md">
       <p className="mb-3 text-xs text-slate-500">{units.map((u) => u.label).join(", ")}</p>
-      <div className="mb-3 inline-flex rounded-lg border border-slate-200 p-0.5">
-        {["GOOD", "FAULTY"].map((c) => (
-          <button key={c} type="button" onClick={() => setCondition(c)}
-            className={`rounded-md px-3 py-1 text-sm font-semibold ${condition === c ? (c === "GOOD" ? "bg-emerald-600 text-white" : "bg-rose-600 text-white") : "text-slate-600"}`}>
-            {c === "GOOD" ? "Good" : "Faulty"}
-          </button>
-        ))}
-      </div>
-      <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder={condition === "FAULTY" ? "What is wrong? (required)" : "Note (optional)"} className={inputCls} />
+      <ReturnStateFields value={state} onChange={setState} />
       <div className="mt-4 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600">Cancel</button>
         <button
           type="button"
-          disabled={busy || (condition === "FAULTY" && !note.trim())}
+          disabled={busy || !returnStateOk(state)}
           onClick={async () => {
             setBusy(true);
             try {
-              await call(`${BASE}/return`, { method: "POST", body: { itemIds: units.map((u) => u._id), condition, note } }, "Failed to take back");
-              toast.success(condition === "GOOD" ? "Back on the shelf" : "Moved to Repair & Warranty");
+              await call(`${BASE}/return`, { method: "POST", body: { itemIds: units.map((u) => u._id), ...returnStateBody(state) } }, "Failed to take back");
+              toast.success(state.workingState === "WORKING" ? "Back on the shelf" : state.workingState === "FAULTY" ? "Moved to Repair & Warranty" : "Recorded as scrapped");
               onDone();
               onClose();
             } catch (err) {
