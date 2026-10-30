@@ -920,6 +920,11 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, canP
               <tr key={inv._id} className="transition hover:bg-slate-50/60">
                 <td className={`${invTd} font-semibold text-indigo-600`}>
                   {inv.invoiceNumber}
+                  {inv.companyUse && (
+                    <span className="mt-0.5 block w-fit rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200">
+                      Company Use
+                    </span>
+                  )}
                   {inv.partialSubmit && (
                     <button
                       type="button" onClick={() => onEntries(inv)} title="Show entries"

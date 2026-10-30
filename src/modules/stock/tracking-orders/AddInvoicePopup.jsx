@@ -2,12 +2,19 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { Upload, FileText, Sparkles, ArrowLeft } from "lucide-react";
+import toast from "react-hot-toast";
+import { Upload, FileText, ArrowLeft } from "lucide-react";
 import { Modal, money } from "@/modules/stock/shared/StockSharedUI";
+import { aiApi, useCan } from "@/modules/master/aiSettings/aiSettingsShared";
+import {
+  uploadWithProgress, ScanProgress, ScanSkeleton, ScanResultBanner, ScanFailedBanner, ChangeModelPopup,
+} from "./InvoiceScanParts";
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
 const labelCls = "mb-1.5 block text-xs font-semibold text-slate-700";
+// A value the AI filled in and nobody has changed yet.
+const aiCls = "border-emerald-300 bg-emerald-50/60 ring-1 ring-emerald-100";
 
 const ACCEPTED_UPLOAD_TYPES = ["image/jpeg", "image/png", "image/webp", "image/jpg", "application/pdf"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -23,30 +30,42 @@ async function getJson(path, failMessage) {
 /*
   Add Invoice (and ⋮ → Edit invoice): the details exactly as the vendor's
   invoice states them — number, date, amount, and how many of each product.
-  Uploading the file fills these in (dummy values for now, the Claude API
-  later); they are checked and corrected here before saving. Items are
-  entered afterwards, from the invoice row's "+ Add Items".
+  Uploading the file has Claude read it (model from Master → AI Settings);
+  what it filled is highlighted and checked here before saving. If the scan
+  fails the form opens empty, to fill by hand. Items are entered afterwards,
+  from the invoice row's "+ Add Items".
 */
 const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, invoice, onClose, onDone }) => {
   const isEdit = mode === "edit";
+  const can = useCan();
+  const canChangeModel = can("ai-settings", "UPDATE");
 
   const [loading, setLoading] = useState(true);
-  const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  // AI scan: idle → uploading → scanning → done | failed
+  const [scan, setScan] = useState({ phase: "idle", uploadPct: 0, startedAt: null, meta: null, error: "" });
+  const [warnings, setWarnings] = useState([]);
+  const [aiFilled, setAiFilled] = useState({}); // field key -> true while untouched
+  const [scanCfg, setScanCfg] = useState(null); // { invoiceScan: { enabled, model }, models }
+  const [modelPopup, setModelPopup] = useState(false);
+  const reading = scan.phase === "uploading" || scan.phase === "scanning";
+  const untouch = (key) => setAiFilled((p) => (p[key] ? { ...p, [key]: false } : p));
 
   const [po, setPo] = useState(null);
   const [invoicedElsewhere, setInvoicedElsewhere] = useState({}); // quotationItemId -> qty on other invoices
   const [branches, setBranches] = useState([]);
 
   const [file, setFile] = useState(null);
-  const [readSource, setReadSource] = useState(""); // "DUMMY" once the upload filled the form
+  const [readSource, setReadSource] = useState(""); // "AI" once the scan filled the form, "MANUAL" if it failed
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
   const [invoiceAmount, setInvoiceAmount] = useState("");
   const [qty, setQty] = useState({}); // quotationItemId -> invoice quantity (string)
   const [extraCharges, setExtraCharges] = useState([]);
   const [notes, setNotes] = useState("");
+  const [companyUse, setCompanyUse] = useState(false);
   const [branchId, setBranchId] = useState("");
 
   useEffect(() => {
@@ -85,6 +104,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
           setQty(q);
           setExtraCharges((invoice.extraCharges || []).map((c) => ({ ...c, includeInBilling: c.includeInBilling !== false })));
           setNotes(invoice.notes || "");
+          setCompanyUse(!!invoice.companyUse);
         }
       } catch (e) {
         setError(e.message);
@@ -118,6 +138,51 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
     return round2(lines + charges);
   }, [items, qty, extraCharges]);
 
+  // Which model will read the file — shown while scanning, and the list the
+  // "Change model" popup offers. Non-fatal: the scan works without it.
+  useEffect(() => {
+    if (isEdit) return;
+    aiApi("/invoice-scan").then(setScanCfg).catch(() => {});
+  }, [isEdit]);
+  const modelLabel = (id) => scanCfg?.models?.find((m) => m.id === id)?.label || id;
+
+  const runScan = async (f) => {
+    setError(null);
+    setWarnings([]);
+    setScan({ phase: "uploading", uploadPct: 0, startedAt: null, meta: null, error: "" });
+    try {
+      const fd = new FormData();
+      fd.append("invoiceFile", f);
+      const d = await uploadWithProgress(
+        `${API_BACKEND_URL}/stock/tracking-orders/${trackingOrderId}/invoices/read`,
+        fd,
+        (pct, uploaded) => setScan((s) => ({ ...s, uploadPct: pct, ...(uploaded ? { phase: "scanning", startedAt: Date.now() } : {}) }))
+      );
+      setInvoiceNumber(d.invoiceNumber || "");
+      setInvoiceDate(d.invoiceDate || "");
+      setInvoiceAmount(d.invoiceAmount ? String(d.invoiceAmount) : "");
+      const q = {};
+      const filled = { invoiceNumber: !!d.invoiceNumber, invoiceDate: !!d.invoiceDate, invoiceAmount: !!d.invoiceAmount };
+      (d.lines || []).forEach((l) => {
+        const k = String(l.quotationItemId);
+        q[k] = l.invoiceQuantity ? String(l.invoiceQuantity) : "";
+        if (l.invoiceQuantity) filled[`qty:${k}`] = true;
+      });
+      setQty(q);
+      setExtraCharges(d.extraCharges || []);
+      (d.extraCharges || []).forEach((_, i) => (filled[`misc:${i}`] = true));
+      setAiFilled(filled);
+      setWarnings(d.warnings || []);
+      setReadSource("AI");
+      setScan({ phase: "done", uploadPct: 100, startedAt: null, meta: { seconds: d.seconds, modelLabel: modelLabel(d.model) }, error: "" });
+    } catch (err) {
+      // The form still opens — empty, to fill by hand.
+      setAiFilled({});
+      setReadSource((s) => s || "MANUAL");
+      setScan({ phase: "failed", uploadPct: 100, startedAt: null, meta: null, error: err.message });
+    }
+  };
+
   const pickFile = async (e) => {
     const picked = e.target.files?.[0];
     e.target.value = "";
@@ -127,30 +192,20 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
     setError(null);
     setFile(picked);
     if (isEdit) return; // a replacement file does not overwrite what was checked by hand
+    runScan(picked);
+  };
 
-    setReading(true);
+  // "Change model": saves the pick as the default (needs AI Settings · Update), then re-scans.
+  const pickModel = async (model) => {
     try {
-      const fd = new FormData();
-      fd.append("invoiceFile", picked);
-      const res = await fetch(`${API_BACKEND_URL}/stock/tracking-orders/${trackingOrderId}/invoices/read`, {
-        method: "POST",
-        credentials: "include",
-        body: fd,
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Could not read the invoice");
-      const d = json.data;
-      setReadSource(d.source || "");
-      setInvoiceNumber(d.invoiceNumber || "");
-      setInvoiceDate(d.invoiceDate || "");
-      setInvoiceAmount(d.invoiceAmount ? String(d.invoiceAmount) : "");
-      const q = {};
-      (d.lines || []).forEach((l) => (q[String(l.quotationItemId)] = String(l.invoiceQuantity ?? "")));
-      setQty(q);
+      if (model !== scanCfg?.invoiceScan?.model) {
+        setScanCfg(await aiApi("", { method: "PUT", body: { invoiceScan: { model } } }));
+        toast.success(`AI model changed to ${modelLabel(model)}`);
+      }
+      setModelPopup(false);
+      runScan(file);
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setReading(false);
+      toast.error(err.message);
     }
   };
 
@@ -182,6 +237,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
       invoiceDate,
       invoiceAmount: Number(invoiceAmount) || 0,
       notes: notes.trim(),
+      companyUse,
       extraCharges: extraCharges.map((c) => ({
         amount: Number(c.amount),
         note: c.note || "",
@@ -222,42 +278,76 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
         <div className="space-y-4">
           {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
 
-          {/* Upload */}
-          <label className={`flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-6 text-center transition ${file ? "border-emerald-300 bg-emerald-50/50" : "border-slate-300 bg-slate-50 hover:border-indigo-300 hover:bg-indigo-50/40"}`}>
-            {file ? <FileText className="h-6 w-6 text-emerald-600" /> : <Upload className="h-6 w-6 text-slate-400" />}
-            <span className="text-sm font-semibold text-slate-700">
-              {reading ? "Reading invoice…" : file ? file.name : isEdit ? "Replace invoice file (optional)" : "Upload invoice (PDF / Image)"}
-            </span>
-            {!isEdit && !file && <span className="text-xs text-slate-500">Details fill in automatically from the invoice</span>}
-            {isEdit && !file && invoice.invoiceFile && <span className="text-xs text-slate-500">Current: {invoice.invoiceFile.split("/").pop()}</span>}
-            <input type="file" accept={ACCEPTED_UPLOAD_TYPES.join(",")} onChange={pickFile} className="hidden" disabled={reading} />
-          </label>
-
-          {readSource === "DUMMY" && (
-            <p className="flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              <Sparkles className="h-3.5 w-3.5" /> Sample details filled in — reading the actual invoice comes later. Check and correct them before saving.
-            </p>
+          {/* Upload — while the AI reads it, the progress card takes its place */}
+          {reading ? (
+            <ScanProgress
+              fileName={file?.name} phase={scan.phase} uploadPct={scan.uploadPct} scanStartedAt={scan.startedAt}
+              modelId={scanCfg?.invoiceScan?.model} modelLabel={scanCfg ? modelLabel(scanCfg.invoiceScan.model) : ""}
+            />
+          ) : (
+            <label className={`flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed text-center transition ${file ? "border-emerald-300 bg-emerald-50/50 px-4 py-3" : "border-slate-300 bg-slate-50 px-4 py-6 hover:border-emerald-300 hover:bg-emerald-50/40"}`}>
+              {file ? <FileText className="h-5 w-5 text-emerald-600" /> : <Upload className="h-6 w-6 text-slate-400" />}
+              <span className="text-sm font-semibold text-slate-700">
+                {file ? file.name : isEdit ? "Replace invoice file (optional)" : "Upload invoice (PDF / Image)"}
+              </span>
+              {!isEdit && !file && <span className="text-xs text-slate-500">AI reads the invoice and fills in the details</span>}
+              {!isEdit && file && <span className="text-[11px] text-slate-500">Click to upload a different file</span>}
+              {isEdit && !file && invoice.invoiceFile && <span className="text-xs text-slate-500">Current: {invoice.invoiceFile.split("/").pop()}</span>}
+              <input type="file" accept={ACCEPTED_UPLOAD_TYPES.join(",")} onChange={pickFile} className="hidden" />
+            </label>
           )}
 
-          {formReady && (
+          {reading && <ScanSkeleton />}
+          {scan.phase === "done" && scan.meta && (
+            <ScanResultBanner
+              meta={scan.meta} warnings={warnings} busy={reading}
+              onRescan={() => runScan(file)} onChangeModel={canChangeModel && scanCfg ? () => setModelPopup(true) : null}
+            />
+          )}
+          {scan.phase === "failed" && (
+            <ScanFailedBanner
+              message={scan.error} busy={reading}
+              onRescan={() => runScan(file)} onChangeModel={canChangeModel && scanCfg ? () => setModelPopup(true) : null}
+            />
+          )}
+          {modelPopup && scanCfg && (
+            <ChangeModelPopup models={scanCfg.models} current={scanCfg.invoiceScan.model} onClose={() => setModelPopup(false)} onPick={pickModel} />
+          )}
+
+          {formReady && !reading && (
             <>
               <div className="grid gap-3 sm:grid-cols-3">
                 <div>
                   <label className={labelCls}>Invoice Number</label>
-                  <input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className={inputCls} />
+                  <input value={invoiceNumber} onChange={(e) => { setInvoiceNumber(e.target.value); untouch("invoiceNumber"); }} className={`${inputCls} ${aiFilled.invoiceNumber ? aiCls : ""}`} />
                 </div>
                 <div>
                   <label className={labelCls}>Invoice Date</label>
-                  <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={inputCls} />
+                  <input type="date" value={invoiceDate} onChange={(e) => { setInvoiceDate(e.target.value); untouch("invoiceDate"); }} className={`${inputCls} ${aiFilled.invoiceDate ? aiCls : ""}`} />
                 </div>
                 <div>
                   <label className={labelCls}>Amount on invoice (₹)</label>
-                  <input type="number" min="0" value={invoiceAmount} onChange={(e) => setInvoiceAmount(e.target.value)} className={inputCls} />
+                  <input type="number" min="0" value={invoiceAmount} onChange={(e) => { setInvoiceAmount(e.target.value); untouch("invoiceAmount"); }} className={`${inputCls} ${aiFilled.invoiceAmount ? aiCls : ""}`} />
                   <p className={`mt-1 text-[11px] ${Math.abs((Number(invoiceAmount) || 0) - poRateAmount) > 1 ? "font-semibold text-amber-600" : "text-slate-400"}`}>
                     At PO rates: {money(poRateAmount)}
                   </p>
                 </div>
               </div>
+
+              <button
+                type="button" role="switch" aria-checked={companyUse} onClick={() => setCompanyUse((v) => !v)}
+                className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${companyUse ? "border-indigo-300 bg-indigo-50/60" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+              >
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800">Company Use</span>
+                  <span className="block text-xs text-slate-500">
+                    {companyUse ? "This invoice is for the company's own use" : "Turn on if this invoice is for the company's own use"}
+                  </span>
+                </span>
+                <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition ${companyUse ? "bg-indigo-600" : "bg-slate-300"}`}>
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${companyUse ? "left-[18px]" : "left-0.5"}`} />
+                </span>
+              </button>
 
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full border-collapse text-sm">
@@ -283,8 +373,8 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                           <td className="px-3 py-2">
                             <input
                               type="number" min="0" value={qty[k] ?? ""} disabled={qtyLocked}
-                              onChange={(e) => setQty((p) => ({ ...p, [k]: e.target.value }))}
-                              className={`${inputCls} text-right`}
+                              onChange={(e) => { setQty((p) => ({ ...p, [k]: e.target.value })); untouch(`qty:${k}`); }}
+                              className={`${inputCls} text-right ${aiFilled[`qty:${k}`] ? aiCls : ""}`}
                             />
                           </td>
                         </tr>
@@ -311,8 +401,8 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                   <div className="space-y-2">
                     {extraCharges.map((c, idx) => (
                       <div key={idx} className={`flex flex-wrap items-center gap-2 ${c.includeInBilling === false ? "opacity-75" : ""}`}>
-                        <input placeholder="e.g. Transport" value={c.note} onChange={(e) => updateCharge(idx, "note", e.target.value)} className={`${inputCls} min-w-0 flex-1`} />
-                        <input type="number" placeholder="Amount" value={c.amount} onChange={(e) => updateCharge(idx, "amount", e.target.value)} className={`${inputCls} w-28 text-right`} />
+                        <input placeholder="e.g. Transport" value={c.note} onChange={(e) => { updateCharge(idx, "note", e.target.value); untouch(`misc:${idx}`); }} className={`${inputCls} min-w-0 flex-1 ${aiFilled[`misc:${idx}`] ? aiCls : ""}`} />
+                        <input type="number" placeholder="Amount" value={c.amount} onChange={(e) => { updateCharge(idx, "amount", e.target.value); untouch(`misc:${idx}`); }} className={`${inputCls} w-28 text-right ${aiFilled[`misc:${idx}`] ? aiCls : ""}`} />
                         <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold">
                           {[
                             { value: true, label: "In bill", on: "bg-blue-600 text-white" },
@@ -326,7 +416,14 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                             </button>
                           ))}
                         </div>
-                        <button type="button" onClick={() => setExtraCharges((p) => p.filter((_, i) => i !== idx))} className="rounded px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600">✕</button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExtraCharges((p) => p.filter((_, i) => i !== idx));
+                            // Highlights are keyed by position — after a removal they would point at the wrong rows.
+                            setAiFilled((p) => Object.fromEntries(Object.entries(p).filter(([key]) => !key.startsWith("misc:"))));
+                          }}
+                          className="rounded px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600">✕</button>
                       </div>
                     ))}
                   </div>

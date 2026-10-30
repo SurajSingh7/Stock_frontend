@@ -587,6 +587,11 @@ const InvoiceListComp = () => {
                   <td className={td}>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="font-semibold text-slate-900">{r.invoiceNumber}</span>
+                      {r.companyUse && (
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200">
+                          Company Use
+                        </span>
+                      )}
                       {r.invoiceFile && (
                         <button
                           type="button" onClick={() => setPopup({ type: "file", row: r })}

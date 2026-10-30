@@ -40,11 +40,12 @@ const recipientLabel = (r, lk) => {
   if (r.type === "GROUP") return lk.groups.find((g) => g._id === String(r.refId))?.name || "Group";
   if (r.type === "CREATOR") return "Record creator";
   if (r.type === "VENDOR") return "Vendor";
+  if (r.type === "BRANCH_USERS") return "People with access to the branch";
   return r.address;
 };
 
 /* ─── Recipient picker ──────────────────────────────────────────────────── */
-const RecipientPicker = ({ value, onChange, lk, allowVendor, placeholder = "Add recipient" }) => {
+const RecipientPicker = ({ value, onChange, lk, allowVendor, allowBranchUsers, placeholder = "Add recipient" }) => {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const has = (type, refId) => value.some((r) => r.type === type && String(r.refId || "") === String(refId || ""));
@@ -71,6 +72,12 @@ const RecipientPicker = ({ value, onChange, lk, allowVendor, placeholder = "Add 
           <p className="px-2 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">From the record</p>
           <PickItem disabled={has("CREATOR")} onClick={() => add({ type: "CREATOR" })} label="Record creator" hint="whoever created it" />
           {allowVendor && <PickItem disabled={has("VENDOR")} onClick={() => add({ type: "VENDOR" })} label="Vendor" hint="contacts marked To (CC on the CC line)" />}
+          {allowBranchUsers && (
+            <PickItem
+              disabled={has("BRANCH_USERS")} onClick={() => add({ type: "BRANCH_USERS" })}
+              label="People with access to the branch" hint="contacts linked to a login, by their branch access · not admins"
+            />
+          )}
           <p className="px-2 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">Groups</p>
           {lk.groups.map((g) => <PickItem key={g._id} disabled={has("GROUP", g._id)} onClick={() => add({ type: "GROUP", refId: g._id })} label={g.name} hint={g.type === "WHATSAPP_GROUP" ? "WhatsApp group" : `${(g.members || []).length} people`} />)}
           <p className="px-2 pb-1 pt-2 text-[10px] font-bold uppercase tracking-wider text-slate-400">People</p>
@@ -93,7 +100,7 @@ const PickItem = ({ label, hint, onClick, disabled }) => (
 );
 
 /* ─── One channel inside a step ─────────────────────────────────────────── */
-const SendEditor = ({ send, onChange, onRemove, lk, eventKey, allowVendor, manual }) => {
+const SendEditor = ({ send, onChange, onRemove, lk, eventKey, allowVendor, allowBranchUsers, manual }) => {
   const templates = lk.templates.filter((t) => t.channel === send.channel && t.eventKey === eventKey);
   return (
     <div className={`rounded-lg border p-3 ${send.enabled ? "border-slate-200 bg-white" : "border-dashed border-slate-300 bg-slate-50 opacity-70"}`}>
@@ -113,11 +120,11 @@ const SendEditor = ({ send, onChange, onRemove, lk, eventKey, allowVendor, manua
         </Field>
         <Field label={manual ? "To (pre-filled in the dialog)" : send.channel === "IN_APP" ? "To (people linked to a login)" : "To"}>
           {/* Vendors have no login, so the bell can't reach them. */}
-          <RecipientPicker value={send.to} onChange={(to) => onChange({ ...send, to })} lk={lk} allowVendor={allowVendor && send.channel !== "IN_APP"} />
+          <RecipientPicker value={send.to} onChange={(to) => onChange({ ...send, to })} lk={lk} allowVendor={allowVendor && send.channel !== "IN_APP"} allowBranchUsers={allowBranchUsers} />
         </Field>
         {send.channel === "EMAIL" && (
           <Field label="CC" className="md:col-span-2">
-            <RecipientPicker value={send.cc} onChange={(cc) => onChange({ ...send, cc })} lk={lk} allowVendor={allowVendor} placeholder="Add CC" />
+            <RecipientPicker value={send.cc} onChange={(cc) => onChange({ ...send, cc })} lk={lk} allowVendor={allowVendor} allowBranchUsers={allowBranchUsers} placeholder="Add CC" />
           </Field>
         )}
       </div>
@@ -136,7 +143,8 @@ const RuleModal = ({ rule, events, lk, onClose, onSaved }) => {
   const [error, setError] = useState(null);
   const event = events.find((e) => e.key === form.eventKey);
   const manual = event?.kind === "MANUAL";
-  const allowVendor = event && event.recordType !== "Quotation";
+  const allowVendor = !!event?.allowsVendor;
+  const allowBranchUsers = !!event?.allowsBranchUsers;
 
   const setStep = (i, step) => setForm((f) => ({ ...f, steps: f.steps.map((s, j) => (j === i ? step : s)) }));
   const cumulative = form.steps.reduce((acc, s, i) => [...acc, (acc[i - 1] || 0) + (i === 0 ? 0 : Number(s.afterHours) || 0)], []);
@@ -283,6 +291,7 @@ const RuleModal = ({ rule, events, lk, onClose, onSaved }) => {
                       lk={lk}
                       eventKey={form.eventKey}
                       allowVendor={allowVendor}
+                      allowBranchUsers={allowBranchUsers}
                       manual={manual}
                       onChange={(s) => setStep(i, { ...step, sends: step.sends.map((x, j) => (j === k ? s : x)) })}
                       onRemove={() => setStep(i, { ...step, sends: step.sends.filter((_, j) => j !== k) })}
@@ -424,7 +433,7 @@ const AlertRules = () => {
                               <p className="text-[11px] font-bold uppercase tracking-wide">{i === 0 ? "At once" : `+${hours} h`} · {STEP_LABEL[s.type]}</p>
                               {s.sends.map((x) => (
                                 <p key={x._id || x.channel} className={`mt-1 text-xs ${x.enabled ? "" : "line-through opacity-60"}`}>
-                                  {x.channel === "EMAIL" ? "Email" : "WA"} → {x.to.map((r) => recipientLabel(r, lk)).join(", ") || "from the dialog"}
+                                  {x.channel === "EMAIL" ? "Email" : x.channel === "IN_APP" ? "In-App" : "WA"} → {x.to.map((r) => recipientLabel(r, lk)).join(", ") || "from the dialog"}
                                 </p>
                               ))}
                             </div>

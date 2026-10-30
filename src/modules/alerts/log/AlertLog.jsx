@@ -24,8 +24,8 @@ const MessageModal = ({ id, onClose, onChanged, can }) => {
   const act = async (path, method, ok) => {
     setBusy(true);
     try {
-      await alertApi(`/messages/${id}/${path}`, { method });
-      toast.success(ok);
+      const r = await alertApi(`/messages/${id}/${path}`, { method });
+      toast.success(typeof ok === "function" ? ok(r.data) : ok);
       onChanged();
     } catch (e) {
       toast.error(e.message);
@@ -43,6 +43,17 @@ const MessageModal = ({ id, onClose, onChanged, can }) => {
           {m.status === "QUEUED" && can("CANCEL") && <button type="button" className={btnGhost} disabled={busy} onClick={() => act("cancel", "PATCH", "Cancelled")}><Ban className="h-4 w-4" />Cancel</button>}
           {!["QUEUED", "SENDING"].includes(m.status) && m.to?.address && can("RESEND") && (
             <button type="button" className={btnPrimary} disabled={busy} onClick={() => act("resend", "POST", "Resend queued")}><RotateCw className="h-4 w-4" />Resend</button>
+          )}
+          {/* Skipped for want of a recipient: look the rule's recipients up again
+              (a number added, a contact linked since) and send to whoever is new. */}
+          {m.status === "SKIPPED" && !m.to?.address && m.ruleId && can("RESEND") && (
+            <button
+              type="button" className={btnPrimary} disabled={busy}
+              title="Find the rule's recipients again — e.g. after adding a WhatsApp number or linking a contact — and send to anyone who hasn't got it"
+              onClick={() => act("resend", "POST", (d) => `Sent to ${d?.to?.join(", ") || "recipients"}`)}
+            >
+              <RotateCw className="h-4 w-4" />Try again
+            </button>
           )}
         </>
       )}

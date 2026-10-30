@@ -216,6 +216,13 @@ export const navCategories = [
         moduleKey: "inventory-items",
         action: ["VIEW_MENU"],
       },
+      // What is at or below its threshold — where the low-stock alerts land.
+      {
+        name: "Low Stock",
+        path: "/stock/low-stock",
+        moduleKey: "inventory-items",
+        action: ["VIEW_MENU"],
+      },
       // Stock that was already on hand before this system.
       {
         name: "Opening Stock",
@@ -354,6 +361,13 @@ export const navCategories = [
         name: "GST Rates",
         path: "/master/gst-rate",
         moduleKey: "gst-rates",
+        action: ["VIEW_MENU"],
+      },
+      // Which Claude model reads uploaded invoices.
+      {
+        name: "AI Settings",
+        path: "/master/ai-settings",
+        moduleKey: "ai-settings",
         action: ["VIEW_MENU"],
       },
     ],
