@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchPaymentApprovals, fetchAdjustments, fetchDebitNoteQueue, decidePayment } from "@/modules/stock/invoiceList/invoiceListApi";
+import { fetchVendors } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Eye, Check, X } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
@@ -56,15 +57,10 @@ const DecisionPopup = ({ row, onClose, onDone }) => {
   // would 403 for exactly the people this screen is for.
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payment-approval/${row._id}/adjustments`, { credentials: "include" });
-      const json = await res.json();
+      const list = await fetchAdjustments("payment-approval", row._id);
       // Only what is in the payable: misc charges and APPROVED debit notes.
       // One still in review/approval is not part of this number.
-      setAdjustments(
-        res.ok && json.success
-          ? (json.data || []).filter((a) => a.type !== "DEBIT_NOTE" || !a.status || a.status === "APPROVED")
-          : []
-      );
+      setAdjustments(list.filter((a) => a.type !== "DEBIT_NOTE" || !a.status || a.status === "APPROVED"));
     } catch {
       // Non-fatal — the totals above still tell the whole money story.
       setAdjustments([]);
@@ -76,12 +72,7 @@ const DecisionPopup = ({ row, onClose, onDone }) => {
   const decide = async (decision) => {
     setBusy(decision); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payment-approval/${row._id}/decide`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ decision, reason: reason.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save");
+      await decidePayment(row._id, { decision, reason: reason.trim() });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -266,9 +257,8 @@ const PaymentApprovalComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/payment-approval-debit-notes?limit=1&status=APPROVAL_PENDING`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setDnCounts(j.data?.counts || {});
+        const j = await fetchDebitNoteQueue("paymentApproval", { limit: 1, status: "APPROVAL_PENDING" });
+        setDnCounts(j.data?.counts || {});
       } catch {
         // Non-fatal — the badge just stays empty.
       }
@@ -299,9 +289,7 @@ const PaymentApprovalComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=500`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setVendors(j.data || []);
+        setVendors(await fetchVendors());
       } catch {
         // Non-fatal — the vendor filter just stays empty.
       }
@@ -315,9 +303,7 @@ const PaymentApprovalComp = () => {
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (vendorId) params.set("vendorId", vendorId);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/payment-approval?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
+      const json = await fetchPaymentApprovals(params);
       setRows(json.data?.rows || []);
       setCounts(json.data?.counts || {});
       setTotal(json.pagination?.total || 0);

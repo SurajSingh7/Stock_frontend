@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchLeafCategories, fetchVendors, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Eye, Edit3, ClipboardCheck } from "lucide-react";
 import { SearchableSelect, inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
@@ -118,12 +120,10 @@ const InvoiceApprovalList = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
       } catch {}
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setVendors(j.data || []);
+        setVendors(await fetchVendors(1000));
       } catch {}
     })();
   }, []);
@@ -132,8 +132,7 @@ const InvoiceApprovalList = () => {
     (async () => {
       if (!categoryId) { setProductOptions([]); return; }
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setProductOptions((j.data || []).map((p) => ({ value: p._id, label: p.name })));
+        setProductOptions(await fetchProductOptions(categoryId));
       } catch { setProductOptions([]); }
     })();
   }, [categoryId]);
@@ -151,9 +150,7 @@ const InvoiceApprovalList = () => {
       if (vendorId) params.set("vendorId", vendorId);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/board?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch invoices");
+      const json = await api.get(API_ENDPOINTS.purchase.invoices.board, { query: params, fallback: "Failed to fetch invoices" });
       setRows(json.data?.rows || []);
       setCounts(json.data?.counts || { ALL: 0, PENDING: 0, APPROVED: 0, REJECTED: 0 });
       setTotal(json.pagination?.total ?? 0);

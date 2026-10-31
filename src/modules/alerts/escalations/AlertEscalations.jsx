@@ -135,7 +135,7 @@ const AlertEscalations = () => {
                     <td className={td}><StatusBadge meta={ESCALATION_STATUS_META[r.status]} /></td>
                     <td className={`${td} text-right`}>
                       <div className="inline-flex gap-1">
-                        <Link href={`/alerts/log?recordId=${r.recordId}`} title="Messages for this record" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-indigo-600"><ExternalLink className="h-4 w-4" /></Link>
+                        <Link href={`/stock/admin/alerts/log?recordId=${r.recordId}`} title="Messages for this record" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-indigo-600"><ExternalLink className="h-4 w-4" /></Link>
                         {r.status === "ACTIVE" && can("STOP") && (
                           <button type="button" onClick={() => setStopping(r)} className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50"><Square className="h-3.5 w-3.5" />Stop</button>
                         )}

@@ -7,7 +7,8 @@ import {
   Search, Plus, Pencil, Trash2, RotateCcw, ShieldCheck, ShieldAlert,
   Building2, Phone, X, ChevronDown, MoreVertical, Eye, ChevronRight, Users, Info, Mail, CornerDownRight,
 } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchVendorList, fetchVendor, fetchVendorGroup, deleteVendor, restoreVendor, fetchCategory } from "./vendorApi";
+import { fetchLeafCategories, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { formatWarrantyShort } from "@/shared/warranty/warranty";
 
@@ -250,9 +251,9 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${vendor._id}`, { credentials: "include" });
-        const json = await res.json();
-        if (json.success) setDetail(json.data);
+        setDetail(await fetchVendor(vendor._id));
+      } catch {
+        // Non-fatal — the panel just shows no assigned products.
       } finally {
         setLoading(false);
       }
@@ -281,9 +282,8 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
       const entries = await Promise.all(
         missing.map(async (id) => {
           try {
-            const res = await fetch(`${API_BACKEND_URL}/stock/categories/${id}`, { credentials: "include" });
-            const json = await res.json();
-            return [id, json.success ? json.data?.displayPath || json.data?.name || "" : ""];
+            const cat = await fetchCategory(id);
+            return [id, cat?.displayPath || cat?.name || ""];
           } catch {
             return [id, ""];
           }
@@ -529,10 +529,7 @@ const VendorGroupPopup = ({ vendorId, onClose }) => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${vendorId}/group`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load the group");
-        setData(json.data);
+        setData(await fetchVendorGroup(vendorId));
       } catch (e) {
         setError(e.message);
       }
@@ -602,9 +599,7 @@ const VendorsComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
       } catch {}
     })();
   }, []);
@@ -614,9 +609,7 @@ const VendorsComp = () => {
     (async () => {
       if (!categoryId) { setProductOptions([]); return; }
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=1000`, { credentials: "include" });
-        const j = await r.json();
-        setProductOptions(j.success ? (j.data || []).map((p) => ({ value: p._id, label: p.name })) : []);
+        setProductOptions(await fetchProductOptions(categoryId));
       } catch { setProductOptions([]); }
     })();
   }, [categoryId]);
@@ -639,9 +632,7 @@ const VendorsComp = () => {
       if (productId) params.set("productId", productId);
       if (groupView !== "all") params.set("group", groupView);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch vendors");
+      const json = await fetchVendorList(params);
 
       const rows = json.data || [];
       const filtered = rows.filter((v) => (status === "ACTIVE" ? v.isActive : !v.isActive));
@@ -662,9 +653,8 @@ const VendorsComp = () => {
     if (!open || Array.isArray(childrenOf[mainId])) return;
     setChildrenOf((p) => ({ ...p, [mainId]: "loading" }));
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors?parentId=${mainId}&limit=200`, { credentials: "include" });
-      const json = await res.json();
-      setChildrenOf((p) => ({ ...p, [mainId]: res.ok && json.success ? json.data || [] : [] }));
+      const json = await fetchVendorList({ parentId: mainId, limit: 200 });
+      setChildrenOf((p) => ({ ...p, [mainId]: json.data || [] }));
     } catch {
       setChildrenOf((p) => ({ ...p, [mainId]: [] }));
     }
@@ -676,11 +666,7 @@ const VendorsComp = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${deleteTarget._id}`, {
-        method: "DELETE", credentials: "include",
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Delete failed");
+      await deleteVendor(deleteTarget._id);
       showToast("Vendor deleted successfully");
       setDeleteTarget(null);
       loadVendors();
@@ -693,11 +679,7 @@ const VendorsComp = () => {
 
   const handleRestore = async (vendor) => {
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${vendor._id}/restore`, {
-        method: "PATCH", credentials: "include",
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Restore failed");
+      await restoreVendor(vendor._id);
       showToast("Vendor restored successfully");
       loadVendors();
     } catch (err) {

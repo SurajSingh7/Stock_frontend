@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { sendPoMail, fetchPoMailPreview } from "./purchaseOrderApi";
 import { X, Mail } from "lucide-react";
 
 const inputCls =
@@ -139,12 +139,11 @@ export const useSendMailForm = (row) => {
   useEffect(() => {
     if (!row.poId) return undefined;
     let alive = true;
-    fetch(`${API_BACKEND_URL}/stock/alerts/manual/PO_SEND_TO_VENDOR/${row.poId}/preview`, { credentials: "include" })
-      .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
-      .then(({ ok, json }) => {
-        if (!alive || !ok || !json.success) return;
-        setPreview(json.data);
-        setInternalCc(json.data?.internalCc || []);
+    fetchPoMailPreview(row.poId)
+      .then((data) => {
+        if (!alive) return;
+        setPreview(data);
+        setInternalCc(data?.internalCc || []);
       })
       // Non-fatal: the send itself still works, the server builds the same mail.
       .catch(() => {});
@@ -189,16 +188,9 @@ export const needsSkipChoice = (form) => !form.sendEmail && !form.skipMode;
 
 /** Fires the send-mail action. Resolves to the resulting mode: "SENT" | "MANUAL" | "SKIPPED". */
 export const submitSendMail = async (poId, { sendEmail, to, cc, skipMode, note }) => {
-  const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}/send-mail`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    // `to` is a list now — a vendor can have several contacts marked To.
-    body: JSON.stringify(sendEmail ? { sendEmail, to, cc } : { sendEmail, to, cc, skipMode, note }),
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
-  return json.data?.mailResult?.mode || (sendEmail ? "SENT" : skipMode);
+  // `to` is a list now — a vendor can have several contacts marked To.
+  const data = await sendPoMail(poId, sendEmail ? { sendEmail, to, cc } : { sendEmail, to, cc, skipMode, note });
+  return data?.mailResult?.mode || (sendEmail ? "SENT" : skipMode);
 };
 
 const SKIP_OPTIONS = [

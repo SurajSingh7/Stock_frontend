@@ -9,7 +9,7 @@ import {
   Delete,
   LucideDelete,
 } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchVendorList, fetchVendor, saveVendor, fetchProductsByCategory, fetchActiveBranches } from "./vendorApi";
 import { usePermissions } from "@/context/PermissionContext";
 import { PAYMENT_TERMS } from "./vendorConstants";
 import { STATE_OPTIONS } from "@/shared/constants/indianStates";
@@ -324,9 +324,8 @@ const MainVendorField = ({ vendor, setVendor }) => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/vendors?group=mains&limit=500`, { credentials: "include" });
-        const json = await res.json();
-        if (res.ok && json.success) setOptions((json.data || []).filter((v) => v.isActive !== false));
+        const json = await fetchVendorList({ group: "mains", limit: 500 });
+        setOptions((json.data || []).filter((v) => v.isActive !== false));
       } catch {
         // Non-fatal — the field just offers nothing to pick.
       }
@@ -896,9 +895,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
     async (categoryId) => {
       if (productsByCategory[categoryId]) return productsByCategory[categoryId];
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/by-category/${categoryId}`, { credentials: "include" });
-        const json = await res.json();
-        const list = json.success ? json.data || [] : [];
+        const list = await fetchProductsByCategory(categoryId);
         setProductsByCategory((prev) => ({ ...prev, [categoryId]: list }));
         return list;
       } catch {
@@ -1398,9 +1395,8 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
-        const json = await res.json();
-        if (!cancelled && res.ok) setBranches(json?.data || []);
+        const list = await fetchActiveBranches();
+        if (!cancelled) setBranches(list);
       } catch {
         // Non-fatal — the select stays empty and the existing branch is kept.
       }
@@ -1417,14 +1413,7 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
     try {
       // Only the read-only view asks for soft-deleted vendors — editing one has
       // to keep failing, so the edit path sends no flag.
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/vendors/${vendorId}${readOnly ? "?includeInactive=true" : ""}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load vendor");
-
-      const data = json.data;
+      const data = await fetchVendor(vendorId, { includeInactive: readOnly });
       const loaded = {
         ...defaultVendor(),
         ...data,
@@ -1505,14 +1494,7 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
       // vendorCode is immutable — never send it on update (Rule 10 pattern)
       if (isEdit) delete payload.vendorCode;
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors${isEdit ? `/${vendorId}` : ""}`, {
-        method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save vendor");
+      await saveVendor(isEdit ? vendorId : null, payload);
       router.push("/stock/vendors");
     } catch (err) {
       setFormErrors([err.message]);

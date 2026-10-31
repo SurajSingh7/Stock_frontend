@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw } from "lucide-react";
 import { inputCls, money } from "@/modules/stock/shared/StockSharedUI";
@@ -78,12 +79,7 @@ const VendorInvoicesTab = ({ vendorId, year }) => {
       if (stage !== "ALL") params.set("stage", stage);
       if (byYear) params.set("year", String(year));
 
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/vendor-ledger/${vendorId}/invoices?${params.toString()}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoices");
+      const json = await api.get(API_ENDPOINTS.purchase.vendorLedger.invoices(vendorId), { query: params, fallback: "Failed to load invoices" });
       setRows(json.data?.rows || []);
       setTotals(json.data?.totals || {});
       setTotal(json.pagination?.total || 0);

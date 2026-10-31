@@ -8,8 +8,9 @@ import CreateTransferRequestModal from "./CreateTransferRequestModal";
 import ViewTransferRequestModal from "./ViewTransferRequestModal";
 import {
   STATUS_TAB_STYLES, th, thRight,
-  StatusBadge, BranchPair, ItemsCell, fetchTransferBranches, fetchTransferBoard,
+  StatusBadge, BranchPair, ItemsCell,
 } from "./shared";
+import { fetchTransferBranches, fetchTransferBoard } from "./transferApi";
 
 /*
   "Transfer Requests" — everything THIS branch has asked for from other

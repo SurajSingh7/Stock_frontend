@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { API_PORTAL_BACKEND_URL } from '@/config/getEnvVariables';
+import { logout } from '@/modules/core/auth/authApi';
 import { usePermissions } from '@/context/PermissionContext';
 import { navCategories } from '@/layouts/header/components/NavBar/NavCategories';
 import { useFilteredNav } from '@/layouts/header/components/NavBar/PermissionNavBuilder';
@@ -54,15 +54,9 @@ const HomePage = () => {
 
   const handleLogout = async () => {
     try {
-      const res = await fetch(`${API_PORTAL_BACKEND_URL || ''}/hrms/logout`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast.success('Logged out successfully');
-        window.location.href = '/';
-      }
+      await logout();
+      toast.success('Logged out successfully');
+      window.location.href = '/';
     } catch (error) {
       console.error('Failed to log out', error);
       toast.error('Could not log out — please try again');

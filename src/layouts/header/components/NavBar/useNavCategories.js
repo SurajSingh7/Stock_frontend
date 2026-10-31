@@ -8,7 +8,7 @@ import { navCategories, adminNavCategories } from "./NavCategories";
     settings  — categories marked `section: "settings"` (Alerts & Escalations,
                 Access Control, Testing), shown under the ⚙ menu instead
 
-  Categories sharing a `group` (Inventory + Requests + Transfer) become ONE
+  Categories sharing a `group` (Inventory = Stock + Opening + Transfer) become ONE
   bar entry named after the group, placed where its first member was, with
   each member as a column (`sections`). `items` stays the flat list, so the
   "is this menu active" check works unchanged.

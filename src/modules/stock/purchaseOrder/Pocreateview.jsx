@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchPurchaseOrder, createPurchaseOrder, updatePurchaseOrder, resolveVendorTerms, fetchActiveTerms } from "./purchaseOrderApi";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { usePermissions } from "@/context/PermissionContext";
 
@@ -123,9 +123,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
       setLoading(true);
       try {
         if (isEdit) {
-          const poRes = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, { credentials: "include" });
-          const poJson = await poRes.json();
-          const po = poJson.data;
+          const po = await fetchPurchaseOrder(poId);
           setRows(
             (po.items || []).map((it) => ({
               quotationItemId: it.quotationItemId, categoryName: it.categoryName, productName: it.productName,
@@ -145,15 +143,10 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           // single Default term. Read-only — see resolveForVendor on the backend.
           let resolvedSource = "NONE";
           try {
-            const termsRes = await fetch(`${API_BACKEND_URL}/stock/terms-conditions/resolve/${vendorId}`, {
-              credentials: "include",
-            });
-            const termsJson = await termsRes.json();
-            if (termsRes.ok && termsJson.success) {
-              setTermsContent(termsJson.data?.term?.termsContent || "");
-              resolvedSource = termsJson.data?.source || "NONE";
-              setTermsSource(resolvedSource);
-            }
+            const resolved = await resolveVendorTerms(vendorId);
+            setTermsContent(resolved?.term?.termsContent || "");
+            resolvedSource = resolved?.source || "NONE";
+            setTermsSource(resolvedSource);
           } catch {
             // non-fatal — PO creation still works with empty terms
           }
@@ -163,11 +156,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           // pick one by hand from the active templates.
           if (resolvedSource === "NONE") {
             try {
-              const listRes = await fetch(`${API_BACKEND_URL}/stock/terms-conditions?status=ACTIVE&limit=100`, {
-                credentials: "include",
-              });
-              const listJson = await listRes.json();
-              if (listRes.ok && listJson.success) setActiveTerms(listJson.data?.data || []);
+              setActiveTerms(await fetchActiveTerms());
             } catch {
               // non-fatal — the dropdown just stays empty; submit remains blocked
             }
@@ -212,27 +201,17 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
     setError(null);
     try {
       if (isEdit) {
-        const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-          // terms/buyerEntity/requester are immutable after create — never sent from here.
-          body: JSON.stringify({ poDate, shipmentPreference: shipment, notes }),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to update PO");
+        // terms/buyerEntity/requester are immutable after create — never sent from here.
+        await updatePurchaseOrder(poId, { poDate, shipmentPreference: shipment, notes });
       } else {
-        const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-          body: JSON.stringify({
-            sourceQuotationId, vendorId,
-            quotationItemIds: checked.map((r) => r.quotationItemId),
-            skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
-            // requester is stamped server-side from the session, not sent.
-            poDate, shipmentPreference: shipment, notes,
-            termsConditionId: selectedTermsId || undefined,
-          }),
+        await createPurchaseOrder({
+          sourceQuotationId, vendorId,
+          quotationItemIds: checked.map((r) => r.quotationItemId),
+          skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
+          // requester is stamped server-side from the session, not sent.
+          poDate, shipmentPreference: shipment, notes,
+          termsConditionId: selectedTermsId || undefined,
         });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to create PO");
       }
       onDone();
     } catch (err) {

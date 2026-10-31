@@ -3,7 +3,8 @@
 import React, { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Search, UserCheck, Undo2 } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import { usePermissions } from "@/context/PermissionContext";
 import { Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { PersonSearch, PersonCard } from "@/modules/stock/people/PersonSearch";
@@ -18,18 +19,9 @@ import { ReturnStateFields, emptyReturnState, returnStateOk, returnStateBody } f
   Stock someone already had before this system goes in Opening Issued Stock.
 */
 
-const BASE = `${API_BACKEND_URL}/stock/employee-items`;
-const call = async (url, { method = "GET", body } = {}, fallback = "Request failed") => {
-  const res = await fetch(url, {
-    method,
-    credentials: "include",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.success === false) throw new Error(json.message || fallback);
-  return json.data;
-};
+const BASE = API_ENDPOINTS.inventory.employeeItems.base;
+const call = async (path, { method = "GET", body } = {}, fallback = "Request failed") =>
+  (method === "POST" ? await api.post(path, body, { fallback }) : await api.get(path, { fallback })).data;
 
 const canDo = (permissions, isAdmin, action) => {
   if (isAdmin) return true;

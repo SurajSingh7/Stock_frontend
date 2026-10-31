@@ -1,4 +1,5 @@
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 
 // Full breadcrumb string for a category — every category returned by the
 // backend already carries a precomputed `displayPath` (e.g. "A / B / C").
@@ -13,11 +14,10 @@ export async function fetchAllLeafCategories({ hasProducts } = {}) {
   let skip = 0;
   let all = [];
   while (true) {
-    const params = new URLSearchParams({ type: "LEAF", limit: String(pageSize), skip: String(skip) });
-    if (hasProducts) params.set("hasProducts", "true");
-    const res = await fetch(`${API_BACKEND_URL}/stock/categories/flat?${params.toString()}`, { credentials: "include" });
-    const json = await res.json();
-    if (!res.ok || !json.success) throw new Error(json.message || "Failed to load categories");
+    const json = await api.get(API_ENDPOINTS.master.categories.flat, {
+      query: { type: "LEAF", limit: pageSize, skip, hasProducts: hasProducts ? "true" : undefined },
+      fallback: "Failed to load categories",
+    });
     const data = json.data || [];
     all = all.concat(data);
     skip += pageSize;

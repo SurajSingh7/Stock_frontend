@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { History, Info } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchDebitNotes, withdrawDebitNote } from "@/modules/stock/invoiceList/invoiceListApi";
 import { Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import { dnStatusMeta, DN_ACTION_LABEL, DN_STATUS } from "@/modules/stock/shared/debitNoteStatus";
 
@@ -67,10 +67,7 @@ export const DebitNoteHistoryPopup = ({ invoice, basePath = "invoice-list", onCl
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/${basePath}/${invoice._id}/debit-notes`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load debit notes");
-        setNotes(json.data || []);
+        setNotes(await fetchDebitNotes(basePath, invoice._id));
       } catch (e) {
         setError(e.message);
         setNotes([]);
@@ -152,14 +149,7 @@ export const WithdrawDebitNotePopup = ({ invoice, onClose, onDone }) => {
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoice-list/debit-notes/${dn._id}/withdraw`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ reason: reason.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to withdraw");
+      await withdrawDebitNote(dn._id, reason.trim());
       onDone();
     } catch (e) {
       setError(e.message);

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { recordPayment } from "@/modules/stock/invoiceList/invoiceListApi";
 import {
   ArrowLeft, Plus, X, Paperclip, Wallet, AlertTriangle, CheckCircle2, PieChart,
 } from "lucide-react";
@@ -176,11 +176,7 @@ const RecordPaymentView = ({ invoice, onBack, onDone }) => {
       */
       rows.forEach((s, i) => s.files.forEach((f) => fd.append(`split_${i}_proofs`, f)));
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/record`, {
-        method: "POST", credentials: "include", body: fd,
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to record payment");
+      await recordPayment(invoice._id, fd);
       onDone();
     } catch (e) {
       setError(e.message);

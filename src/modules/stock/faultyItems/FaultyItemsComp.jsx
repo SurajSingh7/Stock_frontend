@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchVendors } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { ChevronDown, ChevronRight, PackageX, IndianRupee, Users, RotateCcw } from "lucide-react";
 import { SearchableSelect, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
@@ -36,9 +38,7 @@ const UnitsRow = ({ row, colSpan }) => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/faulty-items/${row.debitNoteId}/lines/${row.lineIndex}/units`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load units");
+        const json = await api.get(API_ENDPOINTS.purchase.faultyItems.units(row.debitNoteId, row.lineIndex), { fallback: "Failed to load units" });
         setData(json.data);
       } catch (e) {
         setError(e.message);
@@ -115,9 +115,7 @@ const FaultyItemsComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=500`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setVendors(j.data || []);
+        setVendors(await fetchVendors());
       } catch {
         // Non-fatal — the vendor filter just stays empty.
       }
@@ -128,22 +126,13 @@ const FaultyItemsComp = () => {
     setLoading(true); setError(null); setOpen({});
     try {
       if (view === "vendors") {
-        const qs = new URLSearchParams();
-        if (state) qs.set("state", state);
-        const res = await fetch(`${API_BACKEND_URL}/stock/faulty-items/by-vendor?${qs.toString()}`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
+        const json = await api.get(API_ENDPOINTS.purchase.faultyItems.byVendor, { query: { state }, fallback: "Failed to load" });
         setVendorRows(json.data || []);
       } else {
-        const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-        if (debounced.trim()) qs.set("search", debounced.trim());
-        if (vendorId) qs.set("vendorId", vendorId);
-        if (state) qs.set("state", state);
-        if (from) qs.set("from", from);
-        if (to) qs.set("to", to);
-        const res = await fetch(`${API_BACKEND_URL}/stock/faulty-items?${qs.toString()}`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
+        const json = await api.get(API_ENDPOINTS.purchase.faultyItems.list, {
+          query: { page, limit, search: debounced.trim(), vendorId, state, from, to },
+          fallback: "Failed to load",
+        });
         setRows(json.data?.rows || []);
         setCounts(json.data?.counts || {});
         setTotals(json.data?.totals || {});

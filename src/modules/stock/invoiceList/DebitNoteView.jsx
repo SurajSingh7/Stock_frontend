@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchDebitNoteItems, raiseDebitNote, resubmitDebitNote } from "@/modules/stock/invoiceList/invoiceListApi";
 import { ArrowLeft, Plus, X, Search, AlertTriangle } from "lucide-react";
 import { inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
@@ -68,14 +68,8 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const qs = isEdit ? `?adjustmentId=${adjustment._id}` : "";
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/invoice-list/${invoice._id}/debit-note-items${qs}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load items");
-      const loaded = json.data?.lines || [];
+      const data = await fetchDebitNoteItems(invoice._id, isEdit ? adjustment._id : undefined);
+      const loaded = data?.lines || [];
       setLines(loaded);
       setActiveTab(loaded[0] ? String(loaded[0].quotationItemId) : null);
 
@@ -214,18 +208,8 @@ const DebitNoteView = ({ invoice, adjustment = null, onBack, onDone }) => {
           .map((e) => ({ note: e.note, amount: Number(e.amount) })),
         reason: reason.trim(),
       };
-      const url = isEdit
-        ? `${API_BACKEND_URL}/stock/invoice-list/debit-notes/${adjustment._id}/resubmit`
-        : `${API_BACKEND_URL}/stock/invoice-list/${invoice._id}/debit-notes`;
-
-      const res = await fetch(url, {
-        method: isEdit ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(isEdit ? { ...body, editNote: editReason.trim() } : body),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save debit note");
+      if (isEdit) await resubmitDebitNote(adjustment._id, { ...body, editNote: editReason.trim() });
+      else await raiseDebitNote(invoice._id, body);
       onDone();
     } catch (e) {
       setError(e.message);

@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchVendors, fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import {
   RotateCcw, Wallet, Users, Paperclip, Clock, FileMinus, PlusCircle,
@@ -159,20 +161,9 @@ const TransactionRegisterComp = () => {
   }, [search]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const [vr, br] = await Promise.all([
-          fetch(`${API_BACKEND_URL}/stock/vendors?limit=500`, { credentials: "include" }),
-          fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=invoice-list`, { credentials: "include" }),
-        ]);
-        const vj = await vr.json();
-        const bj = await br.json();
-        if (vj.success) setVendors(vj.data || []);
-        if (bj.success) setBranches(bj.data?.branches || []);
-      } catch {
-        // Non-fatal — the dropdowns just stay empty.
-      }
-    })();
+    // Non-fatal — a dropdown that fails to load just stays empty.
+    fetchVendors().then(setVendors).catch(() => {});
+    fetchScopedBranches("invoice-list").then(setBranches).catch(() => {});
   }, []);
 
   const load = useCallback(async () => {
@@ -189,9 +180,7 @@ const TransactionRegisterComp = () => {
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/reports/transactions?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load transaction register");
+      const json = await api.get(API_ENDPOINTS.purchase.reports.transactions, { query: params, fallback: "Failed to load transaction register" });
       setRows(json.data?.rows || []);
       setTotals(json.data?.totals || {});
       setModes(json.data?.modes || []);

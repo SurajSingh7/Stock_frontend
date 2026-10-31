@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchPayments, fetchAdjustments, fetchDebitNoteQueue, sendForApproval, updateTds } from "@/modules/stock/invoiceList/invoiceListApi";
+import { fetchVendors } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import {
   RotateCcw, Send, Wallet, PlusCircle, Layers,
@@ -206,12 +207,7 @@ const FixAndResendPopup = ({ invoice, onClose, onResent }) => {
   const resend = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/send-for-approval`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ reason: note.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
+      await sendForApproval(invoice._id, note.trim());
       onResent();
     } catch (e) {
       setError(e.message);
@@ -289,9 +285,7 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/adjustments`, { credentials: "include" });
-      const json = await res.json();
-      setRows(res.ok && json.success ? (json.data || []).filter(inPayable) : []);
+      setRows((await fetchAdjustments("payments", invoice._id)).filter(inPayable));
     } catch {
       // Non-fatal: the totals below still come off the row itself, so a failed
       // load costs the itemisation, not the figure being approved.
@@ -304,12 +298,7 @@ const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
   const send = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/send-for-approval`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ reason: note.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to send");
+      await sendForApproval(invoice._id, note.trim());
       onSent();
     } catch (e) {
       setError(e.message);
@@ -489,12 +478,7 @@ const TdsEditPopup = ({ invoice, onClose, onDone }) => {
   const save = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/tds`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ rate: n, reason: reason.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to update TDS");
+      await updateTds(invoice._id, { rate: n, reason: reason.trim() });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -553,9 +537,8 @@ const PaymentsComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/payments-debit-notes?limit=1&status=REVIEW_PENDING`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setDnCounts(j.data?.counts || {});
+        const j = await fetchDebitNoteQueue("payments", { limit: 1, status: "REVIEW_PENDING" });
+        setDnCounts(j.data?.counts || {});
       } catch {
         // Non-fatal — the badge just stays empty.
       }
@@ -591,9 +574,7 @@ const PaymentsComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=500`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setVendors(j.data || []);
+        setVendors(await fetchVendors());
       } catch {
         // Non-fatal — the vendor filter just stays empty.
       }
@@ -610,9 +591,7 @@ const PaymentsComp = () => {
       if (paymentState) params.set("paymentState", paymentState);
       if (payable && payable !== PAYABLE_FILTER.ALL) params.set("payable", payable);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
+      const json = await fetchPayments(params);
       setRows(json.data?.rows || []);
       setCounts(json.data?.counts || {});
       setTotal(json.pagination?.total || 0);

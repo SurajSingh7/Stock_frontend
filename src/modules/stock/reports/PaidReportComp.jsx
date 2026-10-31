@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Users, Wallet, Clock, Info, Receipt } from "lucide-react";
 import { SearchableSelect, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
@@ -80,9 +82,7 @@ const PaidReportComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=invoice-list`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("invoice-list"));
       } catch {
         // Non-fatal — the branch filter just stays empty.
       }
@@ -101,9 +101,7 @@ const PaidReportComp = () => {
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/reports/paid?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load paid report");
+      const json = await api.get(API_ENDPOINTS.purchase.reports.paid, { query: params, fallback: "Failed to load paid report" });
       setRows(json.data?.rows || []);
       setTotals(json.data?.totals || {});
       setModes(json.data?.modes || []);

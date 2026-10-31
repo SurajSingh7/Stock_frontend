@@ -24,12 +24,12 @@ export const th =
    Admins move between these constantly while setting one person up, so the
    whole section is reachable from every page rather than via the main navbar. */
 const SECTION_LINKS = [
-  { href: '/access-control/modules', label: 'Modules', icon: '▦' },
-  { href: '/access-control/roles', label: 'Roles', icon: '◈' },
-  { href: '/access-control/departments', label: 'Departments', icon: '▤' },
-  { href: '/access-control/users', label: 'Users', icon: '◉' },
-  { href: '/access-control/delegate', label: 'Delegate', icon: '⇄' },
-  { href: '/access-control/audit-log', label: 'Audit Log', icon: '◷' },
+  { href: '/stock/admin/access-control/modules', label: 'Modules', icon: '▦' },
+  { href: '/stock/admin/access-control/roles', label: 'Roles', icon: '◈' },
+  { href: '/stock/admin/access-control/departments', label: 'Departments', icon: '▤' },
+  { href: '/stock/admin/access-control/users', label: 'Users', icon: '◉' },
+  { href: '/stock/admin/access-control/delegate', label: 'Delegate', icon: '⇄' },
+  { href: '/stock/admin/access-control/audit-log', label: 'Audit Log', icon: '◷' },
 ];
 
 export const SectionNav = () => {

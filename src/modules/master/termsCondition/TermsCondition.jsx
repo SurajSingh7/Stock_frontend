@@ -1,5 +1,6 @@
 'use client'
-import { API_BACKEND_URL } from '@/config/getEnvVariables';
+import { api } from '@/lib/apiClient';
+import { API_ENDPOINTS } from '@/constants/api';
 import Pagination from '@/shared/ui/pagination/Pagination';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -7,8 +8,7 @@ import toast from 'react-hot-toast';
 
 /* ======================== CONSTANTS ======================== */
 
-const TERMS_CONDITIONS_API = `${API_BACKEND_URL}/stock/terms-conditions`;
-const VENDORS_API = `${API_BACKEND_URL}/stock/vendors`;
+const EP = API_ENDPOINTS.master.termsConditions;
 
 const STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'Active' },
@@ -52,77 +52,25 @@ const sanitizeForPreview = (html) =>
 
 /* ======================== API FUNCTIONS ======================== */
 
-const getTermsConditions = async ({ page, limit, search, showInactive }) => {
-  const params = new URLSearchParams();
-  params.set('page', page);
-  params.set('limit', limit);
-  if (search) params.set('search', search);
-  if (showInactive) params.set('showInactive', 'true');
-
-  const response = await fetch(`${TERMS_CONDITIONS_API}?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'include',
+const getTermsConditions = ({ page, limit, search, showInactive }) =>
+  api.get(EP.list, {
+    query: { page, limit, search, showInactive: showInactive ? 'true' : undefined },
+    fallback: 'Failed to fetch Terms & Conditions',
   });
-  if (!response.ok) throw new Error('Failed to fetch Terms & Conditions');
-  return response.json();
-};
 
-const createTermsCondition = async (payload) => {
-  const response = await fetch(TERMS_CONDITIONS_API, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to create Terms & Conditions');
-  return data;
-};
+const createTermsCondition = (payload) => api.post(EP.list, payload, { fallback: 'Failed to create Terms & Conditions' });
 
-const updateTermsCondition = async (id, payload) => {
-  const response = await fetch(`${TERMS_CONDITIONS_API}/${id}`, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to update Terms & Conditions');
-  return data;
-};
+const updateTermsCondition = (id, payload) => api.put(EP.byId(id), payload, { fallback: 'Failed to update Terms & Conditions' });
 
-const deleteTermsCondition = async (id) => {
-  const response = await fetch(`${TERMS_CONDITIONS_API}/${id}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to delete Terms & Conditions');
-  return data;
-};
+const deleteTermsCondition = (id) => api.delete(EP.byId(id), { fallback: 'Failed to delete Terms & Conditions' });
 
-const restoreTermsCondition = async (id) => {
-  const response = await fetch(`${TERMS_CONDITIONS_API}/${id}/restore`, {
-    method: 'PATCH',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to restore Terms & Conditions');
-  return data;
-};
+const restoreTermsCondition = (id) => api.patch(EP.restore(id), undefined, { fallback: 'Failed to restore Terms & Conditions' });
 
 const searchVendors = async (search) => {
-  const params = new URLSearchParams();
-  params.set('page', '1');
-  params.set('limit', '20');
-  if (search) params.set('search', search);
-
-  const response = await fetch(`${VENDORS_API}?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'include',
+  const json = await api.get(API_ENDPOINTS.purchase.vendors.list, {
+    query: { page: 1, limit: 20, search },
+    fallback: 'Failed to fetch vendors',
   });
-  if (!response.ok) throw new Error('Failed to fetch vendors');
-  const json = await response.json();
   return (json?.data || []).map((v) => ({ id: v._id, name: v.name }));
 };
 

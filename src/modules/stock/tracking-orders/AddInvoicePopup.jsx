@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { saveInvoice, invoiceReadUrl } from "./trackingApi";
 import toast from "react-hot-toast";
 import { Upload, FileText, ArrowLeft } from "lucide-react";
 import { Modal, money } from "@/modules/stock/shared/StockSharedUI";
@@ -20,12 +22,7 @@ const ACCEPTED_UPLOAD_TYPES = ["image/jpeg", "image/png", "image/webp", "image/j
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
-async function getJson(path, failMessage) {
-  const res = await fetch(`${API_BACKEND_URL}${path}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || failMessage);
-  return json.data;
-}
+const getData = async (path, query, fallback) => (await api.get(path, { query, fallback })).data;
 
 /*
   Add Invoice (and ⋮ → Edit invoice): the details exactly as the vendor's
@@ -72,11 +69,11 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
     (async () => {
       try {
         const [detail, board, branchAccess] = await Promise.all([
-          getJson(`/stock/tracking-orders/${trackingOrderId}`, "Failed to load order"),
-          getJson(`/stock/invoices/board?trackingOrderId=${trackingOrderId}&limit=200`, "Failed to load invoices"),
+          getData(API_ENDPOINTS.purchase.trackingOrders.byId(trackingOrderId), undefined, "Failed to load order"),
+          getData(API_ENDPOINTS.purchase.invoices.board, { trackingOrderId, limit: 200 }, "Failed to load invoices"),
           isEdit
             ? null
-            : getJson(`/stock/scoped-branches?module=invoices`, "Failed to load branches").catch(() => null),
+            : getData(API_ENDPOINTS.master.branches.scoped, { module: "invoices" }, "Failed to load branches").catch(() => null),
         ]);
         setPo(detail.po);
 
@@ -154,7 +151,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
       const fd = new FormData();
       fd.append("invoiceFile", f);
       const d = await uploadWithProgress(
-        `${API_BACKEND_URL}/stock/tracking-orders/${trackingOrderId}/invoices/read`,
+        invoiceReadUrl(trackingOrderId),
         fd,
         (pct, uploaded) => setScan((s) => ({ ...s, uploadPct: pct, ...(uploaded ? { phase: "scanning", startedAt: Date.now() } : {}) }))
       );
@@ -252,12 +249,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
 
     setSaving(true);
     try {
-      const res = await fetch(
-        isEdit ? `${API_BACKEND_URL}/stock/invoices/${invoice._id}` : `${API_BACKEND_URL}/stock/tracking-orders/${trackingOrderId}/invoices`,
-        { method: isEdit ? "PUT" : "POST", credentials: "include", body: fd }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save invoice");
+      await saveInvoice(isEdit ? { invoiceId: invoice._id } : { trackingOrderId }, fd);
       onDone();
     } catch (err) {
       setError(err.message);

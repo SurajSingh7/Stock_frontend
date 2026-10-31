@@ -2,21 +2,16 @@
 
 import React from "react";
 import { Check } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import { usePermissions } from "@/context/PermissionContext";
 
 /* Shared by the AI Settings page and Add Invoice's "Change model" popup. */
 
 export async function aiApi(path, { method = "GET", body } = {}) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/ai-settings${path}`, {
-    method,
-    credentials: "include",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || !json.success) throw new Error(json.message || "Request failed");
-  return json.data;
+  const url = `${API_ENDPOINTS.master.aiSettings.base}${path}`;
+  const res = method === "GET" ? await api.get(url) : await api[method.toLowerCase()](url, body);
+  return res.data;
 }
 
 // Rough cost of reading a 1–2 page invoice (~5k tokens in, ~1.5k out), in ₹.

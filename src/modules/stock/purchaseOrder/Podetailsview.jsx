@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchPurchaseOrder, poPdfUrl } from "./purchaseOrderApi";
 import { ArrowLeft, Download, ExternalLink } from "lucide-react";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
@@ -139,10 +139,7 @@ const PODetailsView = ({ context = {}, onBack }) => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load purchase order");
-        setPo(json.data);
+        setPo(await fetchPurchaseOrder(poId));
       } catch (err) {
         setError(err.message);
       } finally {
@@ -179,7 +176,7 @@ const PODetailsView = ({ context = {}, onBack }) => {
 
   const isSplit = po.taxType === "CGST_SGST";
   const buyer = po.buyerEntity || {};
-  const pdfUrl = `${API_BACKEND_URL}/stock/purchase-orders/${po._id}/pdf`;
+  const pdfUrl = poPdfUrl(po._id);
 
   return (
     <div className="mx-auto max-w-3xl p-6 pb-12">

@@ -1,27 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchTransferDetail as fetchDetail, fetchAvailableUnits, processTransferRequest } from "./transferApi";
 import { ArrowRight, ChevronDown, ChevronUp } from "lucide-react";
 import { Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { loadSavedName, saveName } from "./userName";
-
-async function fetchDetail(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/transfer-requests/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load transfer request");
-  return json.data;
-}
-
-async function fetchAvailableUnits(branchId, productDefinitionId) {
-  const params = new URLSearchParams({
-    branchId, productDefinitionId, status: "AVAILABLE", approvalStatus: "APPROVED", limit: "200",
-  });
-  const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items?${params.toString()}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load available units");
-  return json.data || [];
-}
 
 const serialLabel = (item) => {
   const fv = item.fieldValues || {};
@@ -209,14 +192,7 @@ const ProcessTransferRequestModal = ({ requestId, onClose, onDone }) => {
     setError(null);
     try {
       saveName(name);
-      const res = await fetch(`${API_BACKEND_URL}/stock/transfer-requests/${requestId}/process`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lines, reason: reason.trim(), processedByName: name.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to process transfer request");
+      await processTransferRequest(requestId, { lines, reason: reason.trim(), processedByName: name.trim() });
       onDone();
     } catch (err) {
       setError(err.message);

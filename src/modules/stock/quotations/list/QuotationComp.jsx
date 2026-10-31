@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchStatusSummary, fetchQuotations } from "@/modules/stock/quotations/quotationApi";
+import { fetchLeafCategories, fetchVendors, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { Plus, RotateCcw, Eye } from "lucide-react";
 import { SearchableSelect, Modal } from "@/modules/stock/shared/StockSharedUI";
@@ -181,17 +182,14 @@ const QuotationComp = () => {
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
 
   const loadSummary = useCallback(async () => {
-    try { const res = await fetch(`${API_BACKEND_URL}/stock/quotations/status-summary`, { credentials: "include" });
-      const json = await res.json(); if (json.success) setSummary(json.data || {}); } catch {}
+    try { setSummary(await fetchStatusSummary()); } catch {}
   }, []);
 
   // leaf categories that have products (server-side)
   useEffect(() => {
     (async () => {
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setCategories(j.data || []); } catch {}
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setVendors(j.data || []); } catch {}
+      try { setCategories(await fetchLeafCategories()); } catch {}
+      try { setVendors(await fetchVendors(1000)); } catch {}
     })();
   }, []);
 
@@ -199,8 +197,7 @@ const QuotationComp = () => {
   useEffect(() => {
     (async () => {
       if (!categoryId) { setProductOptions([]); return; }
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setProductOptions((j.data || []).map((p) => ({ value: p._id, label: p.name }))); } catch { setProductOptions([]); }
+      try { setProductOptions(await fetchProductOptions(categoryId)); } catch { setProductOptions([]); }
     })();
   }, [categoryId]);
 
@@ -215,11 +212,9 @@ const QuotationComp = () => {
       if (vendorId) params.set("vendorId", vendorId);
       if (dateFrom) params.set("dateFrom", dateFrom);    // backend: status-wise date (see note)
       if (dateTo) params.set("dateTo", dateTo);
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch quotations");
-      setRows(json.data || []);
-      setTotal(json.pagination?.total ?? 0);
+      const { rows, total } = await fetchQuotations(params);
+      setRows(rows);
+      setTotal(total);
     } catch (err) { setError(err.message); setRows([]); setTotal(0); } finally { setLoading(false); }
   }, [page, limit, debouncedSearch, status, categoryId, productId, vendorId, dateFrom, dateTo]);
 
@@ -261,7 +256,7 @@ const QuotationComp = () => {
           <p className="mt-0.5 text-sm text-slate-500">Approved categories flow to PO Management separately.</p>
         </div>
         <button
-          type="button" onClick={() => router.push("/stock/quotations/create")}
+          type="button" onClick={() => router.push("/stock/purchase/quotations/create")}
           className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
         >
           <Plus className="h-4 w-4" /> Add quotation
@@ -398,7 +393,7 @@ const QuotationComp = () => {
                     <td className="px-4 py-3 text-right">
                       {/* View is the only action — a quotation is never edited */}
                       <button
-                        type="button" onClick={() => router.push(`/stock/quotations/${q._id}/view`)} title="View"
+                        type="button" onClick={() => router.push(`/stock/purchase/quotations/${q._id}`)} title="View"
                         className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
                       >
                         <Eye className="h-3.5 w-3.5" /> View

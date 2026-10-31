@@ -113,7 +113,7 @@ const NotificationBell = () => {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl bg-white text-slate-800 shadow-2xl ring-1 ring-slate-900/10">
+        <div className="absolute right-0 z-50 mt-[11px] w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl bg-white text-slate-800 shadow-2xl ring-1 ring-slate-900/10">
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <p className="text-sm font-semibold">Notifications</p>
             {count > 0 && (
@@ -145,7 +145,7 @@ const NotificationBell = () => {
               ))
             )}
           </div>
-          <Link href="/notifications" onClick={() => setOpen(false)} className="block border-t border-slate-100 px-4 py-2.5 text-center text-xs font-semibold text-indigo-600 hover:bg-slate-50">
+          <Link href="/stock/notifications" onClick={() => setOpen(false)} className="block border-t border-slate-100 px-4 py-2.5 text-center text-xs font-semibold text-indigo-600 hover:bg-slate-50">
             View all
           </Link>
         </div>

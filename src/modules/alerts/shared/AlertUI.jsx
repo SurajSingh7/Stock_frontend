@@ -23,12 +23,12 @@ export const btnDanger =
 
 /* ─── Tabs — one per Access Control module ──────────────────────────────── */
 export const ALERT_TABS = [
-  { key: "alert-channels", label: "Channels", path: "/alerts/channels", icon: Radio },
-  { key: "alert-contacts", label: "Contacts & Groups", path: "/alerts/contacts", icon: Users },
-  { key: "alert-templates", label: "Templates", path: "/alerts/templates", icon: FileText },
-  { key: "alert-rules", label: "Rules", path: "/alerts/rules", icon: Workflow },
-  { key: "alert-escalations", label: "Escalations", path: "/alerts/escalations", icon: Siren },
-  { key: "alert-log", label: "Message Log", path: "/alerts/log", icon: ScrollText },
+  { key: "alert-channels", label: "Channels", path: "/stock/admin/alerts/channels", icon: Radio },
+  { key: "alert-contacts", label: "Contacts & Groups", path: "/stock/admin/alerts/contacts", icon: Users },
+  { key: "alert-templates", label: "Templates", path: "/stock/admin/alerts/templates", icon: FileText },
+  { key: "alert-rules", label: "Rules", path: "/stock/admin/alerts/rules", icon: Workflow },
+  { key: "alert-escalations", label: "Escalations", path: "/stock/admin/alerts/escalations", icon: Siren },
+  { key: "alert-log", label: "Message Log", path: "/stock/admin/alerts/log", icon: ScrollText },
 ];
 
 /** Actions the user holds on one module; admins hold everything. */

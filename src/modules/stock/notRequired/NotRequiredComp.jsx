@@ -15,7 +15,8 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
 import { Search, RotateCcw, Ban, Undo2, History } from "lucide-react";
@@ -53,12 +54,7 @@ const MarkRequiredPopup = ({ card, onClose, onDone }) => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/tracking-orders/${card.trackingOrderId}/required`,
-        { method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+      await api.patch(API_ENDPOINTS.purchase.trackingOrders.required(card.trackingOrderId), undefined, { fallback: "Failed" });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -224,14 +220,10 @@ const NotRequiredComp = () => {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-      if (search.trim()) qs.set("search", search.trim());
-      if (dateFrom) qs.set("dateFrom", dateFrom);
-      if (dateTo) qs.set("dateTo", dateTo);
-
-      const res = await fetch(`${API_BACKEND_URL}/stock/not-required?${qs}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
+      const json = await api.get(API_ENDPOINTS.purchase.notRequired.list, {
+        query: { page, limit, search: search.trim(), dateFrom, dateTo },
+        fallback: "Failed to load",
+      });
       // successResponseHandler lifts pagination to the top level — see the
       // shape note in getNotRequired.
       setCards(json.data?.cards || []);
@@ -338,7 +330,7 @@ const NotRequiredComp = () => {
               <VendorCard
                 key={card.trackingOrderId}
                 card={card}
-                onOpenQuotation={() => router.push(`/stock/quotations/${card.sourceQuotationId}/view`)}
+                onOpenQuotation={() => router.push(`/stock/purchase/quotations/${card.sourceQuotationId}`)}
                 onHistory={() => setPopup({ type: "history", card })}
                 onMarkRequired={() => setPopup({ type: "markRequired", card })}
               />

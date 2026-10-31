@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { ArrowLeft, Wallet, Paperclip } from "lucide-react";
 import { money } from "@/modules/stock/shared/StockSharedUI";
@@ -45,12 +46,7 @@ const VendorPaymentsView = ({ vendorId, vendorName, period = {}, periodLabel, on
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
 
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/reports/paid/${vendorId}/payments?${params.toString()}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load payments");
+      const json = await api.get(API_ENDPOINTS.purchase.reports.vendorPayments(vendorId), { query: params, fallback: "Failed to load payments" });
       setRows(json.data?.rows || []);
       setTotals(json.data?.totals || {});
       setTotal(json.pagination?.total || 0);

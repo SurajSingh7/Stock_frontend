@@ -20,12 +20,15 @@ import { SHOW_DEV } from "@/config/getEnvVariables";
  * VIEW_MENU granted on its own can never produce a menu entry that 403s.
  */
 export const navCategories = [
-   {
+  {
     category: "Tracking",
+    // group: one "Purchase" mega menu — Tracking, Invoices, Quotation columns.
+    group: "Purchase",
+    icon: "tracking",
     items: [
       {
-        name: "track",
-        path: "/stock/tracking-orders",
+        name: "Track Orders",
+        path: "/stock/purchase/tracking-orders",
         moduleKey: "tracking-orders",
         action: ["VIEW_MENU"],
       },
@@ -33,18 +36,20 @@ export const navCategories = [
       // seeing that history is granted apart from the right to create it.
       {
         name: "Not Required",
-        path: "/stock/not-required",
+        path: "/stock/purchase/not-required",
         moduleKey: "not-required",
         action: ["VIEW_MENU"],
       },
     ],
   },
-   {
-    category: "Invoice list",
+  {
+    category: "Invoices",
+    group: "Purchase",
+    icon: "invoices",
     items: [
       {
         name: "Invoice List",
-        path: "/stock/invoice-list",
+        path: "/stock/purchase/invoices",
         moduleKey: "invoice-list",
         action: ["VIEW_MENU"],
       },
@@ -52,72 +57,71 @@ export const navCategories = [
       // given to someone who does not get the Invoice List.
       {
         name: "Faulty Items",
-        path: "/stock/faulty-items",
+        path: "/stock/purchase/faulty-items",
         moduleKey: "faulty-items",
         action: ["VIEW_MENU"],
       },
     ],
   },
-
-
   {
     category: "Quotation",
+    group: "Purchase",
+    icon: "quotation",
     items: [
       {
         name: "Quotations",
-        path: "/stock/quotations/list",
+        path: "/stock/purchase/quotations",
         moduleKey: "quotations",
         action: ["VIEW_MENU"],
       },
     ],
   },
 
-  {
-    category: "Vendor",
-    items: [
-      {
-        name: "Vendors List",
-        path: "/stock/vendors",
-        moduleKey: "vendors",
-        action: ["VIEW_MENU"],
-      },
-    ],
-  },
   {
     category: "Approval",
     items: [
       {
         name: "Quotations",
-        path: "/stock/quotations/approval",
+        path: "/stock/approval/quotations",
         moduleKey: "quotations",
         action: ["VIEW_MENU"],
       },
       {
-        name: "Approvals",
-        path: "/stock/payment-approval",
+        name: "Payments & Debit Notes",
+        path: "/stock/approval/payments",
         moduleKey: "payment-approval",
         action: ["VIEW_MENU"],
       },
     ],
   },
   {
-    category: "Account",
+    category: "Approval",
+    // group: one "Accounts" mega menu, Approval + Payables as its columns.
+    group: "Accounts",
+    icon: "approval",
     items: [
       {
-        name: "Po Approval",
-        path: "/stock/purchase-orders",
+        name: "PO Approval",
+        path: "/stock/accounts/po-approval",
         moduleKey: "purchase-orders",
         action: ["VIEW_MENU"],
       },
       {
         name: "Invoice Approval",
-        path: "/stock/invoice-approval",
+        path: "/stock/accounts/invoice-approval",
         moduleKey: "invoices",
         action: ["VIEW_MENU"],
       },
+    ],
+  },
+  {
+    category: "Payables",
+    group: "Accounts",
+    icon: "payables",
+    items: [
       {
-        name: "Payments",
-        path: "/stock/payments",
+        name: "Payment Processing",
+        path: "/stock/accounts/payments",
         moduleKey: "payments",
         action: ["VIEW_MENU"],
       },
@@ -152,8 +156,8 @@ export const navCategories = [
         Vendor Ledger entries; a vendor's month-wise ledger opens from its ⋮.
       */
       {
-        name: "Vendor Outstanding Overview",
-        path: "/stock/reports/account-summary",
+        name: "Outstanding Overview",
+        path: "/stock/reports/vendor-outstanding",
         moduleKey: "account-summary",
         action: ["VIEW_MENU"],
       },
@@ -198,85 +202,60 @@ export const navCategories = [
   },
 
   {
-    category: "Inventory",
-    // group: shown as one column of the "Inventory" mega menu (with Requests
-    // and Transfer). Section names may change later — only here.
+    category: "Stock",
+    // group: shown as one column of the "Inventory" mega menu (with
+    // Opening and Transfer). Section names may change later — only here.
     group: "Inventory",
     icon: "stock",
     items: [
       {
         name: "Product Inventory",
-        path: "/stock/product-inventory",
+        path: "/stock/inventory/products",
         moduleKey: "inventory-items",
         action: ["VIEW_MENU"],
       },
       {
         name: "Item Inventory",
-        path: "/stock/item-inventory",
+        path: "/stock/inventory/items",
         moduleKey: "inventory-items",
         action: ["VIEW_MENU"],
       },
       // What is at or below its threshold — where the low-stock alerts land.
       {
         name: "Low Stock",
-        path: "/stock/low-stock",
+        path: "/stock/inventory/low-stock",
         moduleKey: "inventory-items",
-        action: ["VIEW_MENU"],
-      },
-      // Stock that was already on hand before this system.
-      {
-        name: "Opening Stock",
-        path: "/stock/opening-stock",
-        moduleKey: "opening-stock",
-        action: ["VIEW_MENU"],
-      },
-      // …and stock that was already with someone (employee / subscriber).
-      {
-        name: "Opening Issued Stock",
-        path: "/stock/opening-issued",
-        moduleKey: "opening-issued-stock",
-        action: ["VIEW_MENU"],
-      },
-      // Our broken units — repair, warranty claim, scrap.
-      {
-        name: "Repair & Warranty",
-        path: "/stock/repairs",
-        moduleKey: "repairs",
-        action: ["VIEW_MENU"],
-      },
-      // Stock with our own people.
-      {
-        name: "Employee Items",
-        path: "/stock/employee-items",
-        moduleKey: "employee-items",
         action: ["VIEW_MENU"],
       },
       // Inventory reports (the Reports menu is billing).
       {
         name: "Stock Reports",
-        path: "/stock/stock-reports",
+        path: "/stock/inventory/reports",
         moduleKey: "stock-reports",
         action: ["VIEW_MENU"],
       },
     ],
   },
 
-  // Subscribers' requests for stock, from the NOC / broadband website.
+  // One-time entry of what existed before this system — its own column so the
+  // day-to-day Stock list stays short.
   {
-    category: "Requests",
+    category: "Opening",
     group: "Inventory",
-    icon: "requests",
+    icon: "opening",
     items: [
+      // Stock that was already on hand before this system.
       {
-        name: "Item Requests",
-        path: "/stock/item-requests",
-        moduleKey: "item-requests",
+        name: "In Store",
+        path: "/stock/inventory/opening/in-store",
+        moduleKey: "opening-stock",
         action: ["VIEW_MENU"],
       },
+      // …and stock that was already with someone (employee / subscriber).
       {
-        name: "Subscriber Items",
-        path: "/stock/subscriber-items",
-        moduleKey: "item-requests",
+        name: "With People",
+        path: "/stock/inventory/opening/with-people",
+        moduleKey: "opening-issued-stock",
         action: ["VIEW_MENU"],
       },
     ],
@@ -291,7 +270,7 @@ export const navCategories = [
     items: [
       {
         name: "Request Simulator (Test)",
-        path: "/test/request-simulator",
+        path: "/stock/admin/test/request-simulator",
         moduleKey: "test-simulator",
         action: ["VIEW_MENU"],
       },
@@ -305,68 +284,141 @@ export const navCategories = [
     items: [
       {
         name: "Transfer Requests",
-        path: "/stock/transfer-requests",
+        path: "/stock/inventory/transfers/requests",
         moduleKey: "transfer-requests",
         action: ["VIEW_MENU"],
       },
       {
         name: "Incoming Requests",
-        path: "/stock/incoming-requests",
+        path: "/stock/inventory/transfers/incoming",
         moduleKey: "transfer-requests",
         action: ["VIEW_MENU"],
       },
       {
         name: "Transfer History",
-        path: "/stock/transfer-history",
+        path: "/stock/inventory/transfers/history",
         moduleKey: "transfer-requests",
         action: ["VIEW_MENU"],
       },
     ],
   },
 
+  // Allotment — who our stock went to, or who asked for it: subscribers and
+  // our own employees, one column each.
+  // Subscribers' requests for stock, from the NOC / broadband website.
   {
-    category: "Master",
+    category: "Subscribers",
+    group: "Allotment",
+    icon: "subscribers",
+    items: [
+      {
+        name: "Item Requests",
+        path: "/stock/allotment/requests",
+        moduleKey: "item-requests",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Subscriber Items",
+        path: "/stock/allotment/subscribers",
+        moduleKey: "item-requests",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+  // Stock with our own people.
+  {
+    category: "Employees",
+    group: "Allotment",
+    icon: "employees",
+    items: [
+      {
+        name: "Employee Items",
+        path: "/stock/allotment/employees",
+        moduleKey: "employee-items",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+
+  // Our broken units — repair, warranty claim, scrap. One page, so the bar
+  // shows it as a plain link.
+  {
+    category: "Repairs",
+    items: [
+      {
+        name: "Repair & Warranty",
+        path: "/stock/repairs",
+        moduleKey: "repairs",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+
+  // Next to Masters: vendors are set-up data too, not day-to-day work.
+  {
+    category: "Vendor",
+    items: [
+      {
+        name: "Vendors List",
+        path: "/stock/vendors",
+        moduleKey: "vendors",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Terms & Conditions",
+        path: "/stock/vendors/terms",
+        moduleKey: "terms-conditions",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+
+  {
+    category: "Masters",
     items: [
       {
         name: "Product Definition",
-        path: "/master/product-definition",
+        path: "/stock/masters/products",
         moduleKey: "product-definitions",
         action: ["VIEW_MENU"],
       },
       {
         name: "Category",
-        path: "/master/category",
+        path: "/stock/masters/categories",
         moduleKey: "categories",
         action: ["VIEW_MENU"],
       },
       {
-        name: "Field Definition",
-        path: "/master/field-definition",
-        moduleKey: "field-definitions",
-        action: ["VIEW_MENU"],
-      },
-      {
-        name: "Terms & Conditions",
-        path: "/master/terms-condition",
-        moduleKey: "terms-conditions",
-        action: ["VIEW_MENU"],
-      },
-      {
         name: "Branches",
-        path: "/master/branch",
+        path: "/stock/masters/branches",
         moduleKey: "branches",
         action: ["VIEW_MENU"],
       },
       {
         name: "GST Rates",
-        path: "/master/gst-rate",
+        path: "/stock/masters/gst-rates",
         moduleKey: "gst-rates",
+        action: ["VIEW_MENU"],
+      },
+    ],
+  },
+
+  // System-level setup, rarely touched: under Administration, not the bar.
+  {
+    category: "Configuration",
+    section: "settings",
+    icon: "config",
+    items: [
+      {
+        name: "Field Definition",
+        path: "/stock/admin/field-definitions",
+        moduleKey: "field-definitions",
         action: ["VIEW_MENU"],
       },
       // Which Claude model reads uploaded invoices.
       {
         name: "AI Settings",
-        path: "/master/ai-settings",
+        path: "/stock/admin/ai-settings",
         moduleKey: "ai-settings",
         action: ["VIEW_MENU"],
       },
@@ -380,12 +432,12 @@ export const navCategories = [
     section: "settings",
     icon: "alerts",
     items: [
-      { name: "Rules", path: "/alerts/rules", moduleKey: "alert-rules", action: ["VIEW_MENU"] },
-      { name: "Templates", path: "/alerts/templates", moduleKey: "alert-templates", action: ["VIEW_MENU"] },
-      { name: "Contacts & Groups", path: "/alerts/contacts", moduleKey: "alert-contacts", action: ["VIEW_MENU"] },
-      { name: "Escalations", path: "/alerts/escalations", moduleKey: "alert-escalations", action: ["VIEW_MENU"] },
-      { name: "Message Log", path: "/alerts/log", moduleKey: "alert-log", action: ["VIEW_MENU"] },
-      { name: "Channels", path: "/alerts/channels", moduleKey: "alert-channels", action: ["VIEW_MENU"] },
+      { name: "Rules", path: "/stock/admin/alerts/rules", moduleKey: "alert-rules", action: ["VIEW_MENU"] },
+      { name: "Templates", path: "/stock/admin/alerts/templates", moduleKey: "alert-templates", action: ["VIEW_MENU"] },
+      { name: "Contacts & Groups", path: "/stock/admin/alerts/contacts", moduleKey: "alert-contacts", action: ["VIEW_MENU"] },
+      { name: "Escalations", path: "/stock/admin/alerts/escalations", moduleKey: "alert-escalations", action: ["VIEW_MENU"] },
+      { name: "Message Log", path: "/stock/admin/alerts/log", moduleKey: "alert-log", action: ["VIEW_MENU"] },
+      { name: "Channels", path: "/stock/admin/alerts/channels", moduleKey: "alert-channels", action: ["VIEW_MENU"] },
     ],
   },
 ];
@@ -402,12 +454,12 @@ export const adminNavCategories = [
     // grant it to a role, narrow it per department, then handle the one person
     // who is an exception.
     items: [
-      { name: "Modules & Actions", path: "/access-control/modules" },
-      { name: "Roles & Permissions", path: "/access-control/roles" },
-      { name: "Department Restrictions", path: "/access-control/departments" },
-      { name: "User Access", path: "/access-control/users" },
-      { name: "Delegate Access", path: "/access-control/delegate" },
-      { name: "Audit Log", path: "/access-control/audit-log" },
+      { name: "Modules & Actions", path: "/stock/admin/access-control/modules" },
+      { name: "Roles & Permissions", path: "/stock/admin/access-control/roles" },
+      { name: "Department Restrictions", path: "/stock/admin/access-control/departments" },
+      { name: "User Access", path: "/stock/admin/access-control/users" },
+      { name: "Delegate Access", path: "/stock/admin/access-control/delegate" },
+      { name: "Audit Log", path: "/stock/admin/access-control/audit-log" },
     ],
   },
 ];

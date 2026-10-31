@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { poAction, fetchPoBoard, poPdfUrl } from "./purchaseOrderApi";
+import { resetTrackingOrder } from "@/modules/stock/tracking-orders/trackingApi";
+import { fetchVendors, fetchLeafCategories, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
 import POCreateView from "./Pocreateview";
 import PODetailsView from "./Podetailsview";
 import Pagination from "@/shared/ui/pagination/Pagination";
@@ -364,17 +366,7 @@ const ResetOrderPopup = ({ row, onClose, onDone }) => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/reset`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ reason: reason.trim() }),
-        }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to reset order");
+      await resetTrackingOrder(row.trackingOrderId, reason.trim());
       onDone();
     } catch (e) {
       setError(e.message);
@@ -444,15 +436,7 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
   const [approved, setApproved] = useState(false); // approve landed — only the send is left
   const [result, setResult] = useState(null);      // "SENT" | "MANUAL" | "SKIPPED"
 
-  const patch = async (path, body) => {
-    const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/${path}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const json = await res.json();
-    if (!res.ok || !json.success) throw new Error(json.message || "Failed");
-    return json;
-  };
+  const patch = (action, body) => poAction(row.poId, action, body);
 
   // Once the approve has gone through the board is stale, so closing has to
   // refresh it — otherwise the row would still offer "Review PO".
@@ -790,9 +774,7 @@ const PurchaseOrderPage = () => {
       params.set("page", String(page));
       params.set("limit", String(limit));
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/board?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load board");
+      const json = await fetchPoBoard(params);
 
       setBoard(json.data?.board || []);
       setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
@@ -809,12 +791,10 @@ const PurchaseOrderPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setVendors(j.data || []);
+        setVendors(await fetchVendors(1000));
       } catch { }
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
       } catch { }
     })();
   }, []);
@@ -829,12 +809,7 @@ const PurchaseOrderPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const url = categoryF
-          ? `${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryF}&limit=1000`
-          : `${API_BACKEND_URL}/stock/product-definitions?limit=1000`;
-        const r = await fetch(url, { credentials: "include" });
-        const j = await r.json();
-        setProductOptions(j.success ? (j.data || []).map((p) => ({ value: p._id, label: p.name })) : []);
+        setProductOptions(await fetchProductOptions(categoryF || undefined));
       } catch {
         setProductOptions([]);
       }
@@ -900,7 +875,7 @@ const PurchaseOrderPage = () => {
     return <PODetailsView context={view} onBack={() => setView({ mode: "board" })} />;
 
   if (view.mode === "view") {
-    const pdfUrl = `${API_BACKEND_URL}/stock/purchase-orders/${view.poId}/pdf`;
+    const pdfUrl = poPdfUrl(view.poId);
     return (
       <div className="mx-auto max-w-4xl p-6">
         <div className="mb-5 flex items-center gap-3">

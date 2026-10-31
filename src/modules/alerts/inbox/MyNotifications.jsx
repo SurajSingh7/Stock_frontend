@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { CheckCheck, ExternalLink } from "lucide-react";
+import { ArrowLeft, CheckCheck, ExternalLink } from "lucide-react";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { fetchInbox, markRead, markAllRead, toAppPath, timeAgo } from "./inboxApi";
 import { btnGhost, Empty, ErrorBox } from "../shared/AlertUI";
@@ -60,12 +60,22 @@ const MyNotifications = () => {
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
       <div className="mx-auto max-w-3xl">
-        <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Notifications</h1>
-            <p className="mt-1 text-sm text-slate-500">{unread ? `${unread} unread` : "All caught up"}</p>
+        {/* Back | title (centred) | filters — the same header as the Vendor form. */}
+        <div className="mb-5 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+          {/* Reached from the bell on any page, so go back to wherever that was;
+              opened directly (no history), fall back to home. */}
+          <button
+            type="button"
+            onClick={() => (window.history.length > 1 ? router.back() : router.push("/"))}
+            className="inline-flex items-center gap-2 justify-self-start rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+          >
+            <ArrowLeft className="h-4 w-4" /> Back
+          </button>
+          <div className="text-center">
+            <h1 className="text-xl font-semibold tracking-tight text-slate-900">My Notifications</h1>
+            <p className="text-xs text-slate-500">{unread ? `${unread} unread` : "All caught up"}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <div className="inline-flex rounded-lg bg-slate-100 p-1">
               {[["all", "All"], ["unread", "Unread"]].map(([k, label]) => (
                 <button key={k} type="button" onClick={() => { setView(k); setPage(1); }}

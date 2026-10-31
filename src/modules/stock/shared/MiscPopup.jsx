@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { Plus, X } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import { Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
@@ -40,15 +41,14 @@ const MiscPopup = ({ invoice, readOnly = false, onClose, onDone }) => {
   const save = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/payments/${invoice._id}/misc`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({
+      await api.patch(
+        API_ENDPOINTS.purchase.payments.misc(invoice._id),
+        {
           charges: rows.map((r) => ({ note: r.note.trim(), amount: Number(r.amount), includeInBilling: r.includeInBilling })),
           reason: reason.trim(),
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save misc");
+        },
+        { fallback: "Failed to save misc" }
+      );
       onDone();
     } catch (e) {
       setError(e.message);

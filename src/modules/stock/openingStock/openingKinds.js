@@ -7,7 +7,7 @@ export const OPENING_KINDS = {
   STORE: {
     kind: "STORE",
     moduleKey: "opening-stock",
-    path: "/stock/opening-stock",
+    path: "/stock/inventory/opening/in-store",
     title: "Opening Stock",
     newTitle: "New Opening Stock Entry",
     subtitle: "Stock that is in the store and was already on hand before this system — entered once, with whatever is known about it.",
@@ -17,7 +17,7 @@ export const OPENING_KINDS = {
   ISSUED: {
     kind: "ISSUED",
     moduleKey: "opening-issued-stock",
-    path: "/stock/opening-issued",
+    path: "/stock/inventory/opening/with-people",
     title: "Opening Issued Stock",
     newTitle: "New Opening Issued Stock Entry",
     subtitle: "Stock that was already with an employee or a subscriber before this system — one person per entry. Posting assigns it to them.",

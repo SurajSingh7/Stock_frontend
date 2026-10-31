@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchLeafCategories, fetchScopedBranches, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, History, Eye, ArrowLeft } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
@@ -32,9 +34,7 @@ const ProductInventoryHistory = ({ product, onBack }) => {
     (async () => {
       setLoading(true); setError(null);
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/history/${product.productDefinitionId}`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load history");
+        const json = await api.get(API_ENDPOINTS.inventory.inventoryItems.history(product.productDefinitionId), { fallback: "Failed to load history" });
         setRows(json.data || []);
       } catch (e) { setError(e.message); } finally { setLoading(false); }
     })();
@@ -149,13 +149,11 @@ const ProductInventory = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
       } catch {}
       // Same scoped picker as Item Inventory — see the note there.
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=inventory-items`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("inventory-items"));
       } catch {}
     })();
   }, []);
@@ -164,8 +162,7 @@ const ProductInventory = () => {
     (async () => {
       if (!categoryId) { setProductOptions([]); return; }
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setProductOptions((j.data || []).map((p) => ({ value: p._id, label: p.name })));
+        setProductOptions(await fetchProductOptions(categoryId));
       } catch { setProductOptions([]); }
     })();
   }, [categoryId]);
@@ -179,9 +176,7 @@ const ProductInventory = () => {
       if (productId) params.set("productDefinitionId", productId);
       if (branchId) params.set("branchId", branchId);
       if (stockStatus) params.set("stockStatus", stockStatus);
-      const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/product-summary?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch product inventory");
+      const json = await api.get(API_ENDPOINTS.inventory.inventoryItems.productSummary, { query: params, fallback: "Failed to fetch product inventory" });
       setRows(json.data || []);
       setTotal(json.pagination?.total ?? 0);
     } catch (err) { setError(err.message); setRows([]); setTotal(0); } finally { setLoading(false); }
@@ -261,7 +256,7 @@ const ProductInventory = () => {
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"
-                      onClick={() => router.push(`/stock/item-inventory?productDefinitionId=${p.productDefinitionId}`)}
+                      onClick={() => router.push(`/stock/inventory/items?productDefinitionId=${p.productDefinitionId}`)}
                       className={`text-sm font-semibold tabular-nums hover:underline ${p.availableQty > 0 ? "text-emerald-700" : "text-slate-400"}`}
                     >
                       {p.availableQty} {unitLabel(p.unit)}

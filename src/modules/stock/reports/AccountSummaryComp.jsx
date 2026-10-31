@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Users, Receipt, Percent, FileMinus, IndianRupee, Wallet, AlertTriangle, Info, Eye, ArrowRight, PlusCircle, MoreVertical, BookOpen } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
@@ -249,9 +251,7 @@ const AccountSummaryComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=invoice-list`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("invoice-list"));
       } catch {
         // Non-fatal — the branch filter just stays empty.
       }
@@ -268,9 +268,7 @@ const AccountSummaryComp = () => {
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/reports/account-summary?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load vendor account summary");
+      const json = await api.get(API_ENDPOINTS.purchase.reports.accountSummary, { query: params, fallback: "Failed to load vendor account summary" });
       setRows(json.data?.rows || []);
       setTotals(json.data?.totals || {});
       setTotal(json.pagination?.total || 0);

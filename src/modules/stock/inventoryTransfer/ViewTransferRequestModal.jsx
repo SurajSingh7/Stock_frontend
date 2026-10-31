@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchTransferDetail as fetchDetail } from "./transferApi";
 import { ArrowRight } from "lucide-react";
 import { Modal, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
@@ -22,13 +22,6 @@ const DetailField = ({ label, value }) => (
     <p className="mt-1 text-sm font-medium text-slate-900">{value ?? "—"}</p>
   </div>
 );
-
-async function fetchDetail(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/transfer-requests/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load transfer request");
-  return json.data;
-}
 
 const ViewTransferRequestModal = ({ requestId, onClose }) => {
   const [detail, setDetail] = useState(null);

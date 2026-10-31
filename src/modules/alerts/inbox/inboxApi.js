@@ -1,4 +1,6 @@
-import { alertApi, ALERTS_API } from "../shared/alertApi";
+import { alertApi } from "../shared/alertApi";
+import { apiUrl } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 
 // The signed-in user's own notifications (website bell).
 export const fetchInbox = ({ page = 1, limit = 8, unread } = {}) =>
@@ -6,7 +8,7 @@ export const fetchInbox = ({ page = 1, limit = 8, unread } = {}) =>
 export const fetchUnreadCount = () => alertApi("/inbox/unread-count").then((r) => r.data?.unread || 0);
 export const markRead = (id) => alertApi(`/inbox/${id}/read`, { method: "PATCH" });
 export const markAllRead = () => alertApi("/inbox/read-all", { method: "PATCH" });
-export const INBOX_STREAM_URL = `${ALERTS_API}/inbox/stream`;
+export const INBOX_STREAM_URL = apiUrl(API_ENDPOINTS.admin.alerts.inboxStream);
 
 /*
   Links in notifications are absolute (APP_PUBLIC_URL), built for WhatsApp.

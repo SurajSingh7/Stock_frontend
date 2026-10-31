@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Wrench, ShieldCheck, CheckCircle2, Trash2, Search, RotateCcw } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import { usePermissions } from "@/context/PermissionContext";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { Modal, SearchableSelect, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
@@ -189,9 +189,7 @@ const RepairList = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=repairs`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("repairs"));
       } catch {
         setBranches([]);
       }

@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchStatusSummary, fetchQuotations } from "@/modules/stock/quotations/quotationApi";
+import { fetchLeafCategories, fetchVendors, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Eye, ClipboardCheck } from "lucide-react";
 import { SearchableSelect, Modal } from "@/modules/stock/shared/StockSharedUI";
@@ -178,24 +179,20 @@ const QuotationApprovalList = () => {
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
 
   const loadSummary = useCallback(async () => {
-    try { const res = await fetch(`${API_BACKEND_URL}/stock/quotations/status-summary`, { credentials: "include" });
-      const json = await res.json(); if (json.success) setSummary(json.data || {}); } catch {}
+    try { setSummary(await fetchStatusSummary()); } catch {}
   }, []);
 
   useEffect(() => {
     (async () => {
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setCategories(j.data || []); } catch {}
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setVendors(j.data || []); } catch {}
+      try { setCategories(await fetchLeafCategories()); } catch {}
+      try { setVendors(await fetchVendors(1000)); } catch {}
     })();
   }, []);
 
   useEffect(() => {
     (async () => {
       if (!categoryId) { setProductOptions([]); return; }
-      try { const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setProductOptions((j.data || []).map((p) => ({ value: p._id, label: p.name }))); } catch { setProductOptions([]); }
+      try { setProductOptions(await fetchProductOptions(categoryId)); } catch { setProductOptions([]); }
     })();
   }, [categoryId]);
 
@@ -210,11 +207,9 @@ const QuotationApprovalList = () => {
       if (vendorId) params.set("vendorId", vendorId);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch quotations");
-      setRows(json.data || []);
-      setTotal(json.pagination?.total ?? 0);
+      const { rows, total } = await fetchQuotations(params);
+      setRows(rows);
+      setTotal(total);
     } catch (err) { setError(err.message); setRows([]); setTotal(0); } finally { setLoading(false); }
   }, [page, limit, debouncedSearch, status, categoryId, productId, vendorId, dateFrom, dateTo]);
 
@@ -385,14 +380,14 @@ const QuotationApprovalList = () => {
                       <div className="flex items-center justify-end gap-1.5">
                         {isPending ? (
                           <button
-                            type="button" onClick={() => router.push(`/stock/quotations/${q._id}/review`)} title="Review"
+                            type="button" onClick={() => router.push(`/stock/approval/quotations/${q._id}`)} title="Review"
                             className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2.5 py-1 text-xs font-medium text-amber-700 shadow-sm transition hover:border-amber-300 hover:bg-amber-50"
                           >
                             <ClipboardCheck className="h-3.5 w-3.5" /> Review
                           </button>
                         ) : (
                           <button
-                            type="button" onClick={() => router.push(`/stock/quotations/${q._id}/view?from=approval`)} title="View"
+                            type="button" onClick={() => router.push(`/stock/purchase/quotations/${q._id}?from=approval`)} title="View"
                             className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2.5 py-1 text-xs font-medium text-indigo-600 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
                           >
                             <Eye className="h-3.5 w-3.5" /> View

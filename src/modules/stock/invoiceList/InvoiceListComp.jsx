@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchInvoiceList, fetchDebitNotes, scheduleInvoice } from "@/modules/stock/invoiceList/invoiceListApi";
+import { fetchVendors } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { CalendarDays, RotateCcw, Lock, Layers, MoreVertical, Eye, Info, FileMinus, Pencil, Undo2, History } from "lucide-react";
 import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
@@ -223,12 +224,7 @@ const SchedulePaymentPopup = ({ row, onClose, onDone }) => {
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoice-list/${row._id}/schedule`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify(onDueDate ? { onDueDate: true } : { scheduledOn: date }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save");
+      await scheduleInvoice(row._id, onDueDate ? { onDueDate: true } : { scheduledOn: date });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -398,9 +394,7 @@ const InvoiceListComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=500`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setVendors(j.data || []);
+        setVendors(await fetchVendors());
       } catch {
         // Non-fatal — the vendor filter just stays empty.
       }
@@ -418,9 +412,7 @@ const InvoiceListComp = () => {
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoice-list?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoices");
+      const json = await fetchInvoiceList(params);
       setRows(json.data?.rows || []);
       setCounts(json.data?.counts || { ALL: 0, NOT_DUE: 0, DUE: 0, OVERDUE: 0 });
       setTotal(json.pagination?.total || 0);
@@ -464,10 +456,8 @@ const InvoiceListComp = () => {
   // The latest note, fetched in full (lines + history) to edit it.
   const openResubmit = async (r) => {
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoice-list/${r._id}/debit-notes`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load the debit note");
-      const dn = (json.data || []).find((d) => String(d._id) === String(r.debitNote?.latest?._id));
+      const notes = await fetchDebitNotes("invoice-list", r._id);
+      const dn = notes.find((d) => String(d._id) === String(r.debitNote?.latest?._id));
       if (!dn) throw new Error("Debit note not found");
       setDnView({ row: r, adjustment: dn });
     } catch (e) {

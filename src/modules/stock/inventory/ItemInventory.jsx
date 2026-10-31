@@ -2,7 +2,10 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchLeafCategories, fetchScopedBranches, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
+import { reportFaulty } from "@/modules/stock/repairs/repairApi";
 import { usePermissions } from "@/context/PermissionContext";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { RotateCcw, Boxes, Info, Eye } from "lucide-react";
@@ -38,9 +41,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, status, f
         const params = new URLSearchParams();
         if (branchId) params.set("branchId", branchId);
         if (status) params.set("status", status);
-        const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/history/${defId}?${params.toString()}`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load batches");
+        const json = await api.get(API_ENDPOINTS.inventory.inventoryItems.history(defId), { query: params, fallback: "Failed to load batches" });
         setRows(json.data || []);
       } catch (err) {
         setError(err.message);
@@ -140,9 +141,7 @@ const ItemTimeline = ({ itemId }) => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/${itemId}/timeline`, { credentials: "include" });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to load history");
+        const json = await api.get(API_ENDPOINTS.inventory.inventoryItems.timeline(itemId), { fallback: "Failed to load history" });
         setData(json.data);
       } catch (err) {
         setError(err.message);
@@ -205,14 +204,7 @@ const ReportFaulty = ({ itemId, onReported }) => {
             setBusy(true);
             setError(null);
             try {
-              const res = await fetch(`${API_BACKEND_URL}/stock/repairs/${itemId}/report-faulty`, {
-                method: "PATCH",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ note: note.trim() }),
-              });
-              const json = await res.json();
-              if (!res.ok || !json.success) throw new Error(json.message || "Failed to report");
+              await reportFaulty(itemId, { note: note.trim() });
               onReported();
             } catch (err) {
               setError(err.message);
@@ -423,16 +415,14 @@ const ItemInventory = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
       } catch {}
       // Only the branches this user can actually see inventory in — offering a
       // branch whose rows are all scoped away would just filter to an empty
       // list. ?module=inventory-items keeps this off branches:READ, which a
       // stock viewer has no reason to hold.
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=inventory-items`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("inventory-items"));
       } catch {}
     })();
   }, []);
@@ -441,8 +431,7 @@ const ItemInventory = () => {
     (async () => {
       if (!categoryId) { setProductOptions([]); return; }
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setProductOptions((j.data || []).map((p) => ({ value: p._id, label: p.name })));
+        setProductOptions(await fetchProductOptions(categoryId));
       } catch { setProductOptions([]); }
     })();
   }, [categoryId]);
@@ -458,9 +447,7 @@ const ItemInventory = () => {
       params.set("status", status);
       if (sourceType) params.set("sourceType", sourceType);
       if (condition) params.set("condition", condition);
-      const res = await fetch(`${API_BACKEND_URL}/stock/inventory-items/cards?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch items");
+      const json = await api.get(API_ENDPOINTS.inventory.inventoryItems.cards, { query: params, fallback: "Failed to fetch items" });
       setRows(json.data || []);
       setTotal(json.pagination?.total ?? 0);
     } catch (err) { setError(err.message); setRows([]); setTotal(0); } finally { setLoading(false); }

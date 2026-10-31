@@ -22,7 +22,8 @@ import {
   Info,
   Move,
 } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import ProductDefinitionCatComp from "./ProductDefinitionCatComp";
 
 
@@ -42,7 +43,7 @@ const CATEGORY_TYPE_LABELS = {
   LEAF: "Last",
 };
 
-const CATEGORIES_ENDPOINT = `${API_BACKEND_URL}/stock/categories`;
+const EP = API_ENDPOINTS.master.categories;
 const TRUNCATE_LENGTH = 25;
 
 // Single source of truth for the category name length limit.
@@ -54,105 +55,36 @@ const CATEGORY_NAME_MAX_LENGTH = 32;
    API FUNCTIONS
 ============================================================================= */
 
-async function parseResponse(res) {
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.success === false) {
-    throw new Error(json.message || "Something went wrong. Please try again.");
-  }
-  return json;
-}
+const OPTS = { fallback: "Something went wrong. Please try again." };
 
 const categoryApi = {
   getRootCategories: async () => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}`, {
-      method: "GET",
-      credentials: "include",
-    });
-    const json = await parseResponse(res);
+    const json = await api.get(EP.list, OPTS);
     return Array.isArray(json.data) ? json.data : [];
   },
 
-  getCategoryById: async (categoryId) => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}/${categoryId}`, {
-      method: "GET",
-      credentials: "include",
-    });
-    const json = await parseResponse(res);
-    return json.data;
-  },
+  getCategoryById: async (categoryId) => (await api.get(EP.byId(categoryId), OPTS)).data,
 
   searchCategories: async ({ search, page, limit }) => {
-    const params = new URLSearchParams({
-      search: search || "",
-      page: String(page),
-      limit: String(limit),
-    });
-    const res = await fetch(`${CATEGORIES_ENDPOINT}/flat?${params.toString()}`, {
-      method: "GET",
-      credentials: "include",
-    });
-    const json = await parseResponse(res);
+    const json = await api.get(EP.flat, { ...OPTS, query: { search: search || "", page, limit } });
     return {
       items: json.data || [],
       total: json.pagination?.total ?? 0,
     };
   },
 
-  createCategory: async ({ name, description, type, parentId }) => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description, type, parentId: parentId || null }),
-    });
-    return parseResponse(res);
-  },
+  createCategory: ({ name, description, type, parentId }) =>
+    api.post(EP.list, { name, description, type, parentId: parentId || null }, OPTS),
 
-  renameCategory: async (categoryId, { name, description }) => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}/${categoryId}`, {
-      method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description }),
-    });
-    return parseResponse(res);
-  },
+  renameCategory: (categoryId, { name, description }) => api.put(EP.byId(categoryId), { name, description }, OPTS),
 
-  toggleCategoryType: async (categoryId, nextType) => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}/${categoryId}/toggle-type`, {
-      method: "PATCH",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: nextType }),
-    });
-    return parseResponse(res);
-  },
+  toggleCategoryType: (categoryId, nextType) => api.patch(EP.action(categoryId, "toggle-type"), { type: nextType }, OPTS),
 
-  softDeleteCategory: async (categoryId) => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}/${categoryId}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
-    return parseResponse(res);
-  },
+  softDeleteCategory: (categoryId) => api.delete(EP.byId(categoryId), OPTS),
 
-  restoreCategory: async (categoryId) => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}/${categoryId}/restore`, {
-      method: "PATCH",
-      credentials: "include",
-    });
-    return parseResponse(res);
-  },
+  restoreCategory: (categoryId) => api.patch(EP.action(categoryId, "restore"), undefined, OPTS),
 
-  moveCategory: async (categoryId, newParentId) => {
-    const res = await fetch(`${CATEGORIES_ENDPOINT}/${categoryId}/move`, {
-      method: "PATCH",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ newParentId: newParentId || null }),
-    });
-    return parseResponse(res);
-  },
+  moveCategory: (categoryId, newParentId) => api.patch(EP.action(categoryId, "move"), { newParentId: newParentId || null }, OPTS),
 };
 
 /* =============================================================================
@@ -164,7 +96,7 @@ function isLeaf(type) {
 }
 
 function buildProductCreateUrl(categoryId) {
-  return `/master/product-definition?redirect=category&categoryId=${categoryId}`;
+  return `/stock/masters/products?redirect=category&categoryId=${categoryId}`;
 }
 
 // Walks a nested tree to find the full ancestry chain (id + name) down to targetId.

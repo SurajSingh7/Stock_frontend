@@ -645,7 +645,7 @@ const ItemRequestDetail = ({ requestId }) => {
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
-      <button type="button" onClick={() => router.push(`/stock/item-requests?type=${request.type || "ISSUE"}`)} className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-800">
+      <button type="button" onClick={() => router.push(`/stock/allotment/requests?type=${request.type || "ISSUE"}`)} className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-800">
         <ArrowLeft className="h-4 w-4" /> Item Requests
       </button>
 
@@ -699,7 +699,7 @@ const ItemRequestDetail = ({ requestId }) => {
             {request.openElsewhere.map((o) => (
               <li key={`${o.requestId}-${o.categoryId}`}>
                 {o.categoryPath} — {lineQty(o.remainingQty, request.lines.find((l) => String(l.categoryId) === String(o.categoryId)))} pending at <b>{o.branchName}</b> on{" "}
-                <button type="button" onClick={() => router.push(`/stock/item-requests/${o.requestId}`)} className="font-mono font-semibold text-indigo-700 hover:underline">
+                <button type="button" onClick={() => router.push(`/stock/allotment/requests/${o.requestId}`)} className="font-mono font-semibold text-indigo-700 hover:underline">
                   {o.requestNumber}
                 </button>
               </li>
@@ -844,7 +844,7 @@ const ItemRequestDetail = ({ requestId }) => {
                 <React.Fragment key={k}><dt className="text-slate-500">{k}</dt><dd className="col-span-2 text-slate-800">{v}</dd></React.Fragment>
               ))}
             </dl>
-            <button type="button" onClick={() => router.push(`/stock/subscriber-items?subscriberId=${request.subscriberId}`)} className="mt-3 text-sm font-semibold text-indigo-600 hover:underline">
+            <button type="button" onClick={() => router.push(`/stock/allotment/subscribers?subscriberId=${request.subscriberId}`)} className="mt-3 text-sm font-semibold text-indigo-600 hover:underline">
               Everything this subscriber has →
             </button>
           </div>

@@ -7,21 +7,35 @@ import {
   ChevronDown,
   Menu,
   X,
-  Settings,
+  ShieldCog,
   Package,
-  Inbox,
+  Radio,
+  UserRound,
+  FolderArchive,
   ArrowLeftRight,
   LayoutGrid,
+  CheckCircle2,
+  Wallet,
+  Truck,
+  Receipt,
+  FileText,
 } from "lucide-react";
 import { useNavCategories } from "./useNavCategories";
 
 const SECTION_ICON = {
   stock: Package,
-  requests: Inbox,
+  subscribers: Radio,
+  employees: UserRound,
+  opening: FolderArchive,
   transfer: ArrowLeftRight,
+  approval: CheckCircle2,
+  payables: Wallet,
+  tracking: Truck,
+  invoices: Receipt,
+  quotation: FileText,
 };
 
-/* A grouped menu (Inventory = Inventory + Requests + Transfer): one column per
+/* A grouped menu (Inventory = Stock + Opening + Transfer): one column per
    member category, its name as the column heading.
 
    It opens under its button, left-aligned. A wide panel under a button near
@@ -45,7 +59,7 @@ const GroupPanel = ({ category, isActive, onPick }) => {
   return (
     <div
       ref={ref}
-      className="absolute left-0 z-10 mt-2 grid max-w-[calc(100vw-1rem)] gap-x-2 overflow-x-auto rounded-xl bg-gray-800 p-3 shadow-2xl ring-1 ring-black/20"
+      className="absolute left-0 z-10 mt-[15px] grid max-w-[calc(100vw-1rem)] gap-x-2 overflow-x-auto rounded-xl bg-gray-800 p-3 shadow-2xl ring-1 ring-black/20"
       style={{
         gridTemplateColumns: `repeat(${category.sections.length}, minmax(11rem, 1fr))`,
       }}
@@ -76,8 +90,8 @@ const GroupPanel = ({ category, isActive, onPick }) => {
 
 export const Navbar = () => {
   // Permission filtering (and the admin bypass) lives in useNavCategories.
-  // "Settings" categories are not in the bar: on desktop they sit under the
-  // ⚙ next to the bell (SettingsMenu), on phones at the end of this ☰ menu.
+  // "settings" categories (shown as Administration) are not in the bar: on desktop they sit under the
+  // admin icon next to the bell (SettingsMenu), on phones at the end of this ☰ menu.
   const {
     main: filteredCategories,
     settings: settingsCategories,
@@ -137,7 +151,7 @@ export const Navbar = () => {
       <nav ref={navRef} className="hidden md:flex space-x-1">
         {filteredCategories.map((category) => (
           <div key={category.category} className="relative">
-            {category.items.length > 0 ? (
+            {category.items.length > 1 ? (
               <>
                 <button
                   onClick={() => toggleDesktopDropdown(category.category)}
@@ -166,7 +180,7 @@ export const Navbar = () => {
                 )}
                 {desktopDropdown === category.category &&
                   !category.sections && (
-                    <div className="absolute left-0 mt-2 w-48 rounded-md shadow-lg bg-gray-800 z-10">
+                    <div className="absolute left-0 mt-[15px] w-48 rounded-md shadow-lg bg-gray-800 z-10">
                       <div className="py-1">
                         {category.items.map((item) => (
                           <Link
@@ -198,7 +212,7 @@ export const Navbar = () => {
                       : "text-gray-300 hover:bg-gray-700"
                   }`}
                 >
-                  {category.items[0].name}
+                  {category.category}
                 </div>
               </Link>
             )}
@@ -306,7 +320,7 @@ export const Navbar = () => {
                           : "text-gray-300 hover:bg-gray-700"
                       }`}
                     >
-                      {category.items[0].name}
+                      {category.category}
                     </div>
                   </Link>
                 )}
@@ -326,8 +340,8 @@ export const Navbar = () => {
                   aria-haspopup="true"
                 >
                   <span className="flex items-center gap-2">
-                    <Settings size={16} />
-                    Settings
+                    <ShieldCog size={16} />
+                    Administration
                   </span>
                   <ChevronDown
                     size={16}

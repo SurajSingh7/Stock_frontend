@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchTrackingBoard, assignTrackingEntity, trackingAction, fetchInvoicesForTracking, deleteInvoice as removeInvoice, setInvoicePartial } from "./trackingApi";
+import { poPdfUrl } from "@/modules/stock/purchaseOrder/purchaseOrderApi";
+import { invoiceFileUrl } from "@/modules/stock/shared/InvoiceInfoPopups";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
@@ -249,16 +251,11 @@ const AddEntityPopup = ({ row, onClose, onDone }) => {
     if (!selectedEntity) return setError("Select entity and state");
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/entity`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({
-          entityId: selectedEntity._id, name: selectedEntity.name, alias: selectedEntity.alias,
-          gstNumber: selectedEntity.gstNumber, address: selectedEntity.address,
-          state: selectedEntity.state, stateCode: selectedEntity.stateCode,
-        }),
+      await assignTrackingEntity(row.trackingOrderId, {
+        entityId: selectedEntity._id, name: selectedEntity.name, alias: selectedEntity.alias,
+        gstNumber: selectedEntity.gstNumber, address: selectedEntity.address,
+        state: selectedEntity.state, stateCode: selectedEntity.stateCode,
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to assign entity");
       onDone();
     } catch (e) {
       setError(e.message);
@@ -379,15 +376,7 @@ export const ExclusionPopup = ({
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/${endpoint}`,
-        {
-          method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-          body: JSON.stringify({ excludedItemIds: excludedIds, reason: reason.trim() }),
-        }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+      await trackingAction(row.trackingOrderId, endpoint, { excludedItemIds: excludedIds, reason: reason.trim() });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -562,7 +551,7 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
         {invoice.invoiceFile && (
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Attachment</p>
-            <a href={`${API_BACKEND_URL.replace(/\/api\/v1$/, "")}${invoice.invoiceFile}`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-medium text-indigo-600 hover:underline">
+            <a href={invoiceFileUrl(invoice.invoiceFile)} target="_blank" rel="noreferrer" className="mt-1 inline-block text-sm font-medium text-indigo-600 hover:underline">
               View file
             </a>
           </div>
@@ -1223,15 +1212,7 @@ const ClosureDecisionPopup = ({ row, mode, onClose, onDone }) => {
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/tracking-orders/${row.trackingOrderId}/${copy.endpoint}`,
-        {
-          method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-          body: JSON.stringify({ reason: reason.trim() }),
-        }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+      await trackingAction(row.trackingOrderId, copy.endpoint, { reason: reason.trim() });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -1325,13 +1306,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
     if (!window.confirm(msg)) return;
     setCardError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${inv._id}/partial`, {
-        method: "PATCH", credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ on: turnOn }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to change partial submit");
+      await setInvoicePartial(inv._id, turnOn);
       onChanged();
     } catch (e) {
       setCardError(e.message);
@@ -1343,9 +1318,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
     if (!window.confirm(`Delete invoice ${inv.invoiceNumber}? This cannot be undone.`)) return;
     setCardError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${inv._id}`, { method: "DELETE", credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to delete invoice");
+      await removeInvoice(inv._id);
       onChanged();
     } catch (e) {
       setCardError(e.message);
@@ -1356,9 +1329,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
     if (!isReceivingFlow) return;
     setInvLoading(true);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/board?trackingOrderId=${row.trackingOrderId}&limit=200`, { credentials: "include" });
-      const json = await res.json();
-      if (res.ok && json.success) setInvoices(json.data?.rows || []);
+      setInvoices(await fetchInvoicesForTracking(row.trackingOrderId));
     } catch {
       // non-fatal — the card just shows "no invoices yet"
     } finally {
@@ -1709,9 +1680,7 @@ const TrackingOrdersComp = () => {
       params.set("page", String(page));
       params.set("limit", String(limit));
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/tracking-orders/board?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load tracking orders");
+      const json = await fetchTrackingBoard(params);
 
       setBoard(json.data?.board || []);
       setCounts(json.data?.counts || DEFAULT_COUNTS);
@@ -1755,7 +1724,7 @@ const TrackingOrdersComp = () => {
     );
   }
   if (view.mode === "viewPoDoc") {
-    const pdfUrl = `${API_BACKEND_URL}/stock/purchase-orders/${view.poId}/pdf`;
+    const pdfUrl = poPdfUrl(view.poId);
     return (
       <div className="mx-auto max-w-4xl p-6">
         <div className="mb-5 flex items-center gap-3">

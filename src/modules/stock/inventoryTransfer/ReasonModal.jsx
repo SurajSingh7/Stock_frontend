@@ -1,14 +1,14 @@
 "use client";
 
 import React, { useState } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
 import { Modal, inputCls } from "@/modules/stock/shared/StockSharedUI";
 import { loadSavedName, saveName } from "./userName";
 
 /*
   Generic "close this request with a reason" modal — used by the source
   branch to reject a request outright (PATCH { reason, processedByName }).
-  `path` is relative to `${API_BACKEND_URL}/stock/`.
+  `path` is an endpoint from @/constants/api (PATCHed with { reason, processedByName }).
 */
 const ReasonModal = ({ title, description, confirmLabel, path, onClose, onDone }) => {
   const [reason, setReason] = useState("");
@@ -22,14 +22,7 @@ const ReasonModal = ({ title, description, confirmLabel, path, onClose, onDone }
     setError(null);
     try {
       saveName(name);
-      const res = await fetch(`${API_BACKEND_URL}/stock/${path}`, {
-        method: "PATCH",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: reason.trim(), processedByName: name.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Action failed");
+      await api.patch(path, { reason: reason.trim(), processedByName: name.trim() }, { fallback: "Action failed" });
       onDone();
     } catch (err) {
       setError(err.message);

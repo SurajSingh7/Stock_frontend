@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchAdjustments, addMiscAdjustment, editAdjustment } from "@/modules/stock/invoiceList/invoiceListApi";
 import { Plus, X } from "lucide-react";
 import { Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 
@@ -50,22 +50,8 @@ export const MiscChargePopup = ({ invoice, adjustment = null, onClose, onDone })
       const extras = rows
         .filter((r) => Number(r.amount) > 0)
         .map((r) => ({ note: r.note, amount: Number(r.amount) }));
-      const url = isEdit
-        ? `${API_BACKEND_URL}/stock/payments/adjustments/${adjustment._id}`
-        : `${API_BACKEND_URL}/stock/payments/${invoice._id}/adjustments`;
-
-      const res = await fetch(url, {
-        method: isEdit ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(
-          isEdit
-            ? { extras, reason: reason.trim(), editReason: editReason.trim() }
-            : { type: "MISC", extras, reason: reason.trim() }
-        ),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save");
+      if (isEdit) await editAdjustment(adjustment._id, { extras, reason: reason.trim(), editReason: editReason.trim() });
+      else await addMiscAdjustment(invoice._id, { type: "MISC", extras, reason: reason.trim() });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -184,13 +170,8 @@ export const AdjustmentHistoryPopup = ({ invoice, basePath = "invoice-list", typ
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/${basePath}/${invoice._id}/adjustments`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
-      setRows((json.data || []).filter((a) => !type || a.type === type));
+      const list = await fetchAdjustments(basePath, invoice._id);
+      setRows(list.filter((a) => !type || a.type === type));
     } catch (e) {
       setError(e.message);
       setRows([]);

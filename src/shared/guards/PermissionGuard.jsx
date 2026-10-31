@@ -27,7 +27,7 @@ import {
 // Rendered outside the app shell's permission model — the login screen and the
 // landing route must always render, or a user with no access could never even
 // reach the screen telling them so.
-const ALWAYS_ALLOWED = new Set(['/', '/home']);
+const ALWAYS_ALLOWED = new Set(['/', '/stock/home']);
 
 // The login screen, and only the login screen. A signed-out visitor has no
 // branch either, so gating '/' would replace the login form with a message
@@ -40,11 +40,11 @@ const PermissionGuard = ({ children }) => {
   const filteredNav = useFilteredNav(navCategories, permissions);
 
   const target = resolveModuleForPath(navCategories, pathname);
-  const homePath = filteredNav[0]?.items?.[0]?.path || '/home';
+  const homePath = filteredNav[0]?.items?.[0]?.path || '/stock/home';
 
   /* Branch prerequisite — checked before everything else below, including the
      admin bypass and ALWAYS_ALLOWED, because an account with no branch cannot
-     use ANY stock screen (the backend refuses every route but two). /home is
+     use ANY stock screen (the backend refuses every route but two). /stock/home is
      deliberately covered: it derives its landing destination from the nav and
      would otherwise drop the user onto a page that cannot load.
 

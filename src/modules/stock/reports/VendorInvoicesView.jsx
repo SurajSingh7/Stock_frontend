@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { ArrowLeft, Calculator, Receipt, AlertTriangle, Wallet, Percent, Info } from "lucide-react";
 import { Modal, money } from "@/modules/stock/shared/StockSharedUI";
@@ -268,12 +269,7 @@ const VendorInvoicesView = ({ mode, vendorId, vendorName, period = {}, periodLab
       if (period.from) params.set("from", period.from);
       if (period.to) params.set("to", period.to);
 
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/reports/${meta.base}/${vendorId}/invoices?${params.toString()}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoices");
+      const json = await api.get(API_ENDPOINTS.purchase.reports.vendorInvoices(meta.base, vendorId), { query: params, fallback: "Failed to load invoices" });
       setRows(json.data?.rows || []);
       setTotals(json.data?.totals || {});
       setTotal(json.pagination?.total || 0);

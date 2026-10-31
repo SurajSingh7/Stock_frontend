@@ -1,5 +1,6 @@
 'use client'
-import { API_BACKEND_URL } from '@/config/getEnvVariables';
+import { api } from '@/lib/apiClient';
+import { API_ENDPOINTS } from '@/constants/api';
 import Pagination from '@/shared/ui/pagination/Pagination';
 import { STATE_OPTIONS, findStateOption } from '@/shared/constants/indianStates';
 import React, { useState, useEffect, useCallback } from 'react';
@@ -8,7 +9,7 @@ import toast from 'react-hot-toast';
 
 /* ======================== CONSTANTS ======================== */
 
-const BRANCHES_API = `${API_BACKEND_URL}/stock/branches`;
+const EP = API_ENDPOINTS.master.branches;
 
 const STATUS_FILTERS = [
   { value: 'active', label: 'Active' },
@@ -51,64 +52,19 @@ const thRight = `${th} text-right`;
 
 /* ======================== API FUNCTIONS ======================== */
 
-const getBranches = async ({ page, limit, search, showInactive }) => {
-  const params = new URLSearchParams();
-  params.set('page', page);
-  params.set('limit', limit);
-  if (search) params.set('search', search);
-  if (showInactive) params.set('showInactive', 'true');
-
-  const response = await fetch(`${BRANCHES_API}?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'include',
+const getBranches = ({ page, limit, search, showInactive }) =>
+  api.get(EP.list, {
+    query: { page, limit, search, showInactive: showInactive ? 'true' : undefined },
+    fallback: 'Failed to fetch branches',
   });
-  if (!response.ok) throw new Error('Failed to fetch branches');
-  return response.json();
-};
 
-const createBranch = async (payload) => {
-  const response = await fetch(BRANCHES_API, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to create branch');
-  return data;
-};
+const createBranch = (payload) => api.post(EP.list, payload, { fallback: 'Failed to create branch' });
 
-const updateBranch = async (id, payload) => {
-  const response = await fetch(`${BRANCHES_API}/${id}`, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to update branch');
-  return data;
-};
+const updateBranch = (id, payload) => api.put(EP.byId(id), payload, { fallback: 'Failed to update branch' });
 
-const deleteBranch = async (id) => {
-  const response = await fetch(`${BRANCHES_API}/${id}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to delete branch');
-  return data;
-};
+const deleteBranch = (id) => api.delete(EP.byId(id), { fallback: 'Failed to delete branch' });
 
-const restoreBranch = async (id) => {
-  const response = await fetch(`${BRANCHES_API}/${id}/restore`, {
-    method: 'PATCH',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to restore branch');
-  return data;
-};
+const restoreBranch = (id) => api.patch(EP.restore(id), undefined, { fallback: 'Failed to restore branch' });
 
 /* ======================== UTILITY FUNCTIONS ======================== */
 

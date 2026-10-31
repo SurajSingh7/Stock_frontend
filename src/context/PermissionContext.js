@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { API_BACKEND_URL, API_PORTAL_BACKEND_URL } from '@/config/getEnvVariables';
+import { fetchAuthData as fetchHrmsAuth, fetchMyPermissions } from '@/modules/core/auth/authApi';
 
 const PermissionContext = createContext();
 
@@ -29,29 +29,21 @@ export const PermissionProvider = ({ children }) => {
       // + user overrides + branch scope, already resolved server-side) come
       // from this app's own backend — see stock-backend's
       // access-control-controller.getMyPermissions.
-      const [authRes, permissionRes] = await Promise.all([
-        fetch(`${API_PORTAL_BACKEND_URL}/hrms/authdata`, {
-          method: 'GET',
-          credentials: 'include',
-        }),
-        fetch(`${API_BACKEND_URL}/stock/access-control/my-permissions`, {
-          method: 'GET',
-          credentials: 'include',
-        }),
-      ]);
+      const [authResult, permissionResult] = await Promise.allSettled([fetchHrmsAuth(), fetchMyPermissions()]);
+      const failures = [authResult, permissionResult].filter((r) => r.status === 'rejected').map((r) => r.reason);
 
       // Unauthorized
-      if (authRes.status === 403 || permissionRes.status === 403) {
+      if (failures.some((e) => e?.status === 403)) {
         router.push('/rostertestingg/error/authorize/');
         return;
       }
 
-      if (!authRes.ok || !permissionRes.ok) {
+      if (failures.length) {
         throw new Error('Failed to fetch user or permissions data');
       }
 
-      const authData = await authRes.json();
-      const permissionData = await permissionRes.json();
+      const authData = authResult.value;
+      const permissionData = permissionResult.value;
 
       // ============================
       // User Data

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchTrackingDetail, fetchInvoice, fetchInvoicesForTracking, fetchProductDefinition, saveInvoiceItems } from "./trackingApi";
+import { invoiceFileUrl } from "@/modules/stock/shared/InvoiceInfoPopups";
 import { unitLabel, Modal } from "@/modules/stock/shared/StockSharedUI";
 import { EntriesContent, entryView } from "./InvoiceEntries";
 
@@ -33,34 +34,6 @@ const IconTrash = () => (
 const rupees = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
 const ADD_ROW_COUNTS = [1, 3, 5, 10];
-async function fetchTrackingDetail(trackingOrderId) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/tracking-orders/${trackingOrderId}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load tracking order");
-  return json.data;
-}
-async function fetchInvoice(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoice");
-  return json.data;
-}
-// Every invoice of this order — for the PO's received figures and the
-// "Previous invoices" box.
-async function fetchInvoicesForTracking(trackingOrderId) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/board?trackingOrderId=${trackingOrderId}&limit=200`, {
-    credentials: "include",
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoices");
-  return json.data?.rows || [];
-}
-async function fetchProductDefinition(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product");
-  return json.data;
-}
 // selectedFields in display order, keeping each one's isRequired flag. Both
 // tracking methods draw from the same list — Individual renders one set of
 // these per unit row, Group renders one set per batch.
@@ -804,20 +777,13 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
     }
     setSaving(submit ? "submit" : "draft");
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${invoiceId}/items`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          submit,
-          ...(partial && entryId ? { entryId } : {}),
-          lines: builtLines.map(({ quotationItemId, receivedQuantity, focQuantity, rows, rating }) => ({
-            quotationItemId, receivedQuantity, focQuantity, rows, rating,
-          })),
-        }),
+      await saveInvoiceItems(invoiceId, {
+        submit,
+        ...(partial && entryId ? { entryId } : {}),
+        lines: builtLines.map(({ quotationItemId, receivedQuantity, focQuantity, rows, rating }) => ({
+          quotationItemId, receivedQuantity, focQuantity, rows, rating,
+        })),
       });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save");
       onDone();
     } catch (err) {
       setError(err.message);
@@ -870,7 +836,7 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         cls: "border-violet-200 bg-violet-50 text-violet-700",
       }
     : STATUS_PILL[invoice?.status];
-  const fileUrl = invoice?.invoiceFile ? `${API_BACKEND_URL.replace(/\/api\/v1$/, "")}${invoice.invoiceFile}` : "";
+  const fileUrl = invoiceFileUrl(invoice?.invoiceFile);
 
   // PO: received = approved, across every invoice of the order (a partial
   // invoice's lines carry its approved total).

@@ -1,0 +1,65 @@
+/* Inventory menu (Stock · Opening · Transfer), Allotment and Repairs. */
+
+export const INVENTORY_API = {
+  inventoryItems: {
+    list: "/stock/inventory-items",
+    cards: "/stock/inventory-items/cards",
+    productSummary: "/stock/inventory-items/product-summary",
+    history: (productDefinitionId) => `/stock/inventory-items/history/${productDefinitionId}`,
+    timeline: (itemId) => `/stock/inventory-items/${itemId}/timeline`,
+  },
+
+  lowStock: {
+    list: "/stock/low-stock",
+  },
+
+  stockReports: {
+    base: "/stock/stock-reports",
+  },
+
+  // Opening — one kind of entry, two modules (see openingKinds.js).
+  opening: {
+    STORE: "/stock/opening-stock",
+    ISSUED: "/stock/opening-issued-stock",
+  },
+
+  transferRequests: {
+    list: "/stock/transfer-requests",
+    board: "/stock/transfer-requests/board",
+    branches: "/stock/transfer-requests/branches",
+    byId: (id) => `/stock/transfer-requests/${id}`,
+    process: (id) => `/stock/transfer-requests/${id}/process`,
+    reject: (id) => `/stock/transfer-requests/${id}/reject`,
+  },
+
+  repairs: {
+    list: "/stock/repairs",
+    counts: "/stock/repairs/counts",
+    vendors: "/stock/repairs/vendors",
+    // report-faulty | send-repair | repair-result | claim | claim-outcome | mark-ok | scrap
+    step: (itemId, step) => `/stock/repairs/${itemId}/${step}`,
+  },
+
+  itemRequests: {
+    list: "/stock/item-requests",
+    statusCounts: "/stock/item-requests/status-counts",
+    typeCounts: "/stock/item-requests/type-counts",
+    byId: (id) => `/stock/item-requests/${id}`,
+    units: (id) => `/stock/item-requests/${id}/units`,
+    // issue | receive | swap | short-close | reject
+    action: (id, action) => `/stock/item-requests/${id}/${action}`,
+    closeLine: (id, lineId) => `/stock/item-requests/${id}/lines/${lineId}/close`,
+    subscribers: "/stock/item-requests/subscribers",
+    subscriber: (subscriberId) => `/stock/item-requests/subscribers/${subscriberId}`,
+  },
+
+  employeeItems: {
+    base: "/stock/employee-items",
+  },
+
+  people: {
+    base: "/stock/people",
+    search: "/stock/people/search",
+    select: "/stock/people/select",
+  },
+};

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchQuotation, reviewQuotation } from "@/modules/stock/quotations/quotationApi";
 import { ArrowLeft, Check, X, Pencil } from "lucide-react";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { formatWarrantyShort } from "@/shared/warranty/warranty";
@@ -242,22 +242,17 @@ const ReviewMode = ({ quotation, onDone }) => {
     });
     setSubmitting(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations/${quotation._id}/review`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ decisions: payload }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to submit");
+      await reviewQuotation(quotation._id, payload);
       // Stay on Quotation Approval — go back to the list so it reloads
       // (fresh list + tab counts), rather than navigating away to Tracking Orders.
-      router.push("/stock/quotations/approval");
+      router.push("/stock/approval/quotations");
     } catch (err) { setError(err.message); setPendingWarn(null); window.scrollTo({ top: 0, behavior: "smooth" }); } finally { setSubmitting(false); }
   };
 
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => router.push("/stock/quotations/approval")} className={backBtnCls}>
+        <button type="button" onClick={() => router.push("/stock/approval/quotations")} className={backBtnCls}>
           <ArrowLeft className="h-3.5 w-3.5" /> Back to list
         </button>
         <div>
@@ -492,10 +487,7 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations/${quotationId}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load quotation");
-      setQuotation(json.data);
+      setQuotation(await fetchQuotation(quotationId));
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   }, [quotationId]);
 
@@ -533,8 +525,8 @@ const QuotationApproval = ({ quotationId, mode = "review" }) => {
   const cameFromApproval =
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("from") === "approval";
   const backTo = isViewMode
-    ? (cameFromApproval ? "/stock/quotations/approval" : "/stock/quotations/list")
-    : "/stock/quotations/approval";
+    ? (cameFromApproval ? "/stock/approval/quotations" : "/stock/purchase/quotations")
+    : "/stock/approval/quotations";
 
   return (
     <div className="min-h-screen bg-slate-50/60">

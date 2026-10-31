@@ -135,7 +135,7 @@ const SubscriberItems = () => {
                           <td className="px-4 py-2.5">
                             {/* No request behind it = entered as Opening Issued Stock (OI-…). */}
                             {it.assignedTo?.requestId ? (
-                              <button type="button" onClick={() => router.push(`/stock/item-requests/${it.assignedTo.requestId}`)} className="font-mono text-indigo-600 hover:underline">
+                              <button type="button" onClick={() => router.push(`/stock/allotment/requests/${it.assignedTo.requestId}`)} className="font-mono text-indigo-600 hover:underline">
                                 {it.assignedTo?.requestNumber}
                               </button>
                             ) : (

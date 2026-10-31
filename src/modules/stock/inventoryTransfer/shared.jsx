@@ -1,4 +1,3 @@
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
 
 export const fmtDateTime = (d) =>
   d
@@ -48,44 +47,3 @@ export const ItemsCell = ({ row }) => (
   </div>
 );
 
-// Branch pickers for every transfer screen. Served by the transfer-requests
-// module rather than /branches/active, so branch staff don't need the
-// Master > Branch permission just to name a branch.
-//
-// `branches` is every active branch (a transfer's counterparty is by
-// definition another branch); `defaultBranchId` is the caller's own branch,
-// the only branch they may raise a request on behalf of.
-export async function fetchTransferBranches() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/transfer-requests/branches`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
-  return {
-    branches: json.data?.branches || [],
-    defaultBranchId: json.data?.defaultBranchId ? String(json.data.defaultBranchId) : "",
-  };
-}
-
-// For the screens that only ever need the flat list.
-export async function fetchActiveBranches() {
-  return (await fetchTransferBranches()).branches;
-}
-
-// One shared fetch for the /transfer-requests/board endpoint — each page
-// passes its own fixed `role` (or none) and the query params it wants to
-// let the user control (status/search/pagination).
-export async function fetchTransferBoard({ branchId, role, status, search, page, limit }) {
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-  if (branchId) params.set("branchId", branchId);
-  if (branchId && role) params.set("role", role);
-  if (status) params.set("status", status);
-  if (search && search.trim()) params.set("search", search.trim());
-
-  const res = await fetch(`${API_BACKEND_URL}/stock/transfer-requests/board?${params.toString()}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch transfer requests");
-  return {
-    rows: json.data?.rows || [],
-    counts: json.data?.counts || { ALL: 0, PENDING: 0, COMPLETED: 0, REJECTED: 0 },
-    total: json.pagination?.total ?? 0,
-  };
-}

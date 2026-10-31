@@ -14,6 +14,9 @@ export const ZoomProvider = ({ children }) => {
 
   useEffect(() => {
     document.documentElement.style.zoom = zoom;
+    // Viewport units are scaled by `zoom` too; the layout divides by this to
+    // keep "one screen tall" one screen tall at any zoom.
+    document.documentElement.style.setProperty("--app-zoom", zoom);
     localStorage.setItem("app-zoom", zoom);
   }, [zoom]);
 

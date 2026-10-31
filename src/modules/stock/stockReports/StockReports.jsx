@@ -2,7 +2,9 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Download } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import { SearchableSelect, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { SOURCE_LABEL, fmtDate } from "@/modules/stock/inventory/itemBadges";
 
@@ -12,13 +14,8 @@ import { SOURCE_LABEL, fmtDate } from "@/modules/stock/inventory/itemBadges";
   broken units have been waiting.
 */
 
-const BASE = `${API_BACKEND_URL}/stock/stock-reports`;
-const get = async (path, query) => {
-  const res = await fetch(`${BASE}/${path}?${new URLSearchParams(query)}`, { credentials: "include" });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || json.success === false) throw new Error(json.message || "Failed to load the report");
-  return json.data;
-};
+const BASE = API_ENDPOINTS.inventory.stockReports.base;
+const get = async (path, query) => (await api.get(`${BASE}/${path}`, { query, fallback: "Failed to load the report" })).data;
 
 const TABS = [
   { value: "position", label: "Stock Position" },
@@ -68,9 +65,7 @@ const StockReports = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=stock-reports`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("stock-reports"));
       } catch {
         setBranches([]);
       }

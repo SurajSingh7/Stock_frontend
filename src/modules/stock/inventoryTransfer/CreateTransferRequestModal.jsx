@@ -1,19 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchAllProducts as fetchProducts, createTransferRequest } from "./transferApi";
 import { Plus, Trash2 } from "lucide-react";
 import { usePermissions } from "@/context/PermissionContext";
 import { Modal, SearchableSelect, inputCls, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
 const EMPTY_LINE = { productDefinitionId: "", requestedQty: "" };
-
-async function fetchProducts() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions?limit=1000`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load products");
-  return json.data || [];
-}
 
 const CreateTransferRequestModal = ({ branches, defaultRequestingBranchId, onClose, onCreated }) => {
   // Requester identity is the signed-in user, not a remembered free-text
@@ -88,14 +81,7 @@ const CreateTransferRequestModal = ({ branches, defaultRequestingBranchId, onClo
           .filter((l) => l.productDefinitionId)
           .map((l) => ({ productDefinitionId: l.productDefinitionId, requestedQty: Number(l.requestedQty) })),
       };
-      const res = await fetch(`${API_BACKEND_URL}/stock/transfer-requests`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to create transfer request");
+      await createTransferRequest(payload);
       onCreated();
     } catch (err) {
       setError(err.message);

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { getPendingOrders } from "./quotationApi";
 import { Modal } from "@/modules/stock/shared/StockSharedUI";
 
 /* ============================================================= */
@@ -32,13 +32,8 @@ export const usePendingOrders = (categoryIds, excludeQuotationId = null) => {
     let cancelled = false;
     (async () => {
       try {
-        const qs = new URLSearchParams({ categoryIds: key });
-        if (excludeQuotationId) qs.set("excludeQuotationId", excludeQuotationId);
-        const res = await fetch(`${API_BACKEND_URL}/stock/quotations/pending-orders?${qs.toString()}`, { credentials: "include" });
-        const json = await res.json();
-        if (!cancelled && res.ok && json.success) {
-          setGroups(Object.fromEntries((json.data || []).map((g) => [String(g.categoryId), g])));
-        }
+        const list = await getPendingOrders({ categoryIds: key, excludeQuotationId });
+        if (!cancelled) setGroups(Object.fromEntries(list.map((g) => [String(g.categoryId), g])));
       } catch {
         // Non-fatal — no warning is shown if this cannot be loaded.
       }
@@ -52,11 +47,7 @@ export const usePendingOrders = (categoryIds, excludeQuotationId = null) => {
 export const fetchPendingOrders = async (categoryIds, excludeQuotationId = null) => {
   const ids = [...new Set((categoryIds || []).map(String))];
   if (!ids.length) return [];
-  const qs = new URLSearchParams({ categoryIds: ids.join(",") });
-  if (excludeQuotationId) qs.set("excludeQuotationId", excludeQuotationId);
-  const res = await fetch(`${API_BACKEND_URL}/stock/quotations/pending-orders?${qs.toString()}`, { credentials: "include" });
-  const json = await res.json();
-  return res.ok && json.success ? json.data || [] : [];
+  return getPendingOrders({ categoryIds: ids.join(","), excludeQuotationId }).catch(() => []);
 };
 
 const LineRow = ({ l }) => (

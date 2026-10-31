@@ -9,7 +9,8 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
 import WarrantyInput from "@/shared/warranty/WarrantyInput";
@@ -20,6 +21,9 @@ import {
 /* ================================================================== */
 /* Constants                                                           */
 /* ================================================================== */
+
+const M = API_ENDPOINTS.master;
+const PD = M.productDefinitions;
 
 // The backend serves uploaded files from /uploads/... (static, NOT under
 // /api/v1) — see server.js. API_BACKEND_URL already ends in /api/v1, so strip
@@ -141,19 +145,14 @@ const thRight = `${th} text-right`;
 // AND by the lockCategory prop flow, so a locked category can show its real
 // name/path instead of just holding onto the raw id.
 async function apiGetLeafCategoryById(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/categories/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load category");
-  return json.data;
+  return (await api.get(M.categories.byId(id), { fallback: "Failed to load category" })).data;
 }
 
 // GST slabs are their own master now (Master > GST Rates), not a constant
 // hardcoded in the backend. /active is authenticate-only, so filling this
 // dropdown never requires the GST Rates management permission.
 async function apiFetchGstRates() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/gst-rates/active`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load GST rates");
+  const json = await api.get(M.gstRates.active, { fallback: "Failed to load GST rates" });
   // Flattened to the {value,label} shape the <select> below already speaks.
   // `value` is the NUMBER — it is what gets persisted, and what quotations and
   // purchase orders have always stored.
@@ -161,9 +160,7 @@ async function apiFetchGstRates() {
 }
 
 async function apiFetchFieldDefinitions() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/field-definitions?limit=200`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load field definitions");
+  const json = await api.get(M.fieldDefinitions.list, { query: { limit: 200 }, fallback: "Failed to load field definitions" });
   return json.data?.data || json.data || [];
 }
 
@@ -172,10 +169,7 @@ async function apiFetchFieldDefinitions() {
 // unfiltered /active list (not branch-scoped): thresholds are master data
 // covering the whole network, not just the editor's own branch.
 async function apiFetchActiveBranches() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
-  return json.data || [];
+  return (await api.get(M.branches.active, { fallback: "Failed to load branches" })).data || [];
 }
 
 // Create/update send multipart/form-data so the optional file travels with the
@@ -190,28 +184,17 @@ function buildProductDefinitionFormData(payload, uploadFile) {
 }
 
 async function apiCreateProductDefinition(payload, uploadFile) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions`, {
-    method: "POST", credentials: "include", body: buildProductDefinitionFormData(payload, uploadFile),
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to create product definition");
-  return json.data;
+  const form = buildProductDefinitionFormData(payload, uploadFile);
+  return (await api.post(PD.list, form, { fallback: "Failed to create product definition" })).data;
 }
 
 async function apiUpdateProductDefinition(id, payload, uploadFile) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, {
-    method: "PUT", credentials: "include", body: buildProductDefinitionFormData(payload, uploadFile),
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to update product definition");
-  return json.data;
+  const form = buildProductDefinitionFormData(payload, uploadFile);
+  return (await api.put(PD.byId(id), form, { fallback: "Failed to update product definition" })).data;
 }
 
 async function apiGetProductDefinitionById(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product definition");
-  return json.data;
+  return (await api.get(PD.byId(id), { fallback: "Failed to load product definition" })).data;
 }
 
 /*
@@ -222,15 +205,10 @@ async function apiGetProductDefinitionById(id) {
   breaks limit/total (a page of 10 would render 3 while the count still says 10).
 */
 async function apiListProductDefinitions({ page, limit, search, categoryId, productId, trackingMethod, showInactive }) {
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-  if (search) params.set("search", search);
-  if (categoryId) params.set("categoryId", categoryId);
-  if (productId) params.set("productId", productId);
-  if (trackingMethod) params.set("trackingMethod", trackingMethod);
-  if (showInactive) params.set("showInactive", "true");
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions?${params.toString()}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product definitions");
+  const json = await api.get(PD.list, {
+    query: { page, limit, search, categoryId, productId, trackingMethod, showInactive: showInactive ? "true" : undefined },
+    fallback: "Failed to load product definitions",
+  });
   const items = Array.isArray(json.data) ? json.data : json.data?.data || [];
   const total = json.pagination?.total ?? json.data?.pagination?.total ?? items.length;
   return { items, total };
@@ -238,11 +216,12 @@ async function apiListProductDefinitions({ page, limit, search, categoryId, prod
 
 // Products of one category — powers the dependent Product filter dropdown.
 async function apiProductsByCategory(categoryId) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=500`, {
-    credentials: "include",
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) return [];
+  let json;
+  try {
+    json = await api.get(PD.list, { query: { categoryId, limit: 500 } });
+  } catch {
+    return [];
+  }
   return Array.isArray(json.data) ? json.data : json.data?.data || [];
 }
 
@@ -260,17 +239,11 @@ async function apiNameExistsInCategory(categoryId, name, excludeId) {
 }
 
 async function apiSoftDeleteProductDefinition(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { method: "DELETE", credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to delete product definition");
-  return json.data;
+  return (await api.delete(PD.byId(id), { fallback: "Failed to delete product definition" })).data;
 }
 
 async function apiRestoreProductDefinition(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}/restore`, { method: "PATCH", credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to restore product definition");
-  return json.data;
+  return (await api.patch(PD.restore(id), undefined, { fallback: "Failed to restore product definition" })).data;
 }
 
 /* ================================================================== */

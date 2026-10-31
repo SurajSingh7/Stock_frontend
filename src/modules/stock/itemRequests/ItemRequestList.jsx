@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Inbox, RotateCcw } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { SearchableSelect, inputCls } from "@/modules/stock/shared/StockSharedUI";
 import { fetchRequests, fetchStatusCounts, fetchTypeCounts } from "./itemRequestApi";
@@ -54,9 +54,7 @@ const ItemRequestList = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=item-requests`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("item-requests"));
       } catch {
         setBranches([]);
       }
@@ -95,7 +93,7 @@ const ItemRequestList = () => {
     setType(t);
     setStatus("PENDING");
     setPage(1);
-    router.replace(`/stock/item-requests?type=${t}`, { scroll: false });
+    router.replace(`/stock/allotment/requests?type=${t}`, { scroll: false });
   };
   const tabMeta = TYPE_TABS.find((t) => t.key === type) || TYPE_TABS[0];
   const allCount = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -191,7 +189,7 @@ const ItemRequestList = () => {
               </tr>
             ) : (
               rows.map((r) => (
-                <tr key={r._id} onClick={() => router.push(`/stock/item-requests/${r._id}`)} className="cursor-pointer transition hover:bg-indigo-50/40">
+                <tr key={r._id} onClick={() => router.push(`/stock/allotment/requests/${r._id}`)} className="cursor-pointer transition hover:bg-indigo-50/40">
                   <td className="px-4 py-3 font-mono font-semibold text-indigo-700">
                     {r.requestNumber}
                     {r.revision > 1 && <span className="ml-1 text-[10px] font-semibold text-slate-400">rev {r.revision}</span>}

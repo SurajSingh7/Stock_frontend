@@ -15,7 +15,7 @@ export function middleware(req) {
     // navbar does and forwards to the first page this user can open. A fixed
     // destination here would drop anyone without that module onto a screen
     // they are not allowed to see.
-    return NextResponse.redirect(new URL("/home", req.url));
+    return NextResponse.redirect(new URL("/stock/home", req.url));
   }
 
   // Protect all private routes

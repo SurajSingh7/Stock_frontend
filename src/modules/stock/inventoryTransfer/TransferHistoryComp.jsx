@@ -7,8 +7,9 @@ import { SearchableSelect, inputCls } from "@/modules/stock/shared/StockSharedUI
 import ViewTransferRequestModal from "./ViewTransferRequestModal";
 import {
   STATUS_TAB_STYLES, th, thRight,
-  StatusBadge, BranchPair, ItemsCell, fmtDateTime, fetchActiveBranches, fetchTransferBoard,
+  StatusBadge, BranchPair, ItemsCell, fmtDateTime,
 } from "./shared";
+import { fetchActiveBranches, fetchTransferBoard } from "./transferApi";
 
 /*
   "Transfer History" — the closed-out record of every request: completed

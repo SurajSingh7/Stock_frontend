@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
+import { fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { PackageX, TriangleAlert, RotateCcw } from "lucide-react";
 import { SearchableSelect, inputCls } from "@/modules/stock/shared/StockSharedUI";
@@ -54,9 +56,7 @@ const LowStockComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/scoped-branches?module=inventory-items`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setBranches(j.data?.branches || []);
+        setBranches(await fetchScopedBranches("inventory-items"));
       } catch {
         // Non-fatal — the branch filter just stays empty.
       }
@@ -66,13 +66,10 @@ const LowStockComp = () => {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-      if (debounced.trim()) qs.set("search", debounced.trim());
-      if (branchId) qs.set("branchId", branchId);
-      if (level) qs.set("level", level);
-      const res = await fetch(`${API_BACKEND_URL}/stock/low-stock?${qs.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
+      const json = await api.get(API_ENDPOINTS.inventory.lowStock.list, {
+        query: { page, limit, search: debounced.trim(), branchId, level },
+        fallback: "Failed to load",
+      });
       setRows(json.data?.rows || []);
       setCounts(json.data?.counts || {});
       setTotal(json.pagination?.total || 0);

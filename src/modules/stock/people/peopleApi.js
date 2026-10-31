@@ -1,4 +1,5 @@
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 
 /*
   People Directory — one search over employees and subscribers (the people
@@ -6,33 +7,21 @@ import { API_BACKEND_URL } from "@/config/getEnvVariables";
   ("opening-issued-stock" | "employee-items"); the server checks the caller's
   permission on it.
 */
-const BASE = `${API_BACKEND_URL}/stock/people`;
+const EP = API_ENDPOINTS.inventory.people;
 
-const json = async (res, fallback) => {
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.success === false) throw new Error(body.message || fallback);
-  return body.data;
-};
-
-export const searchPeople = async (q, { kind, module }) => {
-  const params = new URLSearchParams({ q, module });
-  if (kind) params.set("kind", kind);
-  return json(await fetch(`${BASE}/search?${params}`, { credentials: "include" }), "Failed to search people");
-};
-
-const post = async (url, body, fallback) =>
-  json(
-    await fetch(url, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
-    fallback
-  );
+export const searchPeople = async (q, { kind, module }) =>
+  (await api.get(EP.search, { query: { q, module, kind }, fallback: "Failed to search people" })).data;
 
 // A search result → the stored directory person (fetched again from the
 // people API on the server when it came from there).
-export const selectPerson = (result, module) =>
-  post(
-    `${BASE}/select?${new URLSearchParams({ module })}`,
-    result.source === "EXTERNAL" && result.externalId ? { kind: result.kind, externalId: result.externalId } : { personId: result.personId },
-    "Failed to choose this person"
-  );
+export const selectPerson = async (result, module) =>
+  (
+    await api.post(
+      EP.select,
+      result.source === "EXTERNAL" && result.externalId ? { kind: result.kind, externalId: result.externalId } : { personId: result.personId },
+      { query: { module }, fallback: "Failed to choose this person" }
+    )
+  ).data;
 
-export const createPerson = (body, module) => post(`${BASE}?${new URLSearchParams({ module })}`, body, "Failed to add the person");
+export const createPerson = async (body, module) =>
+  (await api.post(EP.base, body, { query: { module }, fallback: "Failed to add the person" })).data;

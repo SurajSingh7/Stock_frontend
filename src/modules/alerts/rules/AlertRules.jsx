@@ -3,7 +3,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { Plus, Pencil, Trash2, X, ChevronDown, Clock, ArrowDown, Bell, Hand, Info } from "lucide-react";
-import { alertApi, STOCK_API } from "../shared/alertApi";
+import { alertApi } from "../shared/alertApi";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import { useAlertEvents } from "../templates/AlertTemplates";
 import {
   AlertsShell, Modal, Field, ErrorBox, Empty, ConfirmModal, ChannelBadge, Toggle, inputCls, btnPrimary, btnGhost, cardCls, useAlertActions,
@@ -28,8 +30,8 @@ const useLookups = () => {
       safe(alertApi("/contacts", { query: { limit: 100 } })),
       safe(alertApi("/groups", { query: { limit: 100 } })),
       safe(alertApi("/templates", { query: { limit: 100 } })),
-      safe(alertApi(`${STOCK_API}/branches`, { query: { limit: 100 } })),
-      safe(alertApi(`${STOCK_API}/vendors`, { query: { limit: 100 } })),
+      safe(api.get(API_ENDPOINTS.master.branches.list, { query: { limit: 100 } })),
+      safe(api.get(API_ENDPOINTS.purchase.vendors.list, { query: { limit: 100 } })),
     ]).then(([contacts, groups, templates, branches, vendors]) => setState({ contacts, groups, templates, branches, vendors }));
   }, []);
   return state;

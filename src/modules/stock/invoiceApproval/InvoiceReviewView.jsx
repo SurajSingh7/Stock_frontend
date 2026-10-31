@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchInvoice as fetchInvoiceDetail, fetchProductDefinition, decideInvoice } from "@/modules/stock/tracking-orders/trackingApi";
+import { invoiceFileUrl } from "@/modules/stock/shared/InvoiceInfoPopups";
 import { ArrowLeft, Download, CheckCircle2, XCircle } from "lucide-react";
 import { inputCls, money, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 
@@ -41,19 +42,6 @@ const unitPriceBreakdown = (unitPrice, gstRate, taxType) => {
   return { basic, cgst, sgst, igst, total: round2(basic + cgst + sgst + igst) };
 };
 
-async function fetchInvoiceDetail(id, entryId) {
-  const qs = entryId ? `?entryId=${entryId}` : "";
-  const res = await fetch(`${API_BACKEND_URL}/stock/invoices/${id}${qs}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load invoice");
-  return json.data;
-}
-async function fetchProductDefinition(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product");
-  return json.data;
-}
 
 /*
   The numbers the approver decides on, per product: category, PO qty, what
@@ -524,10 +512,6 @@ const LineCard = ({ line, taxType, isEntry }) => {
 
 // entryId: reviewing one entry of a partial-submit invoice.
 const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
-  const decisionUrl = (action) =>
-    entryId
-      ? `${API_BACKEND_URL}/stock/invoices/${invoiceId}/entries/${entryId}/${action}`
-      : `${API_BACKEND_URL}/stock/invoices/${invoiceId}/${action}`;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [invoice, setInvoice] = useState(null);
@@ -573,9 +557,7 @@ const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
   const approve = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(decisionUrl("approve"), { method: "PATCH", credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to approve");
+      await decideInvoice(invoiceId, entryId, "approve");
       onDone();
     } catch (err) {
       setError(err.message);
@@ -588,12 +570,7 @@ const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
     if (!reason.trim()) { setError("A reason is required to reject"); return; }
     setBusy(true); setError(null);
     try {
-      const res = await fetch(decisionUrl("reject"), {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ reason: reason.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to reject");
+      await decideInvoice(invoiceId, entryId, "reject", { reason: reason.trim() });
       onDone();
     } catch (err) {
       setError(err.message);
@@ -619,7 +596,7 @@ const InvoiceReviewView = ({ invoiceId, entryId, onBack, onDone }) => {
   // Billing + Misc is what the vendor's invoice adds up to.
   const invoiceTotal = invoice?.invoiceTotal ?? invoice?.grandTotal ?? 0;
   const amountDiff = round2((invoice?.invoiceAmount || 0) - invoiceTotal);
-  const fileUrl = invoice?.invoiceFile ? `${API_BACKEND_URL.replace(/\/api\/v1$/, "")}${invoice.invoiceFile}` : "";
+  const fileUrl = invoiceFileUrl(invoice?.invoiceFile);
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-6 pb-12">

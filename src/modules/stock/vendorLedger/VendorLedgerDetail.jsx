@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import { ArrowLeft, ChevronLeft, ChevronRight, RotateCcw } from "lucide-react";
 import { Modal, money } from "@/modules/stock/shared/StockSharedUI";
 import { paymentTermLabel } from "@/modules/stock/shared/paymentTerms";
@@ -74,12 +75,7 @@ const MonthDetailPopup = ({ vendor, year, month, onClose }) => {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/vendor-ledger/${vendor._id}/month?year=${year}&month=${month}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load");
+      const json = await api.get(API_ENDPOINTS.purchase.vendorLedger.month(vendor._id), { query: { year, month }, fallback: "Failed to load" });
       setData(json.data);
     } catch (e) {
       setError(e.message);
@@ -206,12 +202,7 @@ const VendorLedgerDetail = ({ vendorId, vendorName, initialYear, onBack }) => {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/vendor-ledger/${vendorId}?year=${year}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load ledger");
+      const json = await api.get(API_ENDPOINTS.purchase.vendorLedger.byVendor(vendorId), { query: { year }, fallback: "Failed to load ledger" });
       setData(json.data);
     } catch (e) {
       setError(e.message);

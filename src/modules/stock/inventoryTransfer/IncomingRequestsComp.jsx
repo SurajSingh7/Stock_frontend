@@ -9,8 +9,10 @@ import ReasonModal from "./ReasonModal";
 import ViewTransferRequestModal from "./ViewTransferRequestModal";
 import {
   STATUS_TAB_STYLES, th, thRight,
-  StatusBadge, BranchPair, ItemsCell, fmtDateTime, fetchActiveBranches, fetchTransferBoard,
+  StatusBadge, BranchPair, ItemsCell, fmtDateTime,
 } from "./shared";
+import { fetchActiveBranches, fetchTransferBoard } from "./transferApi";
+import { API_ENDPOINTS } from "@/constants/api";
 
 /*
   "Incoming Requests" — everything OTHER branches have asked from THIS one
@@ -212,7 +214,7 @@ const IncomingRequestsComp = () => {
           title={`Reject ${rejectingRow.requestNumber}`}
           description="This will decline the entire request. Nothing will be transferred."
           confirmLabel="Reject request"
-          path={`transfer-requests/${rejectingRow._id}/reject`}
+          path={API_ENDPOINTS.inventory.transferRequests.reject(rejectingRow._id)}
           onClose={() => setRejectingRow(null)}
           onDone={afterAction}
         />

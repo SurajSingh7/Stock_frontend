@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchVendorsForCategory, createQuotation } from "@/modules/stock/quotations/quotationApi";
+import { fetchLeafCategories } from "@/modules/stock/shared/lookupsApi";
 import { ArrowLeft, Plus, Trash2, Star } from "lucide-react";
 import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import WarrantyInput from "@/shared/warranty/WarrantyInput";
@@ -225,9 +226,7 @@ const QuotationForm = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
       } catch { /* ignore */ }
     })();
   }, []);
@@ -241,11 +240,9 @@ const QuotationForm = () => {
     if (blocks.some((b) => b.categoryId === cat._id)) { setPickCatId(""); return; }
     setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations/vendors-for-category/${cat._id}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load vendors");
+      const data = await fetchVendorsForCategory(cat._id);
       // Newest category on top — the one just added is the one being priced.
-      setBlocks((prev) => [toBlock(json.data, { autoSelect: autoSelectAll, qty: globalQty }), ...prev]);
+      setBlocks((prev) => [toBlock(data, { autoSelect: autoSelectAll, qty: globalQty }), ...prev]);
       setPickCatId("");
     } catch (err) { setError(err.message); }
   };
@@ -330,13 +327,8 @@ const QuotationForm = () => {
     }
     setSaving(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/quotations`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify(buildPayload()),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save quotation");
-      router.push("/stock/quotations/list");
+      await createQuotation(buildPayload());
+      router.push("/stock/purchase/quotations");
     } catch (err) { setError(err.message); window.scrollTo({ top: 0, behavior: "smooth" }); } finally { setSaving(false); }
   };
 
@@ -347,7 +339,7 @@ const QuotationForm = () => {
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <button
-              type="button" onClick={() => router.push("/stock/quotations/list")}
+              type="button" onClick={() => router.push("/stock/purchase/quotations")}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200"
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Back

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Send, XCircle, CheckCircle2, History } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchDebitNoteQueue, actOnDebitNote } from "@/modules/stock/invoiceList/invoiceListApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
 import { dnStatusMeta } from "@/modules/stock/shared/debitNoteStatus";
@@ -18,20 +18,18 @@ import { DnChip, DebitNoteHistoryPopup } from "./DebitNoteParts";
 
 const MODES = {
   review: {
-    list: "payments-debit-notes",
+    queue: "payments",
     historyBase: "payments",
     statuses: ["REVIEW_PENDING", "REVIEW_REJECTED", "APPROVAL_PENDING", "APPROVED", "APPROVAL_REJECTED"],
     actionable: "REVIEW_PENDING",
-    act: (id) => `payments/debit-notes/${id}/review`,
     yes: { label: "Send for approval", icon: Send, body: { decision: "SEND" }, tone: "bg-indigo-600 hover:bg-indigo-500" },
     no: { label: "Reject", body: { decision: "REJECT" }, title: "Reject in review", hint: "It goes back to whoever raised it, who can edit and resubmit it, or withdraw it." },
   },
   approval: {
-    list: "payment-approval-debit-notes",
+    queue: "paymentApproval",
     historyBase: "payment-approval",
     statuses: ["APPROVAL_PENDING", "APPROVED", "APPROVAL_REJECTED"],
     actionable: "APPROVAL_PENDING",
-    act: (id) => `payment-approval/debit-notes/${id}/decide`,
     yes: { label: "Approve", icon: CheckCircle2, body: { decision: "APPROVED" }, tone: "bg-emerald-600 hover:bg-emerald-500" },
     no: { label: "Reject", body: { decision: "REJECTED" }, title: "Reject debit note", hint: "This is final — nothing more happens to it, and its held units go back to stock. A new debit note can be raised if one is still needed." },
   },
@@ -52,12 +50,7 @@ const RejectPopup = ({ dn, cfg, onClose, onDone }) => {
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/${cfg.act(dn._id)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ ...cfg.no.body, reason: reason.trim() }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+      await actOnDebitNote(cfg.queue, dn._id, { ...cfg.no.body, reason: reason.trim() });
       onDone();
     } catch (e) {
       setError(e.message);
@@ -109,9 +102,7 @@ const DebitNoteQueue = ({ mode = "review", canAct = false, onCounts }) => {
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(limit), status });
       if (debounced.trim()) params.set("search", debounced.trim());
-      const res = await fetch(`${API_BACKEND_URL}/stock/${cfg.list}?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load debit notes");
+      const json = await fetchDebitNoteQueue(cfg.queue, params);
       setRows(json.data?.rows || []);
       setCounts(json.data?.counts || {});
       setTotal(json.pagination?.total || 0);
@@ -122,19 +113,14 @@ const DebitNoteQueue = ({ mode = "review", canAct = false, onCounts }) => {
     } finally {
       setLoading(false);
     }
-  }, [cfg.list, page, limit, status, debounced, onCounts]);
+  }, [cfg.queue, page, limit, status, debounced, onCounts]);
 
   useEffect(() => { load(); }, [load]);
 
   const approve = async (dn) => {
     setBusyId(dn._id); setError(null);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/${cfg.act(dn._id)}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify(cfg.yes.body),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed");
+      await actOnDebitNote(cfg.queue, dn._id, cfg.yes.body);
       load();
     } catch (e) {
       setError(e.message);
