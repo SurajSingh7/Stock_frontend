@@ -5,15 +5,14 @@ import Pagination from '@/shared/ui/pagination/Pagination';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
+import { Editor } from '@tinymce/tinymce-react';
+import { API_TINY_MCE } from '@/config/getEnvVariables';
+import { fetchVendors } from '@/modules/stock/shared/lookupsApi';
+import { ArrowLeft, Star, Users, CalendarDays, FileText } from 'lucide-react';
 
 /* ======================== CONSTANTS ======================== */
 
 const EP = API_ENDPOINTS.master.termsConditions;
-
-const STATUS_OPTIONS = [
-  { value: 'ACTIVE', label: 'Active' },
-  { value: 'INACTIVE', label: 'Inactive' },
-];
 
 // dropdown-only status filter for the list, no "All" option — same
 // convention as the Field Definitions master.
@@ -29,7 +28,6 @@ const EMPTY_FORM = {
   isDefault: false,
   applicableVendors: [], // [{ id, name }]
   termsContent: '',
-  status: 'ACTIVE',
 };
 
 /* ---------- Design tokens — SAME as FieldDefinition / VendorsComp ---------- */
@@ -52,9 +50,10 @@ const sanitizeForPreview = (html) =>
 
 /* ======================== API FUNCTIONS ======================== */
 
-const getTermsConditions = ({ page, limit, search, showInactive }) =>
+// status ACTIVE | INACTIVE and vendorId are filtered on the server, so paging stays right.
+const getTermsConditions = ({ page, limit, search, status, vendorId }) =>
   api.get(EP.list, {
-    query: { page, limit, search, showInactive: showInactive ? 'true' : undefined },
+    query: { page, limit, search, status, vendorId },
     fallback: 'Failed to fetch Terms & Conditions',
   });
 
@@ -84,9 +83,9 @@ const mapTermResponse = (item) => ({
     typeof v === 'string' ? { id: v, name: v } : { id: v._id, name: v.name }
   ),
   termsContent: item.termsContent || '',
-  status: item.status || 'ACTIVE',
   isActive: item.isActive !== false,
   createdAt: item.createdAt,
+  updatedAt: item.updatedAt,
 });
 
 const formatDate = (iso) => {
@@ -205,17 +204,16 @@ const Icon = {
 
 /* ======================== UI HELPER COMPONENTS ======================== */
 
-const StatusBadge = ({ status }) => {
-  const isActive = status === 'ACTIVE';
+const StatusBadge = ({ isActive }) => {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
         isActive
           ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-          : 'bg-slate-100 text-slate-500 ring-slate-200'
+          : 'bg-rose-50 text-rose-700 ring-rose-200'
       }`}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+      <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
       {isActive ? 'Active' : 'Inactive'}
     </span>
   );
@@ -233,6 +231,7 @@ const DefaultBadge = ({ value }) =>
   );
 
 const ApplicableVendorsCell = ({ item }) => {
+  const [open, setOpen] = useState(false);
   if (item.isDefault) {
     return (
       <span className="inline-flex items-center gap-1 text-sm font-medium text-amber-700">
@@ -245,25 +244,68 @@ const ApplicableVendorsCell = ({ item }) => {
   const shown = names.slice(0, 2).join(', ');
   const extra = names.length - 2;
   return (
-    <span className="text-sm text-slate-700">
+    <span className="whitespace-nowrap text-sm text-slate-700">
       {shown}
-      {extra > 0 && <span className="ml-1 font-medium text-indigo-600">+{extra} more</span>}
+      {extra > 0 && (
+        <button
+          type="button" onClick={() => setOpen(true)}
+          className="ml-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+        >
+          +{extra} more
+        </button>
+      )}
+      {open && (
+        <Modal title="Applicable vendors" description={item.termName} onClose={() => setOpen(false)} maxWidth="max-w-md">
+          <div className="flex flex-wrap gap-1.5">
+            {names.map((n, i) => (
+              <span key={i} className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-100">
+                {n}
+              </span>
+            ))}
+          </div>
+        </Modal>
+      )}
     </span>
+  );
+};
+
+// One short line in the table; over 30 characters, "… more" opens the whole text.
+const LONG_TEXT = 30;
+const LongText = ({ text, label, title }) => {
+  const [open, setOpen] = useState(false);
+  if (!text) return <span className="text-slate-300">—</span>;
+  if (text.length <= LONG_TEXT) return <span>{text}</span>;
+  return (
+    <>
+      <span>{text.slice(0, LONG_TEXT).trimEnd()}…</span>
+      <button
+        type="button" onClick={() => setOpen(true)}
+        className="ml-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+      >
+        more
+      </button>
+      {open && (
+        <Modal title={label} description={title} onClose={() => setOpen(false)} maxWidth="max-w-md">
+          <p className="whitespace-pre-line break-words text-sm leading-relaxed text-slate-700 [overflow-wrap:anywhere]">{text}</p>
+        </Modal>
+      )}
+    </>
   );
 };
 
 /* IconBtn — SAME tone pattern as FieldDefinition/VendorsComp */
 const IconBtn = ({ onClick, title, tone = 'slate', children }) => {
+  // Coloured at rest, so each action is told apart at a glance; deeper on hover.
   const toneCls =
-    tone === 'indigo' ? "text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50"
-    : tone === 'red' ? "text-rose-600 hover:border-rose-200 hover:bg-rose-50"
-    : tone === 'emerald' ? "text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50"
-    : tone === 'orange' ? "text-orange-500 hover:border-orange-200 hover:bg-orange-50"
-    : "text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700";
+    tone === 'indigo' ? "bg-indigo-50 text-indigo-600 ring-indigo-100 hover:bg-indigo-100 hover:text-indigo-700"
+    : tone === 'red' ? "bg-rose-50 text-rose-600 ring-rose-100 hover:bg-rose-100 hover:text-rose-700"
+    : tone === 'emerald' ? "bg-emerald-50 text-emerald-600 ring-emerald-100 hover:bg-emerald-100 hover:text-emerald-700"
+    : tone === 'orange' ? "bg-amber-50 text-amber-600 ring-amber-100 hover:bg-amber-100 hover:text-amber-700"
+    : "bg-slate-50 text-slate-500 ring-slate-200 hover:bg-slate-100 hover:text-slate-700";
   return (
     <button
       type="button" onClick={onClick} title={title} aria-label={title}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 ${toneCls}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-inset transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 ${toneCls}`}
     >
       {children}
     </button>
@@ -326,7 +368,7 @@ const ErrorState = ({ colSpan, message, onRetry }) => (
 
 /* ======================== HEADER (title + top-right search & Add New) ======================== */
 
-const Header = ({ totalItems, search, onSearchChange, onCreateClick }) => (
+const Header = ({ totalItems, onCreateClick }) => (
   <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
     <div>
       <h1 className="text-xl font-semibold tracking-tight text-slate-900">Terms & Conditions Master</h1>
@@ -336,18 +378,6 @@ const Header = ({ totalItems, search, onSearchChange, onCreateClick }) => (
       </p>
     </div>
     <div className="flex items-center gap-2.5">
-      <div className="relative">
-        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
-          {Icon.search}
-        </span>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search by term name"
-          className={`${inputCls} w-64 pl-9`}
-        />
-      </div>
       <button
         onClick={onCreateClick}
         className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
@@ -360,21 +390,62 @@ const Header = ({ totalItems, search, onSearchChange, onCreateClick }) => (
 
 /* ======================== FILTER BAR ======================== */
 
-const FilterBar = ({ statusFilter, onStatusFilterChange }) => (
-  <div className="mb-6 flex justify-end">
-    <div className="relative">
+// The status dropdown wears the colour of its badge in the table.
+const STATUS_TONE = {
+  active: { box: 'border-emerald-200 bg-emerald-50 text-emerald-700 focus:border-emerald-400 focus:ring-emerald-100', dot: 'bg-emerald-500' },
+  inactive: { box: 'border-rose-200 bg-rose-50 text-rose-700 focus:border-rose-400 focus:ring-rose-100', dot: 'bg-rose-500' },
+};
+
+const FilterBar = ({ search, onSearchChange, vendors, vendorFilter, onVendorFilterChange, statusFilter, onStatusFilterChange }) => (
+  <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="relative w-full sm:max-w-md">
+      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+        {Icon.search}
+      </span>
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Search by term name"
+        className={`${inputCls} pl-9`}
+      />
+    </div>
+    <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
+    {/* The terms that apply to one vendor — its own, plus the default. */}
+    <div className="relative w-full sm:w-64">
       <select
-        value={statusFilter}
-        onChange={(e) => onStatusFilterChange(e.target.value)}
-        className={`${inputCls} w-40 appearance-none pr-8`}
+        value={vendorFilter}
+        onChange={(e) => onVendorFilterChange(e.target.value)}
+        aria-label="Vendor"
+        className={`${inputCls} appearance-none pr-8`}
       >
-        {STATUS_FILTERS.map((s) => (
-          <option key={s.value} value={s.value}>{s.label}</option>
+        <option value="">All vendors</option>
+        {vendors.map((v) => (
+          <option key={v._id} value={v._id}>{v.name}</option>
         ))}
       </select>
       <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
         {Icon.chevronDown}
       </span>
+    </div>
+    <div className="relative w-full shrink-0 sm:w-44">
+      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+        <span className={`h-2 w-2 rounded-full ${STATUS_TONE[statusFilter]?.dot || 'bg-slate-400'}`} />
+      </span>
+      <select
+        value={statusFilter}
+        onChange={(e) => onStatusFilterChange(e.target.value)}
+        aria-label="Status"
+        className={`w-full appearance-none rounded-lg border py-2 pl-8 pr-8 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 ${STATUS_TONE[statusFilter]?.box || ''}`}
+      >
+        {STATUS_FILTERS.map((s) => (
+          <option key={s.value} value={s.value} className="bg-white font-medium text-slate-800">{s.label}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center opacity-70">
+        {Icon.chevronDown}
+      </span>
+    </div>
     </div>
   </div>
 );
@@ -386,13 +457,15 @@ const TERM_TABLE_COLUMNS = ['#', 'Term Name', 'Default', 'Applicable Vendors', '
 const TableRow = ({ item, index, onView, onEdit, onDelete, onRestore }) => (
   <tr className="transition hover:bg-slate-50/60">
     <td className="px-4 py-3.5 text-sm text-slate-500">{index}</td>
-    <td className="px-4 py-3.5 text-sm font-medium text-slate-900">{item.termName}</td>
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-slate-900">
+      <LongText text={item.termName} label="Term name" title={item.isDefault ? 'Default term' : undefined} />
+    </td>
     <td className="px-4 py-3.5"><DefaultBadge value={item.isDefault} /></td>
     <td className="px-4 py-3.5"><ApplicableVendorsCell item={item} /></td>
-    <td className="px-4 py-3.5"><StatusBadge status={item.status} /></td>
-    <td className="px-4 py-3.5 text-sm text-slate-500">{formatDate(item.createdAt)}</td>
-    <td className="px-4 py-3.5">
-      <div className="flex items-center justify-end gap-1">
+    <td className="px-4 py-3.5"><StatusBadge isActive={item.isActive} /></td>
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-500">{formatDate(item.createdAt)}</td>
+    <td className="whitespace-nowrap px-4 py-3.5">
+      <div className="flex items-center justify-end gap-1.5">
         <IconBtn onClick={() => onView(item)} title="View" tone="indigo">{Icon.eye}</IconBtn>
         <IconBtn onClick={() => onEdit(item)} title="Edit" tone="orange">{Icon.edit}</IconBtn>
         {item.isActive ? (
@@ -405,8 +478,9 @@ const TableRow = ({ item, index, onView, onEdit, onDelete, onRestore }) => (
   </tr>
 );
 
-const Table = ({ items, startIndex, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore }) => (
-  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+const Table = ({ items, startIndex, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore, footer }) => (
+  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-x-auto">
     <table className="min-w-full divide-y divide-slate-200">
       <thead className="bg-slate-50/60">
         <tr>
@@ -437,6 +511,8 @@ const Table = ({ items, startIndex, loading, error, onRetry, onCreateClick, onVi
         )}
       </tbody>
     </table>
+    </div>
+    {footer && <div className="border-t border-slate-100 px-4 py-3">{footer}</div>}
   </div>
 );
 
@@ -485,15 +561,19 @@ const Modal = ({ title, description, onClose, children, maxWidth = 'max-w-lg' })
 
 /* ======================== CONFIRM MODAL ======================== */
 
-const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 'Delete', onCancel, onConfirm, loading }) => {
+const ConfirmModal = ({
+  open, title = 'Confirm action', message, confirmLabel = 'Delete', loadingLabel = 'Deleting…',
+  tone = 'danger', onCancel, onConfirm, loading,
+}) => {
   if (!open) return null;
+  const success = tone === 'success';
   return (
     <Modal title={title} onClose={onCancel} maxWidth="max-w-sm">
-      <div className="flex flex-col items-center gap-3 py-1 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-500">
-          {Icon.alert}
+      <div className="flex flex-col items-center gap-4 py-2 text-center">
+        <div className={`flex h-12 w-12 items-center justify-center rounded-full ring-8 ${success ? 'bg-emerald-50 text-emerald-600 ring-emerald-50/50' : 'bg-rose-50 text-rose-500 ring-rose-50/50'}`}>
+          {success ? Icon.restore : Icon.alert}
         </div>
-        <p className="text-sm text-slate-600">{message}</p>
+        <p className="text-sm leading-relaxed text-slate-600">{message}</p>
       </div>
       <div className="mt-5 flex justify-center gap-2.5">
         <button
@@ -505,9 +585,9 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
         <button
           onClick={onConfirm}
           disabled={loading}
-          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${success ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-rose-600 hover:bg-rose-500'}`}
         >
-          {loading ? 'Deleting…' : confirmLabel}
+          {loading ? loadingLabel : confirmLabel}
         </button>
       </div>
     </Modal>
@@ -519,12 +599,15 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
 // `required` renders the same rose asterisk the product-definition form uses,
 // so a starred label means exactly one thing across every master screen: the
 // submit is blocked until it is filled in.
-const Field = ({ label, hint, error, required, children }) => (
+const Field = ({ label, hint, error, required, action, children }) => (
   <div>
-    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-      {label}
-      {required && <span className="ml-0.5 text-rose-500">*</span>}
-    </label>
+    <div className="mb-1.5 flex items-center gap-2">
+      <label className="block text-sm font-medium text-slate-700">
+        {label}
+        {required && <span className="ml-0.5 text-rose-500">*</span>}
+      </label>
+      {action}
+    </div>
     {children}
     {hint && !error && <p className="mt-1.5 text-xs text-slate-400">{hint}</p>}
     {error && <p className="mt-1.5 text-xs font-medium text-rose-600">{error}</p>}
@@ -547,86 +630,30 @@ const Switch = ({ checked, onChange, disabled, labels = ['No', 'Yes'] }) => (
   </div>
 );
 
-const StatusToggle = ({ value, onChange, disabled }) => (
-  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
-    {STATUS_OPTIONS.map((s) => (
-      <button
-        key={s.value} type="button" disabled={disabled}
-        onClick={() => onChange(s.value)}
-        className={`rounded-md px-3.5 py-1.5 text-sm font-medium transition ${
-          value === s.value ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-500 hover:text-slate-700'
-        } ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
-      >
-        {s.label}
-      </button>
-    ))}
+/* ---------- Rich text editor — TinyMCE (key: NEXT_PUBLIC_TINY_MCE) ---------- */
+
+const RichTextEditor = ({ value, onChange, error }) => (
+  <div className={`overflow-hidden rounded-lg border ${error ? 'border-rose-300' : 'border-slate-200'} bg-white shadow-sm`}>
+    <Editor
+      apiKey={API_TINY_MCE}
+      value={value || ''}
+      onEditorChange={(html) => onChange(html)}
+      init={{
+        height: 650,
+        menubar: true,
+        branding: true,
+        plugins: [
+          'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview', 'anchor', 'searchreplace',
+          'visualblocks', 'code', 'fullscreen', 'insertdatetime', 'table', 'help', 'wordcount',
+        ],
+        toolbar:
+          'undo redo | bold italic backcolor | alignleft aligncenter alignright alignjustify | ' +
+          'bullist numlist outdent indent | removeformat | help',
+        content_style: 'body { font-family: Inter, Arial, sans-serif; font-size: 14px; line-height: 1.6; }',
+      }}
+    />
   </div>
 );
-
-/* ---------- Rich text editor (contentEditable + execCommand toolbar, no extra deps) ---------- */
-
-const ToolbarBtn = ({ onClick, title, children }) => (
-  <button
-    type="button"
-    onMouseDown={(e) => e.preventDefault()} // keep editor selection alive when clicking the toolbar
-    onClick={onClick}
-    title={title}
-    aria-label={title}
-    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition hover:bg-slate-200/70 hover:text-slate-900"
-  >
-    {children}
-  </button>
-);
-
-const RichTextEditor = ({ value, onChange, disabled, error }) => {
-  const editorRef = useRef(null);
-
-  // Uncontrolled on purpose (typing would otherwise reset the caret) — the
-  // parent Modal fully unmounts/remounts this on open/close, so a fresh
-  // `value` is always the correct initial HTML for a new edit/view session.
-  useEffect(() => {
-    if (editorRef.current) editorRef.current.innerHTML = value || '';
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const exec = (cmd, arg = null) => {
-    if (disabled) return;
-    editorRef.current?.focus();
-    document.execCommand(cmd, false, arg);
-    onChange(editorRef.current?.innerHTML || '');
-  };
-
-  const handleLink = () => {
-    const url = window.prompt('Enter URL');
-    if (url) exec('createLink', url);
-  };
-
-  return (
-    <div className={`overflow-hidden rounded-lg border ${error ? 'border-rose-300' : 'border-slate-200'} bg-white shadow-sm`}>
-      {!disabled && (
-        <div className="flex flex-wrap items-center gap-0.5 border-b border-slate-100 bg-slate-50/70 px-2 py-1.5">
-          <ToolbarBtn onClick={() => exec('bold')} title="Bold">{Icon.bold}</ToolbarBtn>
-          <ToolbarBtn onClick={() => exec('italic')} title="Italic">{Icon.italic}</ToolbarBtn>
-          <ToolbarBtn onClick={() => exec('underline')} title="Underline">{Icon.underline}</ToolbarBtn>
-          <span className="mx-1 h-4 w-px bg-slate-200" />
-          <ToolbarBtn onClick={() => exec('insertUnorderedList')} title="Bullet list">{Icon.listBullet}</ToolbarBtn>
-          <ToolbarBtn onClick={() => exec('insertOrderedList')} title="Numbered list">{Icon.listNumber}</ToolbarBtn>
-          <span className="mx-1 h-4 w-px bg-slate-200" />
-          <ToolbarBtn onClick={handleLink} title="Insert link">{Icon.link}</ToolbarBtn>
-          <ToolbarBtn onClick={() => exec('removeFormat')} title="Clear formatting">{Icon.clear}</ToolbarBtn>
-        </div>
-      )}
-      <div
-        ref={editorRef}
-        contentEditable={!disabled}
-        onInput={() => onChange(editorRef.current?.innerHTML || '')}
-        suppressContentEditableWarning
-        data-placeholder="Enter terms & conditions…"
-        className={`min-h-[150px] max-h-72 overflow-y-auto px-3 py-2.5 text-sm text-slate-900 focus:outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_a]:text-indigo-600 [&_a]:underline empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)] ${disabled ? 'bg-slate-50 text-slate-500' : ''}`}
-      />
-    </div>
-  );
-};
 
 /* ---------- Searchable vendor multi-select with chips ---------- */
 
@@ -729,46 +756,54 @@ const VendorMultiSelect = ({ selected, onChange, disabled, error }) => {
   );
 };
 
-/* ---------- Live preview card ---------- */
+// How the terms read in a document — the View page and the form's Preview use it.
+const DOC_CLS = "break-words px-8 py-7 text-sm leading-7 text-slate-700 [overflow-wrap:anywhere] [&_a]:text-indigo-600 [&_a]:underline [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-semibold [&_li]:mb-1 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:mb-3 [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-6";
 
-const LivePreview = ({ termName, isDefault, termsContent }) => (
-  <div className="rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-4">
-    <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Live preview</p>
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="text-base font-semibold text-slate-900">{termName || 'Untitled term'}</h3>
-        {isDefault && (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
-            {Icon.star} Default
-          </span>
-        )}
-      </div>
-      <div
-        className="prose-sm mt-3 max-h-64 overflow-y-auto text-sm leading-relaxed text-slate-600 [&_a]:text-indigo-600 [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
-        dangerouslySetInnerHTML={{
-          __html:
-            sanitizeForPreview(termsContent) ||
-            '<p class="text-slate-300">Terms &amp; conditions content will appear here…</p>',
-        }}
-      />
-    </div>
-  </div>
+const TermsDocument = ({ html }) => (
+  <div
+    className={DOC_CLS}
+    dangerouslySetInnerHTML={{ __html: sanitizeForPreview(html) || '<p class="text-slate-300">No content yet.</p>' }}
+  />
 );
 
-/* ======================== FORM (fields left, live preview right) ======================== */
+/* ======================== FORM (details on top, full-width editor below) ======================== */
 
+const FORM_TITLES = {
+  create: { title: 'Add Terms & Conditions', description: 'Define a new term for purchase orders.' },
+  edit: { title: 'Edit Terms & Conditions', description: 'Update this term’s content and applicability.' },
+};
+
+const BackBtn = ({ onClick, disabled }) => (
+  <button
+    type="button" onClick={onClick} disabled={disabled}
+    className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+  >
+    <ArrowLeft className="h-4 w-4" /> Back
+  </button>
+);
+
+/* Add / Edit — a page in place of the list; Back returns to it. */
 const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors }) => {
-  const isView = mode === 'view';
+  const { title, description } = FORM_TITLES[mode] || FORM_TITLES.create;
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="grid flex-1 grid-cols-1 gap-6 lg:grid-cols-5">
-        <div className="space-y-5 lg:col-span-3">
+    <div className="min-h-screen bg-slate-50/60 p-6">
+    <div className="mx-auto max-w-7xl">
+      <div className="mb-6 flex flex-wrap items-center gap-4">
+        <BackBtn onClick={onCancel} disabled={submitting} />
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">{title}</h1>
+          <p className="mt-0.5 text-sm text-slate-500">{description}</p>
+        </div>
+      </div>
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           <Field label="Term Name" required error={errors.termName}>
             <input
               type="text"
               value={formData.termName}
-              disabled={isView}
               onChange={(e) => onChange('termName', e.target.value)}
               placeholder="e.g. Standard Payment Terms"
               className={fieldInputClass}
@@ -776,36 +811,43 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
           </Field>
 
           <Field label="Default">
-            <Switch checked={formData.isDefault} onChange={(v) => onChange('isDefault', v)} disabled={isView} />
+            <Switch checked={formData.isDefault} onChange={(v) => onChange('isDefault', v)} />
             <p className="mt-1.5 text-xs text-slate-400">
               {formData.isDefault
                 ? 'Used for any vendor with no term of its own. Only one Default term can exist — saving this replaces the current one.'
                 : 'Off — choose which vendors this term applies to below.'}
             </p>
           </Field>
+        </div>
 
           {!formData.isDefault && (
             <Field label="Applicable Vendors" required={!formData.isDefault} error={errors.applicableVendors}>
               <VendorMultiSelect
                 selected={formData.applicableVendors}
                 onChange={(v) => onChange('applicableVendors', v)}
-                disabled={isView}
                 error={errors.applicableVendors}
               />
             </Field>
           )}
 
-          <Field label="Terms & Conditions" required error={errors.termsContent}>
+          <Field
+            label="Terms & Conditions"
+            required
+            error={errors.termsContent}
+            action={
+              <button
+                type="button" onClick={() => setPreviewOpen(true)}
+                className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600 ring-1 ring-inset ring-indigo-200 transition hover:bg-indigo-100"
+              >
+                {Icon.eye} Preview
+              </button>
+            }
+          >
             <RichTextEditor
               value={formData.termsContent}
               onChange={(html) => onChange('termsContent', html)}
-              disabled={isView}
               error={errors.termsContent}
             />
-          </Field>
-
-          <Field label="Status">
-            <StatusToggle value={formData.status} onChange={(v) => onChange('status', v)} disabled={isView} />
           </Field>
 
           {errors.general && (
@@ -814,29 +856,115 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
               <span>{errors.general}</span>
             </div>
           )}
-        </div>
-
-        <div className="lg:col-span-2">
-          <LivePreview termName={formData.termName} isDefault={formData.isDefault} termsContent={formData.termsContent} />
-        </div>
       </div>
 
-      <div className="-mx-5 mt-5 flex justify-end gap-2.5 border-t border-slate-100 px-5 pt-4">
+      {previewOpen && (
+        <Modal
+          title={formData.termName || 'Untitled term'}
+          description={formData.isDefault ? 'Default term · preview' : 'Preview'}
+          onClose={() => setPreviewOpen(false)}
+          maxWidth="max-w-3xl"
+        >
+          <div className="-m-5 rounded-b-2xl bg-white">
+            <TermsDocument html={formData.termsContent} />
+          </div>
+        </Modal>
+      )}
+
+      <div className="-mx-6 mt-6 flex justify-end gap-2.5 border-t border-slate-100 px-6 pt-4">
         <button
           onClick={onCancel}
           className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
         >
-          {isView ? 'Close' : 'Cancel'}
+          Cancel
         </button>
-        {!isView && (
-          <button
-            onClick={onSubmit}
-            disabled={submitting}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submitting ? 'Saving…' : 'Save'}
-          </button>
+        <button
+          onClick={onSubmit}
+          disabled={submitting}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {submitting ? 'Saving…' : mode === 'edit' ? 'Save changes' : 'Create term'}
+        </button>
+      </div>
+    </div>
+    </div>
+    </div>
+  );
+};
+
+/* ======================== VIEW (full page) ======================== */
+
+const ViewPage = ({ item, onBack }) => {
+  const vendors = item.applicableVendors.map((v) => v.name).filter(Boolean);
+  return (
+    <div className="min-h-screen bg-slate-50/60 p-6 pb-12">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-6 flex flex-wrap items-center gap-4">
+          <BackBtn onClick={onBack} />
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="break-words text-xl font-semibold tracking-tight text-slate-900">{item.termName}</h1>
+              <StatusBadge isActive={item.isActive} />
+              {item.isDefault && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                  <Star className="h-3 w-3" /> Default
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-sm text-slate-500">Terms & Conditions</p>
+          </div>
+        </div>
+
+        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-600"><Users className="h-4 w-4" /></span>
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-600">Applies to</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                {item.isDefault ? 'All vendors (default)' : `${vendors.length} vendor${vendors.length === 1 ? '' : 's'}`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600"><CalendarDays className="h-4 w-4" /></span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-500">Created on</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">{formatDate(item.createdAt)}</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 rounded-xl border border-violet-100 bg-violet-50/60 px-4 py-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-600"><CalendarDays className="h-4 w-4" /></span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-500">Last updated</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">{formatDate(item.updatedAt || item.createdAt)}</p>
+            </div>
+          </div>
+        </div>
+
+        {!item.isDefault && (
+          <section className="mb-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Users className="h-4 w-4 text-slate-400" /> Applicable vendors
+            </h2>
+            {vendors.length === 0 ? (
+              <p className="text-sm text-slate-400">No vendors selected.</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {vendors.map((n, i) => (
+                  <span key={i} className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-100">{n}</span>
+                ))}
+              </div>
+            )}
+          </section>
         )}
+
+        {/* The terms themselves, laid out like the document they end up in. */}
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <h2 className="flex items-center gap-2 border-b border-slate-100 px-6 py-3.5 text-sm font-semibold text-slate-900">
+            <FileText className="h-4 w-4 text-slate-400" /> Terms & conditions
+          </h2>
+          <TermsDocument html={item.termsContent} />
+        </section>
       </div>
     </div>
   );
@@ -851,6 +979,12 @@ const TermsCondition = () => {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
+  const [vendorFilter, setVendorFilter] = useState('');
+  const [vendorOptions, setVendorOptions] = useState([]);
+
+  useEffect(() => {
+    fetchVendors(1000).then(setVendorOptions).catch(() => setVendorOptions([]));
+  }, []);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(DEFAULT_ITEMS_PER_PAGE);
@@ -864,6 +998,9 @@ const TermsCondition = () => {
 
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+  const [viewItem, setViewItem] = useState(null);
 
   /* ----- Data fetching ----- */
 
@@ -875,17 +1012,11 @@ const TermsCondition = () => {
         page: currentPage,
         limit: itemsPerPage,
         search,
-        showInactive: statusFilter !== 'active',
+        status: statusFilter === 'inactive' ? 'INACTIVE' : 'ACTIVE',
+        vendorId: vendorFilter || undefined,
       });
-      let mapped = (response?.data || []).map(mapTermResponse);
-      let total = response?.pagination?.total ?? mapped.length;
-
-      // Backend only has "active only" vs "everything" — narrow to
-      // inactive-only client-side, same pattern as Field Definitions.
-      if (statusFilter === 'inactive') {
-        mapped = mapped.filter((t) => !t.isActive);
-        total = mapped.length;
-      }
+      const mapped = (response?.data || []).map(mapTermResponse);
+      const total = response?.pagination?.total ?? mapped.length;
 
       setItems(mapped);
       setTotalItems(total);
@@ -894,7 +1025,7 @@ const TermsCondition = () => {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, itemsPerPage, search, statusFilter]);
+  }, [currentPage, itemsPerPage, search, statusFilter, vendorFilter]);
 
   useEffect(() => {
     loadTermsConditions();
@@ -902,7 +1033,7 @@ const TermsCondition = () => {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, vendorFilter]);
 
   /* ----- Modal handlers ----- */
 
@@ -918,7 +1049,6 @@ const TermsCondition = () => {
     isDefault: item.isDefault,
     applicableVendors: item.applicableVendors,
     termsContent: item.termsContent,
-    status: item.status,
   });
 
   const openEditModal = (item) => {
@@ -928,12 +1058,7 @@ const TermsCondition = () => {
     setModalMode('edit');
   };
 
-  const openViewModal = (item) => {
-    setFormData(toFormData(item));
-    setFormErrors({});
-    setActiveItemId(item.id);
-    setModalMode('view');
-  };
+  const openViewModal = (item) => setViewItem(item);
 
   const closeModal = () => {
     setModalMode(null);
@@ -975,7 +1100,6 @@ const TermsCondition = () => {
         isDefault: formData.isDefault,
         applicableVendors: formData.isDefault ? [] : formData.applicableVendors.map((v) => v.id),
         termsContent: formData.termsContent,
-        status: formData.status,
       };
 
       if (modalMode === 'create') {
@@ -1014,40 +1138,54 @@ const TermsCondition = () => {
     }
   };
 
-  const handleRestore = async (item) => {
+  const handleRestore = async () => {
+    if (!restoreTarget) return;
+    setRestoring(true);
     try {
-      await restoreTermsCondition(item.id);
+      await restoreTermsCondition(restoreTarget.id);
       toast.success('Terms & Conditions restored successfully.');
+      setRestoreTarget(null);
       await loadTermsConditions();
     } catch (err) {
       toast.error(err.message || 'Failed to restore Terms & Conditions.');
+    } finally {
+      setRestoring(false);
     }
   };
 
   /* ----- Render ----- */
 
-  const modalTitle =
-    modalMode === 'create' ? 'Add Terms & Conditions'
-    : modalMode === 'edit' ? 'Edit Terms & Conditions'
-    : 'Terms & Conditions details';
-
-  const modalDescription =
-    modalMode === 'create' ? 'Define a new term for purchase orders.'
-    : modalMode === 'edit' ? 'Update this term’s content and applicability.'
-    : null;
-
   const startIndex = (currentPage - 1) * itemsPerPage + 1;
+
+  // Add / Edit and View each take the page over; Back returns to the list.
+  if (modalMode) {
+    return (
+      <Form
+        mode={modalMode}
+        formData={formData}
+        onChange={handleFormChange}
+        onSubmit={handleSubmit}
+        onCancel={closeModal}
+        submitting={submitting}
+        errors={formErrors}
+      />
+    );
+  }
+  if (viewItem) return <ViewPage item={viewItem} onBack={() => setViewItem(null)} />;
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
-      <Header
-        totalItems={totalItems}
+      <Header totalItems={totalItems} onCreateClick={openCreateModal} />
+
+      <FilterBar
         search={search}
         onSearchChange={setSearch}
-        onCreateClick={openCreateModal}
+        vendors={vendorOptions}
+        vendorFilter={vendorFilter}
+        onVendorFilterChange={setVendorFilter}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
       />
-
-      <FilterBar statusFilter={statusFilter} onStatusFilterChange={setStatusFilter} />
 
       <Table
         items={items}
@@ -1059,44 +1197,43 @@ const TermsCondition = () => {
         onView={openViewModal}
         onEdit={openEditModal}
         onDelete={handleDeleteClick}
-        onRestore={handleRestore}
+        onRestore={setRestoreTarget}
+        // Pagination has nothing to show for one short page — no empty footer then.
+        footer={
+          !error && totalItems > DEFAULT_ITEMS_PER_PAGE ? (
+            <Pagination
+              currentPage={currentPage}
+              totalItems={totalItems}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={(value) => {
+                setItemsPerPage(value);
+                setCurrentPage(1);
+              }}
+            />
+          ) : null
+        }
       />
-
-      {!error && totalItems > 0 && (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <Pagination
-            currentPage={currentPage}
-            totalItems={totalItems}
-            itemsPerPage={itemsPerPage}
-            onPageChange={setCurrentPage}
-            onItemsPerPageChange={(value) => {
-              setItemsPerPage(value);
-              setCurrentPage(1);
-            }}
-          />
-        </div>
-      )}
-
-      {modalMode && (
-        <Modal title={modalTitle} description={modalDescription} onClose={closeModal} maxWidth="max-w-5xl">
-          <Form
-            mode={modalMode}
-            formData={formData}
-            onChange={handleFormChange}
-            onSubmit={handleSubmit}
-            onCancel={closeModal}
-            submitting={submitting}
-            errors={formErrors}
-          />
-        </Modal>
-      )}
 
       <ConfirmModal
         open={!!confirmTarget}
-        message="Are you sure you want to delete this term?"
+        title="Delete this term?"
+        message={confirmTarget ? `"${confirmTarget.termName}" will be marked inactive and stop applying to new purchase orders. You can restore it later.` : ''}
         onCancel={() => setConfirmTarget(null)}
         onConfirm={handleConfirmDelete}
         loading={deleting}
+      />
+
+      <ConfirmModal
+        open={!!restoreTarget}
+        tone="success"
+        title="Restore this term?"
+        message={restoreTarget ? `"${restoreTarget.termName}" will be active again and apply to new purchase orders.` : ''}
+        confirmLabel="Restore"
+        loadingLabel="Restoring…"
+        onCancel={() => setRestoreTarget(null)}
+        onConfirm={handleRestore}
+        loading={restoring}
       />
     </div>
   );

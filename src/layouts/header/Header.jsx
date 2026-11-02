@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { usePathname } from "next/navigation";
 import { Profile } from "./components/Profile";
 import { Navbar } from "./components/NavBar/Navbar";
 import { usePermissions } from "@/context/PermissionContext";
@@ -10,8 +11,12 @@ import SettingsMenu from "./components/NavBar/SettingsMenu";
 
 const Header = () => {
     const { userData } = usePermissions();
+    const pathname = usePathname();
 
-    if (!userData) {
+    // Never on the login page: an HRMS session can still be alive there (a
+    // page restored from history, or the app cookie gone), and the app's menu
+    // over a sign-in form reads as signed-in and signed-out at once.
+    if (!userData || pathname === "/") {
         return null;
     }
 

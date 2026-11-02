@@ -2,14 +2,13 @@
 
 import { useParams } from "next/navigation";
 
-import VendorForm from "@/modules/stock/vendor/Vendorform";
+import VendorView from "@/modules/stock/vendor/VendorView";
 
-// Read-only vendor detail — the same form the edit route renders, with every
-// control inert and nothing to submit.
+// Read-only vendor detail — its own page, not the edit form with every control disabled.
 const VendorViewPage = () => {
   const { id } = useParams();
 
-  return <VendorForm vendorId={id} readOnly />;
+  return <VendorView vendorId={id} />;
 };
 
 export default VendorViewPage;

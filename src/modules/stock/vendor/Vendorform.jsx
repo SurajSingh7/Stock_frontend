@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, createContext, useContext } fr
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Save, Plus, Trash2, ShieldCheck, Loader2, ChevronUp, ChevronDown,
-  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check, Pencil,
+  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check,
   DeleteIcon,
   Delete,
   LucideDelete,
@@ -1544,16 +1544,8 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
           </div>
           
           <div className="flex items-center gap-3">
-            {readOnly ? (
-              <button
-                type="button" onClick={() => router.push(`/stock/vendors/${vendorId}/edit`)}
-                className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-600 shadow-sm transition hover:border-orange-300 hover:bg-orange-50"
-              >
-                <Pencil className="h-4 w-4" /> Edit Vendor
-              </button>
-            ) : (
-              <SaveBtn className="px-4 py-2" />
-            )}
+            {/* The detail view is read-only — editing starts from the list. */}
+            {!readOnly && <SaveBtn className="px-4 py-2" />}
           </div>
         </div>
 

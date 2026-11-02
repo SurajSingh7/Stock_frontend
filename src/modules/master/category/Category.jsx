@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Plus,
   Package,
+  ExternalLink,
   Pencil,
   Trash2,
   RotateCcw,
@@ -628,6 +629,7 @@ function ActionBar({
   currentType,
   onCreateClick,
   onAddProduct,
+  onOpenProductPage,
   onToggleType,
   isToggling,
   isRoot,
@@ -676,14 +678,27 @@ function ActionBar({
 
       <div className="flex items-center gap-4 flex-wrap">
         {!addProductDisabled && (
-          <button
-            type="button"
-            onClick={onAddProduct}
-            className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 hover:shadow-md shadow-sm transition-all duration-150"
-          >
-            <Package className="w-4 h-4" />
-            Add Product
-          </button>
+          <div className="flex items-center gap-2">
+            {/* The full Product Definitions page, this category pre-selected. */}
+            <button
+              type="button"
+              onClick={onOpenProductPage}
+              title="Open in Product Definitions"
+              aria-label="Open in Product Definitions"
+              className="flex items-center justify-center p-2.5 text-emerald-700 bg-white border border-emerald-200 rounded-xl hover:bg-emerald-50 hover:shadow-md shadow-sm transition-all duration-150"
+            >
+              <ExternalLink className="w-4 h-4" />
+            </button>
+            {/* Adds it right here, without leaving the category. */}
+            <button
+              type="button"
+              onClick={onAddProduct}
+              className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl hover:bg-emerald-100 hover:shadow-md shadow-sm transition-all duration-150"
+            >
+              <Package className="w-4 h-4" />
+              Add Product
+            </button>
+          </div>
         )}
 
         {!isRoot && (
@@ -714,14 +729,14 @@ function CategoryTableRow({ row, onView, onEdit, onDelete, onRestore, onMove }) 
       <td className="px-6 py-4 align-top">
         <NameCell row={row} onView={onView} />
       </td>
-      <td className="px-6 py-4 align-top text-sm text-gray-500 max-w-xs">
-        <TruncatedCell text={row.description} label="Description" />
-      </td>
       <td className="px-6 py-4 align-top text-xs text-gray-400 font-mono max-w-xs">
         <TruncatedCell text={row.displayPath || row.name} label="Full Path" />
       </td>
       <td className="px-6 py-4 align-top">
         <TypeBadge type={row.type} />
+      </td>
+      <td className="px-6 py-4 align-top text-sm text-gray-500 max-w-xs">
+        <TruncatedCell text={row.description} label="Description" />
       </td>
       <td className="px-6 py-4 align-top">
         <div className="flex items-center gap-1">
@@ -747,9 +762,9 @@ function CategoryTable({ rows, onView, onEdit, onDelete, onRestore, onMove }) {
           <thead>
             <tr className="border-b border-gray-100 bg-gray-50/70">
               <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
-              <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
               <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Full Path</th>
               <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Type</th>
+              <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
               <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
             </tr>
           </thead>
@@ -993,6 +1008,11 @@ const Category = () => {
 
   const [currentCategory, setCurrentCategory] = useState(null);
   const [children, setChildren] = useState([]);
+  // A product's add/edit form open in place of the list — the form brings its
+  // own Back, so the category action bar steps aside while it is open.
+  const [productFormOpen, setProductFormOpen] = useState(false);
+  // Bumped by "Add Product" — the embedded product list opens its create form.
+  const [addProductSignal, setAddProductSignal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -1261,10 +1281,26 @@ const Category = () => {
 
   /* ---------------- Add product ---------------- */
 
-  const handleAddProduct = () => {
+  const handleOpenProductPage = () => {
     if (!currentCategory || !isLeaf(currentCategory.type)) return;
     router.push(buildProductCreateUrl(currentCategory._id));
   };
+
+  const handleAddProduct = () => {
+    if (!currentCategory || !isLeaf(currentCategory.type)) return;
+    setAddProductSignal((n) => n + 1);
+  };
+
+  // A product was added/removed here: refresh this category's product count
+  // (it decides whether the Last toggle may flip) without reloading the page.
+  const refreshCurrentCategory = useCallback(async () => {
+    if (isRoot) return;
+    try {
+      setCurrentCategory(await categoryApi.getCategoryById(currentCategoryId));
+    } catch {
+      // Non-fatal — the count catches up on the next visit.
+    }
+  }, [currentCategoryId, isRoot]);
 
   const parentIsLeaf = !isRoot && !!currentCategory && isLeaf(currentCategory.type);
   const hasChildren = children.length > 0;
@@ -1289,18 +1325,21 @@ const Category = () => {
 
       <Breadcrumb trail={trail} onNavigate={navigateToBreadcrumb} />
 
-      <ActionBar
-        canGoBack={trail.length > 1}
-        onBack={navigateBack}
-        currentType={currentCategory?.type}
-        onCreateClick={openCreateModal}
-        onAddProduct={handleAddProduct}
-        onToggleType={handleToggleType}
-        isToggling={isToggling}
-        isRoot={isRoot}
-        hasChildren={hasChildren}
-        hasProducts={hasProducts}
-      />
+      {!productFormOpen && (
+        <ActionBar
+          canGoBack={trail.length > 1}
+          onBack={navigateBack}
+          currentType={currentCategory?.type}
+          onCreateClick={openCreateModal}
+          onAddProduct={handleAddProduct}
+          onOpenProductPage={handleOpenProductPage}
+          onToggleType={handleToggleType}
+          isToggling={isToggling}
+          isRoot={isRoot}
+          hasChildren={hasChildren}
+          hasProducts={hasProducts}
+        />
+      )}
 
       {loading ? (
         <div className="bg-white border border-gray-100 rounded-2xl shadow-md overflow-hidden">
@@ -1311,8 +1350,13 @@ const Category = () => {
           <ErrorState message={error} onRetry={loadCurrentLevel} />
         </div>
       ) : children.length === 0 ? (
-        !isRoot && isLeaf(currentCategory?.type) && hasProducts ? (
-          <ProductDefinitionCatComp categoryId={currentCategory._id} />
+        !isRoot && isLeaf(currentCategory?.type) ? (
+          <ProductDefinitionCatComp
+            categoryId={currentCategory._id}
+            onFormToggle={setProductFormOpen}
+            addSignal={addProductSignal}
+            onChanged={refreshCurrentCategory}
+          />
         ) : (
           <div className="bg-white border border-gray-100 rounded-2xl shadow-md">
             <EmptyState message="No child categories found." />

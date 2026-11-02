@@ -17,7 +17,7 @@ import { useState } from "react";
 const UNIT_FACTOR = { months: 1, years: 12 };
 
 const toDraft = (months) => {
-  if (months === null || months === undefined || months === "") return { value: "", unit: "years" };
+  if (months === null || months === undefined || months === "") return { value: "", unit: "months" };
   const m = Number(months);
   if (Number.isFinite(m) && m > 0 && m % 12 === 0) return { value: String(m / 12), unit: "years" };
   return { value: String(months), unit: "months" };

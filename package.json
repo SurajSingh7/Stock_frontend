@@ -13,6 +13,7 @@
     "dev:pm2": "pm2 start ecosystem.dev.config.cjs"
   },
   "dependencies": {
+    "@tinymce/tinymce-react": "^6.3.1",
     "env-cmd": "^11.0.0",
     "lucide-react": "^1.22.0",
     "next": "16.2.9",

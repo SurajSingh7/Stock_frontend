@@ -6,6 +6,7 @@ import { STATE_OPTIONS, findStateOption } from '@/shared/constants/indianStates'
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
+import { Hash, Building2, Landmark, MapPin, FileText } from 'lucide-react';
 
 /* ======================== CONSTANTS ======================== */
 
@@ -148,10 +149,10 @@ const Icon = {
 const StatusBadge = ({ isActive }) => (
   <span
     className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-      isActive ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-slate-100 text-slate-500 ring-slate-200'
+      isActive ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-rose-50 text-rose-700 ring-rose-200'
     }`}
   >
-    <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+    <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
     {isActive ? 'Active' : 'Inactive'}
   </span>
 );
@@ -171,16 +172,17 @@ const RoleBadge = ({ role }) => (
 );
 
 const IconBtn = ({ onClick, title, tone = 'slate', children, disabled }) => {
+  // Coloured at rest, so each action is told apart at a glance; deeper on hover.
   const toneCls =
-    tone === 'indigo' ? "text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50"
-    : tone === 'red' ? "text-rose-600 hover:border-rose-200 hover:bg-rose-50"
-    : tone === 'emerald' ? "text-emerald-600 hover:border-emerald-200 hover:bg-emerald-50"
-    : tone === 'orange' ? "text-orange-500 hover:border-orange-200 hover:bg-orange-50"
-    : "text-slate-500 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700";
+    tone === 'indigo' ? "bg-indigo-50 text-indigo-600 ring-indigo-100 hover:bg-indigo-100 hover:text-indigo-700"
+    : tone === 'red' ? "bg-rose-50 text-rose-600 ring-rose-100 hover:bg-rose-100 hover:text-rose-700"
+    : tone === 'emerald' ? "bg-emerald-50 text-emerald-600 ring-emerald-100 hover:bg-emerald-100 hover:text-emerald-700"
+    : tone === 'orange' ? "bg-amber-50 text-amber-600 ring-amber-100 hover:bg-amber-100 hover:text-amber-700"
+    : "bg-slate-50 text-slate-500 ring-slate-200 hover:bg-slate-100 hover:text-slate-700";
   return (
     <button
       type="button" onClick={onClick} title={title} aria-label={title} disabled={disabled}
-      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-40 ${toneCls}`}
+      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-inset transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-40 ${toneCls}`}
     >
       {children}
     </button>
@@ -261,36 +263,46 @@ const Header = ({ totalItems, onCreateClick }) => (
   </div>
 );
 
-const FilterBar = ({ search, onSearchChange, statusFilter, onStatusFilterChange }) => (
-  <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <div className="relative sm:col-span-2">
-        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
-          {Icon.search}
-        </span>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search by name or code"
-          className={`${inputCls} pl-9`}
-        />
-      </div>
+// The status dropdown wears the colour of its badge in the table.
+const STATUS_TONE = {
+  active: { box: 'border-emerald-200 bg-emerald-50 text-emerald-700 focus:border-emerald-400 focus:ring-emerald-100', dot: 'bg-emerald-500' },
+  inactive: { box: 'border-rose-200 bg-rose-50 text-rose-700 focus:border-rose-400 focus:ring-rose-100', dot: 'bg-rose-500' },
+};
 
-      <div className="relative">
-        <select
-          value={statusFilter}
-          onChange={(e) => onStatusFilterChange(e.target.value)}
-          className={`${inputCls} appearance-none pr-8`}
-        >
-          {STATUS_FILTERS.map((s) => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-        <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
-          {Icon.chevronDown}
-        </span>
-      </div>
+const FilterBar = ({ search, onSearchChange, statusFilter, onStatusFilterChange }) => (
+  <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="relative w-full sm:max-w-md">
+      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+        {Icon.search}
+      </span>
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Search by name or code"
+        className={`${inputCls} pl-9`}
+      />
+    </div>
+
+    <div className="relative w-full shrink-0 sm:w-44">
+      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+        <span className={`h-2 w-2 rounded-full ${STATUS_TONE[statusFilter]?.dot || 'bg-slate-400'}`} />
+      </span>
+      <select
+        value={statusFilter}
+        onChange={(e) => onStatusFilterChange(e.target.value)}
+        aria-label="Status"
+        className={`w-full appearance-none rounded-lg border py-2 pl-8 pr-8 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 ${
+          STATUS_TONE[statusFilter]?.box || ''
+        }`}
+      >
+        {STATUS_FILTERS.map((s) => (
+          <option key={s.value} value={s.value} className="bg-white font-medium text-slate-800">{s.label}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center opacity-70">
+        {Icon.chevronDown}
+      </span>
     </div>
   </div>
 );
@@ -299,22 +311,34 @@ const FilterBar = ({ search, onSearchChange, statusFilter, onStatusFilterChange 
 
 const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
   <tr className="transition hover:bg-slate-50/60">
-    <td className="px-4 py-3.5 text-sm font-mono text-slate-700">{item.code}</td>
-    <td className="px-4 py-3.5 text-sm font-medium text-slate-900">{item.name}</td>
-    <td className="px-4 py-3.5">
+    <td className="whitespace-nowrap px-4 py-3.5 font-mono text-sm text-slate-700">{item.code}</td>
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-slate-900">
+      <LongText label="Name" title={item.name} text={item.name} />
+    </td>
+    <td className="whitespace-nowrap px-4 py-3.5">
       <RoleBadge role={item.branchRole} />
     </td>
-    <td className="px-4 py-3.5 text-sm text-slate-500">
-      {[item.city, item.state && `${item.state}${item.stateCode ? ` (${item.stateCode})` : ''}`]
-        .filter(Boolean)
-        .join(', ') || <span className="text-slate-300">—</span>}
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-600">
+      <LongText label="City" title={item.name} text={item.city} />
     </td>
-    <td className="px-4 py-3.5 text-sm text-slate-500">{item.address || <span className="text-slate-300">—</span>}</td>
-    <td className="px-4 py-3.5">
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-600">
+      {item.state ? (
+        <>
+          {item.state}
+          {item.stateCode && <span className="ml-1.5 font-mono text-xs text-slate-400">{item.stateCode}</span>}
+        </>
+      ) : (
+        <span className="text-slate-300">—</span>
+      )}
+    </td>
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-500">
+      <LongText label="Address" title={item.name} text={item.address} />
+    </td>
+    <td className="whitespace-nowrap px-4 py-3.5">
       <StatusBadge isActive={item.isActive} />
     </td>
-    <td className="px-4 py-3.5">
-      <div className="flex items-center justify-end gap-1">
+    <td className="whitespace-nowrap px-4 py-3.5">
+      <div className="flex items-center justify-end gap-1.5">
         <IconBtn onClick={() => onView(item)} title="View" tone="indigo">{Icon.eye}</IconBtn>
         <IconBtn onClick={() => onEdit(item)} title="Edit" tone="orange">{Icon.edit}</IconBtn>
         {item.isActive ? (
@@ -329,27 +353,29 @@ const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
   </tr>
 );
 
-const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore }) => (
-  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore, footer }) => (
+  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-x-auto">
     <table className="min-w-full divide-y divide-slate-200">
       <thead className="bg-slate-50/60">
         <tr>
-          <th className={th}>Code</th>
+          <th className={`${th} w-28`}>Code</th>
           <th className={th}>Name</th>
-          <th className={th}>Role</th>
-          <th className={th}>Branch</th>
+          <th className={`${th} w-28`}>Role</th>
+          <th className={th}>City</th>
+          <th className={th}>State</th>
           <th className={th}>Address</th>
-          <th className={th}>Status</th>
-          <th className={thRight}>Action</th>
+          <th className={`${th} w-28`}>Status</th>
+          <th className={`${thRight} w-36`}>Action</th>
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-100">
         {error ? (
-          <ErrorState colSpan={7} message={error} onRetry={onRetry} />
+          <ErrorState colSpan={8} message={error} onRetry={onRetry} />
         ) : loading ? (
-          <LoadingRows columns={7} />
+          <LoadingRows columns={8} />
         ) : items.length === 0 ? (
-          <EmptyState colSpan={7} onCreateClick={onCreateClick} />
+          <EmptyState colSpan={8} onCreateClick={onCreateClick} />
         ) : (
           items.map((item) => (
             <TableRow key={item.id} item={item} onView={onView} onEdit={onEdit} onDelete={onDelete} onRestore={onRestore} />
@@ -357,6 +383,8 @@ const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, 
         )}
       </tbody>
     </table>
+    </div>
+    {footer && <div className="border-t border-slate-100 px-4 py-3">{footer}</div>}
   </div>
 );
 
@@ -403,15 +431,24 @@ const Modal = ({ title, description, onClose, children, maxWidth = 'max-w-lg' })
   );
 };
 
-const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 'Delete', onCancel, onConfirm, loading }) => {
+const CONFIRM_TONE = {
+  danger: { icon: 'bg-rose-50 text-rose-500 ring-8 ring-rose-50/50', btn: 'bg-rose-600 hover:bg-rose-500', glyph: Icon.alert },
+  success: { icon: 'bg-emerald-50 text-emerald-600 ring-8 ring-emerald-50/50', btn: 'bg-emerald-600 hover:bg-emerald-500', glyph: Icon.restore },
+};
+
+const ConfirmModal = ({
+  open, title = 'Confirm action', message, confirmLabel = 'Delete', loadingLabel = 'Deleting…',
+  tone = 'danger', onCancel, onConfirm, loading,
+}) => {
   if (!open) return null;
+  const t = CONFIRM_TONE[tone] || CONFIRM_TONE.danger;
   return (
     <Modal title={title} onClose={onCancel} maxWidth="max-w-sm">
-      <div className="flex flex-col items-center gap-3 py-1 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-500">
-          {Icon.alert}
+      <div className="flex flex-col items-center gap-4 py-2 text-center">
+        <div className={`flex h-12 w-12 items-center justify-center rounded-full ${t.icon}`}>
+          {t.glyph}
         </div>
-        <p className="text-sm text-slate-600">{message}</p>
+        <p className="text-sm leading-relaxed text-slate-600">{message}</p>
       </div>
       <div className="mt-5 flex justify-center gap-2.5">
         <button
@@ -423,9 +460,126 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
         <button
           onClick={onConfirm}
           disabled={loading}
-          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${t.btn}`}
         >
-          {loading ? 'Deleting…' : confirmLabel}
+          {loading ? loadingLabel : confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+/* ======================== VIEW ======================== */
+
+// Long values wrap inside their box — even one unbroken string (a URL, a long
+// code) breaks rather than pushing the dialog wider.
+const wrapCls = 'whitespace-pre-line break-words [overflow-wrap:anywhere]';
+
+// One colour per field, so the dialog reads at a glance.
+const DETAIL_TONE = {
+  indigo: { box: 'border-indigo-100 bg-indigo-50/60', icon: 'bg-indigo-100 text-indigo-600', label: 'text-indigo-500' },
+  sky: { box: 'border-sky-100 bg-sky-50/60', icon: 'bg-sky-100 text-sky-600', label: 'text-sky-600' },
+  violet: { box: 'border-violet-100 bg-violet-50/60', icon: 'bg-violet-100 text-violet-600', label: 'text-violet-500' },
+  amber: { box: 'border-amber-100 bg-amber-50/60', icon: 'bg-amber-100 text-amber-600', label: 'text-amber-600' },
+  emerald: { box: 'border-emerald-100 bg-emerald-50/60', icon: 'bg-emerald-100 text-emerald-600', label: 'text-emerald-600' },
+};
+
+const Detail = ({ label, icon: DIcon, tone = 'indigo', children, className = '' }) => {
+  const t = DETAIL_TONE[tone] || DETAIL_TONE.indigo;
+  return (
+    <div className={`flex min-w-0 items-start gap-3 rounded-xl border px-4 py-3 ${t.box} ${className}`}>
+      {DIcon && (
+        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${t.icon}`}>
+          <DIcon className="h-4 w-4" />
+        </span>
+      )}
+      <div className="min-w-0 flex-1">
+        <p className={`text-[11px] font-semibold uppercase tracking-wider ${t.label}`}>{label}</p>
+        <div className={`mt-0.5 text-sm font-medium text-slate-900 ${wrapCls}`}>{children}</div>
+      </div>
+    </div>
+  );
+};
+
+/*
+  A table cell that stays one short line: over LONG_TEXT characters it shows
+  the start, "… more", and the whole text in a small popup on click — so one
+  long address never stretches the table.
+*/
+const LONG_TEXT = 30;
+
+const LongText = ({ text, label, title }) => {
+  const [open, setOpen] = useState(false);
+  if (!text) return <span className="text-slate-300">—</span>;
+  if (text.length <= LONG_TEXT) return <span>{text}</span>;
+  return (
+    <>
+      <span>{text.slice(0, LONG_TEXT).trimEnd()}…</span>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="ml-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+      >
+        more
+      </button>
+      {open && (
+        <Modal title={label} description={title} onClose={() => setOpen(false)} maxWidth="max-w-md">
+          <p className={`text-sm leading-relaxed text-slate-700 ${wrapCls}`}>{text}</p>
+          <div className="-mx-5 mt-5 flex justify-end border-t border-slate-100 px-5 pt-4">
+            <button
+              type="button" onClick={() => setOpen(false)}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+            >
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+};
+
+const dash = <span className="font-normal text-slate-400">—</span>;
+
+const ViewModal = ({ item, onClose }) => {
+  if (!item) return null;
+  return (
+    <Modal title="Branch" onClose={onClose} maxWidth="max-w-lg">
+      <div className="flex items-center gap-4">
+        <div className="min-w-0">
+          <p className={`text-lg font-semibold tracking-tight text-slate-900 ${wrapCls}`}>{item.name}</p>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <RoleBadge role={item.branchRole} />
+            <StatusBadge isActive={item.isActive} />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <Detail label="Code" icon={Hash} tone="indigo"><span className="font-mono">{item.code}</span></Detail>
+        <Detail label="City" icon={Building2} tone="sky">{item.city || dash}</Detail>
+        <Detail label="State" icon={Landmark} tone="violet" className="col-span-2">
+          {item.state ? (
+            <>
+              {item.state}
+              {item.stateCode && <span className="ml-1.5 font-mono text-xs text-slate-500">GST code {item.stateCode}</span>}
+            </>
+          ) : dash}
+        </Detail>
+        <Detail label="Address" icon={MapPin} tone="amber" className="col-span-2">
+          {item.address ? <span className="font-normal leading-relaxed text-slate-600">{item.address}</span> : dash}
+        </Detail>
+        <Detail label="Description" icon={FileText} tone="emerald" className="col-span-2">
+          {item.description ? <span className="font-normal leading-relaxed text-slate-600">{item.description}</span> : dash}
+        </Detail>
+      </div>
+
+      <div className="-mx-5 mt-5 flex justify-end border-t border-slate-100 px-5 pt-4">
+        <button
+          type="button" onClick={onClose}
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          Close
         </button>
       </div>
     </Modal>
@@ -656,6 +810,9 @@ const Branch = () => {
 
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+  const [viewItem, setViewItem] = useState(null);
 
   const loadBranches = useCallback(async () => {
     setLoading(true);
@@ -787,13 +944,18 @@ const Branch = () => {
     }
   };
 
-  const handleRestore = async (item) => {
+  const handleConfirmRestore = async () => {
+    if (!restoreTarget) return;
+    setRestoring(true);
     try {
-      await restoreBranch(item.id);
+      await restoreBranch(restoreTarget.id);
       toast.success('Branch restored successfully.');
+      setRestoreTarget(null);
       await loadBranches();
     } catch (err) {
       toast.error(err.message || 'Failed to restore branch.');
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -826,33 +988,52 @@ const Branch = () => {
         error={error}
         onRetry={loadBranches}
         onCreateClick={openCreateForm}
-        onView={openForm('view')}
+        onView={setViewItem}
         onEdit={openForm('edit')}
         onDelete={handleDeleteClick}
-        onRestore={handleRestore}
+        onRestore={setRestoreTarget}
+        // Pagination has nothing to show for one short page — no empty footer then.
+        footer={
+          !error && totalItems > DEFAULT_ITEMS_PER_PAGE ? (
+            <Pagination
+              currentPage={currentPage}
+              totalItems={totalItems}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={(value) => {
+                setItemsPerPage(value);
+                setCurrentPage(1);
+              }}
+            />
+          ) : null
+        }
       />
 
-      {!error && totalItems > 0 && (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <Pagination
-            currentPage={currentPage}
-            totalItems={totalItems}
-            itemsPerPage={itemsPerPage}
-            onPageChange={setCurrentPage}
-            onItemsPerPageChange={(value) => {
-              setItemsPerPage(value);
-              setCurrentPage(1);
-            }}
-          />
-        </div>
-      )}
+      <ViewModal item={viewItem} onClose={() => setViewItem(null)} />
 
       <ConfirmModal
         open={!!confirmTarget}
-        message="Are you sure you want to delete this branch?"
+        title="Delete this branch?"
+        message={
+          confirmTarget
+            ? `${confirmTarget.name} (${confirmTarget.code}) will be marked inactive and drop out of branch pickers. You can restore it later.`
+            : ''
+        }
         onCancel={() => setConfirmTarget(null)}
         onConfirm={handleConfirmDelete}
         loading={deleting}
+      />
+
+      <ConfirmModal
+        open={!!restoreTarget}
+        tone="success"
+        title="Restore this branch?"
+        message={restoreTarget ? `${restoreTarget.name} (${restoreTarget.code}) will be active again and show up in branch pickers.` : ''}
+        confirmLabel="Restore"
+        loadingLabel="Restoring…"
+        onCancel={() => setRestoreTarget(null)}
+        onConfirm={handleConfirmRestore}
+        loading={restoring}
       />
     </div>
   );
