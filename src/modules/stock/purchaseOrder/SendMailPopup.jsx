@@ -2,15 +2,16 @@
 
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
+import toast from "react-hot-toast";
 import { sendPoMail, fetchPoMailPreview } from "./purchaseOrderApi";
-import { X, Mail } from "lucide-react";
+import {
+  X, Mail, Lock, Send, Hand, SkipForward, Paperclip, ScrollText, AlertTriangle, FlaskConical, Building2, Users,
+} from "lucide-react";
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500";
-const labelCls = "mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-600";
-const cardCls = "rounded-xl border border-slate-200 bg-slate-50/60 p-4";
 
-const Modal = ({ onClose, title, children, maxWidth = "max-w-3xl" }) => {
+const Modal = ({ onClose, title, children, maxWidth = "max-w-5xl" }) => {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   useEffect(() => {
@@ -30,9 +31,12 @@ const Modal = ({ onClose, title, children, maxWidth = "max-w-3xl" }) => {
         className={`max-h-full w-full ${maxWidth} overflow-y-auto rounded-2xl bg-white shadow-2xl ring-1 ring-slate-900/5`}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 flex items-center justify-between border-b border-slate-100 bg-white px-5 py-4">
-          <p className="flex items-center gap-2 text-base font-semibold tracking-tight text-slate-900">
-            <Mail className="h-4 w-4 text-indigo-600" /> {title}
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-5 py-4 backdrop-blur">
+          <p className="flex items-center gap-2.5 text-base font-semibold tracking-tight text-slate-900">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-indigo-500 to-violet-600 text-white shadow-sm">
+              <Mail className="h-4 w-4" />
+            </span>
+            {title}
           </p>
           <button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700">
             <X className="h-4 w-4" />
@@ -42,43 +46,6 @@ const Modal = ({ onClose, title, children, maxWidth = "max-w-3xl" }) => {
       </div>
     </div>,
     document.body
-  );
-};
-
-/** Comma/Enter-separated email chip input — used for CC. */
-const EmailChips = ({ value, onChange, placeholder }) => {
-  const [draft, setDraft] = useState("");
-
-  const commit = () => {
-    const v = draft.trim().replace(/,$/, "");
-    if (v && !value.includes(v)) onChange([...value, v]);
-    setDraft("");
-  };
-
-  return (
-    <div className={`${inputCls} flex flex-wrap items-center gap-1.5 py-1.5`}>
-      {value.map((email) => (
-        <span key={email} className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
-          {email}
-          <button type="button" onClick={() => onChange(value.filter((e) => e !== email))} className="text-indigo-400 hover:text-indigo-700">
-            <X className="h-3 w-3" />
-          </button>
-        </span>
-      ))}
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === "," || e.key === "Tab") {
-            if (draft.trim()) e.preventDefault();
-            commit();
-          }
-        }}
-        onBlur={commit}
-        placeholder={value.length ? "" : placeholder}
-        className="min-w-[120px] flex-1 border-0 bg-transparent p-0.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
-      />
-    </div>
   );
 };
 
@@ -128,9 +95,9 @@ export const useSendMailForm = (row) => {
   const vendorCc = (row.mailCc || []).map((c) => c.email).filter(Boolean);
 
   const [to, setTo] = useState(vendorTo);
-  // Internal CC is OUR side — colleagues copied on every PO mail. Kept
-  // separate from the vendor's own CC so it is obvious which addresses are
-  // the vendor's and which are ours.
+  // Internal CC is OUR side — colleagues copied on every PO mail. It comes
+  // from the PO's Alerts & Escalations rule and is shown read-only here: it is
+  // changed on the rule, not per mail.
   const [internalCc, setInternalCc] = useState([]);
   // What Alerts & Escalations will send: the PO's Manual rule (subject, text,
   // PDF) and its CC list; also whether Email is on and sandbox active.
@@ -157,7 +124,7 @@ export const useSendMailForm = (row) => {
     skipMode, setSkipMode,
     note, setNote,
     to, setTo,
-    internalCc, setInternalCc,
+    internalCc,
     vendorCc,
     preview,
     // What actually goes on the wire: the vendor's CC contacts plus ours.
@@ -168,20 +135,51 @@ export const useSendMailForm = (row) => {
 /** True when the vendor has nobody marked To — the send is refused. */
 export const hasNoRecipient = (row) => !(row.mailTo || []).some((c) => c.email);
 
-const RecipientList = ({ items, empty, tone = "slate" }) => {
-  if (!items.length) return <p className="text-xs italic text-slate-400">{empty}</p>;
-  const ring = tone === "amber" ? "ring-amber-200 bg-amber-50" : "ring-slate-200 bg-white";
+/* One recipient as a chip: initial, name and address. */
+const CHIP_TONE = {
+  emerald: { chip: "bg-emerald-50 ring-emerald-200", dot: "bg-emerald-500 text-white" },
+  sky: { chip: "bg-sky-50 ring-sky-200", dot: "bg-sky-500 text-white" },
+  violet: { chip: "bg-violet-50 ring-violet-200", dot: "bg-violet-500 text-white" },
+};
+
+const RecipientChips = ({ items, empty, tone, warn = false }) => {
+  if (!items.length) {
+    return (
+      <p className={`rounded-lg px-3 py-2 text-xs ${warn ? "bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-200" : "italic text-slate-400"}`}>
+        {empty}
+      </p>
+    );
+  }
+  const t = CHIP_TONE[tone];
   return (
-    <ul className="space-y-1.5">
-      {items.map((c) => (
-        <li key={c.email} className={`rounded-lg px-2.5 py-1.5 text-sm ring-1 ring-inset ${ring}`}>
-          <span className="font-medium text-slate-900">{c.name || c.email}</span>
-          {c.name ? <span className="ml-1.5 text-xs text-slate-500">{c.email}</span> : null}
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((c) => {
+        const label = c.name || c.email;
+        return (
+          <span key={c.email} className={`inline-flex max-w-full items-center gap-2 rounded-full py-1 pl-1 pr-3 ring-1 ring-inset ${t.chip}`} title={c.email}>
+            <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold uppercase ${t.dot}`}>
+              {label.charAt(0)}
+            </span>
+            <span className="min-w-0 truncate text-xs">
+              <span className="font-semibold text-slate-900">{label}</span>
+              {c.name ? <span className="ml-1 text-slate-500">{c.email}</span> : null}
+            </span>
+          </span>
+        );
+      })}
+    </div>
   );
 };
+
+const SectionTitle = ({ icon: Icon, tone, children, right }) => (
+  <div className="mb-2.5 flex items-center gap-2">
+    <span className={`flex h-6 w-6 items-center justify-center rounded-md ${tone}`}>
+      <Icon className="h-3.5 w-3.5" />
+    </span>
+    <p className="text-xs font-bold uppercase tracking-wider text-slate-700">{children}</p>
+    {right && <span className="ml-auto">{right}</span>}
+  </div>
+);
 
 /** Toggle OFF but neither option picked — the save is held back. */
 export const needsSkipChoice = (form) => !form.sendEmail && !form.skipMode;
@@ -194,143 +192,169 @@ export const submitSendMail = async (poId, { sendEmail, to, cc, skipMode, note }
 };
 
 const SKIP_OPTIONS = [
-  { mode: "MANUAL", label: "Sent Manually", hint: "The vendor got the PO outside the system — by hand, own email or WhatsApp." },
-  { mode: "SKIPPED", label: "Skip Mail", hint: "Not sending it now. The order moves on, and the mail can be sent later." },
+  {
+    mode: "MANUAL", label: "Sent Manually", icon: Hand,
+    hint: "The vendor got the PO outside the system — by hand, own email or WhatsApp.",
+    on: "border-sky-300 bg-sky-50 ring-2 ring-sky-100", icon_on: "bg-sky-500 text-white",
+  },
+  {
+    mode: "SKIPPED", label: "Skip Mail", icon: SkipForward,
+    hint: "Not sending it now. The order moves on, and the mail can be sent later.",
+    on: "border-amber-300 bg-amber-50 ring-2 ring-amber-100", icon_on: "bg-amber-500 text-white",
+  },
 ];
 
-/** Vendor details + send toggle + To/CC — the whole body of this popup, also
- *  embedded verbatim in the PO review popup. */
+/** Vendor details + send toggle + recipients + the mail — the whole body of
+ *  this popup, also embedded verbatim in the PO review popup. */
 export const SendMailFields = ({ row, form }) => {
-  const { sendEmail, setSendEmail, skipMode, setSkipMode, note, setNote, internalCc, setInternalCc } = form;
+  const { sendEmail, setSendEmail, skipMode, setSkipMode, note, setNote, internalCc } = form;
   const missingTo = hasNoRecipient(row);
   // A PO the vendor already holds can't be recorded as skipped.
   const skipLocked = mailReachedVendor(row.mailResult);
+  const p = form.preview;
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      {/* Left column — one card: what is being sent, and whether to send it.
-          Vendor name + PO number identify the mail; the contact names live in
-          the Recipients card on the right, so repeating one here only invited
-          the question of why that name and not the others. */}
-      <div>
-        <div className={cardCls}>
-          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Vendor Details</p>
-          <dl className="space-y-2 text-sm">
-            <div>
-              <dt className="text-xs text-slate-500">Vendor / Company Name</dt>
-              <dd className="font-medium text-slate-900">{row.vendorName || "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-slate-500">PO Number</dt>
-              <dd className="font-medium text-indigo-600">{row.poNumber || "—"}</dd>
-            </div>
-          </dl>
-
-          <label className="mt-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2.5">
-            <span className="text-sm font-medium text-slate-700">Send Email Notification</span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={sendEmail}
-              onClick={() => setSendEmail((s) => !s)}
-              className={`relative h-6 w-11 shrink-0 rounded-full transition ${sendEmail ? "bg-indigo-600" : "bg-slate-300"}`}
-            >
-              <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${sendEmail ? "translate-x-5" : "translate-x-0.5"}`} />
-            </button>
-          </label>
-          {!sendEmail && (
-            <div className="mt-3 space-y-2">
-              <p className="text-xs font-semibold text-slate-700">No email will be sent. What happened?</p>
-              {SKIP_OPTIONS.map((o) => {
-                const disabled = o.mode === "SKIPPED" && skipLocked;
-                const picked = skipMode === o.mode;
-                return (
-                  <label
-                    key={o.mode}
-                    className={`flex items-start gap-2.5 rounded-lg border px-3 py-2.5 transition ${
-                      disabled
-                        ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60"
-                        : picked
-                          ? "cursor-pointer border-indigo-300 bg-indigo-50/60"
-                          : "cursor-pointer border-slate-200 bg-white hover:bg-slate-50"
-                    }`}
-                  >
-                    <input
-                      type="radio" name={`skipMode-${row.poId}`} value={o.mode}
-                      checked={picked} disabled={disabled}
-                      onChange={() => setSkipMode(o.mode)}
-                      className="mt-0.5 h-4 w-4 accent-indigo-600"
-                    />
-                    <span>
-                      <span className="block text-sm font-medium text-slate-900">{o.label}</span>
-                      <span className="block text-xs text-slate-500">
-                        {disabled ? "This PO has already reached the vendor." : o.hint}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-              <input
-                value={note} onChange={(e) => setNote(e.target.value)} maxLength={500}
-                placeholder="Note (optional) — e.g. handed over at site"
-                className={inputCls}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Right column — who this mail actually reaches */}
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      {/* Left — what is being sent, and whether to send it */}
       <div className="space-y-4">
-        <div className={cardCls}>
-          <p className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-700">Vendor Recipients</p>
-
-          <div className="mb-4">
-            <label className={labelCls}>To</label>
-            <RecipientList
-              items={row.mailTo || []}
-              empty="No contact on this vendor is marked To — the mail cannot be sent."
-              tone={missingTo ? "amber" : "slate"}
-            />
+        <div className="overflow-hidden rounded-xl border border-indigo-100 bg-white shadow-sm">
+          <div className="bg-linear-to-r from-indigo-50 via-violet-50 to-white px-4 py-3">
+            <SectionTitle icon={Building2} tone="bg-indigo-500 text-white">Vendor</SectionTitle>
+            <p className="text-base font-semibold text-slate-900">{row.vendorName || "—"}</p>
+            <span className="mt-1.5 inline-flex items-center rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200">
+              {row.poNumber || "—"}
+            </span>
           </div>
 
-          <div>
-            <label className={labelCls}>CC</label>
-            <RecipientList items={row.mailCc || []} empty="None" />
+          <div className="p-4">
+            {/* the send switch — green when the mail will go out */}
+            <button
+              type="button" role="switch" aria-checked={sendEmail} onClick={() => setSendEmail((s) => !s)}
+              className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3.5 py-3 text-left transition ${
+                sendEmail ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${sendEmail ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-500"}`}>
+                  <Send className="h-4 w-4" />
+                </span>
+                <span>
+                  <span className="block text-sm font-semibold text-slate-900">Send Email Notification</span>
+                  <span className={`block text-xs ${sendEmail ? "text-emerald-700" : "text-slate-500"}`}>
+                    {sendEmail ? "The PO will be emailed from here" : "No email will go from here"}
+                  </span>
+                </span>
+              </span>
+              <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${sendEmail ? "bg-emerald-500" : "bg-slate-300"}`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${sendEmail ? "translate-x-5" : "translate-x-0.5"}`} />
+              </span>
+            </button>
+
+            {!sendEmail && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-semibold text-slate-700">What happened instead?</p>
+                {SKIP_OPTIONS.map((o) => {
+                  const disabled = o.mode === "SKIPPED" && skipLocked;
+                  const picked = skipMode === o.mode;
+                  return (
+                    <button
+                      key={o.mode} type="button" disabled={disabled} onClick={() => setSkipMode(o.mode)}
+                      className={`flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                        disabled
+                          ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60"
+                          : picked ? o.on : "border-slate-200 bg-white hover:bg-slate-50"
+                      }`}
+                    >
+                      <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${picked ? o.icon_on : "bg-slate-100 text-slate-500"}`}>
+                        <o.icon className="h-3.5 w-3.5" />
+                      </span>
+                      <span>
+                        <span className="block text-sm font-semibold text-slate-900">{o.label}</span>
+                        <span className="block text-xs text-slate-500">
+                          {disabled ? "This PO has already reached the vendor." : o.hint}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+                <input
+                  value={note} onChange={(e) => setNote(e.target.value)} maxLength={500}
+                  placeholder="Note (optional) — e.g. handed over at site"
+                  className={inputCls}
+                />
+              </div>
+            )}
           </div>
-
-          <p className="mt-3 text-xs text-slate-400">
-            Set on the vendor, per contact. Change them under Master → Vendors.
-          </p>
         </div>
 
-        <div className={cardCls}>
-          <p className="mb-1 text-xs font-bold uppercase tracking-wider text-slate-700">Internal CC Emails</p>
-          <p className="mb-3 text-xs text-slate-400">Our own people, copied on every PO mail. Set in Alerts &amp; Escalations → Rules.</p>
-          <EmailChips value={internalCc} onChange={setInternalCc} placeholder="Add internal CC email…" />
-        </div>
-
-        {form.preview && sendEmail && (
-          <div className={cardCls}>
-            <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">The mail</p>
-            {!form.preview.emailEnabled && (
-              <p className="mb-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-inset ring-rose-100">
-                Email is switched off in Alerts &amp; Escalations → Channels — sending will be refused.
-              </p>
-            )}
-            {form.preview.sandbox && (
-              <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
-                Sandbox is on — this goes to {form.preview.sandbox.email || "the test email (not set yet)"}, not the vendor.
-              </p>
-            )}
-            <p className="text-sm font-medium text-slate-900">{form.preview.subject}</p>
-            <p className="mt-1 line-clamp-3 text-xs text-slate-500">{String(form.preview.body || "").replace(/<[^>]+>/g, " ")}</p>
-            <p className="mt-2 text-xs text-slate-400">
-              {form.preview.attachment ? `📎 ${form.preview.attachment} · ` : ""}
-              {form.preview.ruleName ? `Rule: ${form.preview.ruleName}` : "Built-in text — add a Manual rule to change it"}
-            </p>
+        {/* the mail itself, as Alerts & Escalations will build it */}
+        {p && sendEmail && (
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+              <SectionTitle icon={Mail} tone="bg-slate-700 text-white">The mail</SectionTitle>
+            </div>
+            <div className="space-y-2 p-4">
+              {!p.emailEnabled && (
+                <p className="flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-inset ring-rose-200">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  Email is switched off in Alerts &amp; Escalations → Channels — sending will be refused.
+                </p>
+              )}
+              {p.sandbox && (
+                <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-inset ring-amber-200">
+                  <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  Sandbox is on — this goes to {p.sandbox.email || "the test email (not set yet)"}, not the vendor.
+                </p>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {p.attachment && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-200">
+                    <Paperclip className="h-3 w-3" /> {p.attachment}
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                  <ScrollText className="h-3 w-3" /> {p.ruleName ? `Rule: ${p.ruleName}` : "Built-in text — add a Manual rule to change it"}
+                </span>
+              </div>
+            </div>
           </div>
         )}
+      </div>
+
+      {/* Right — who this mail reaches. All read-only: vendor contacts are set
+          on the vendor, internal CC on the Alerts & Escalations rule. */}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+          <SectionTitle
+            icon={Users} tone="bg-emerald-500 text-white"
+            right={<span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-400"><Lock className="h-3 w-3" /> read-only</span>}
+          >
+            Recipients
+          </SectionTitle>
+        </div>
+        <div className="space-y-4 p-4">
+          <div>
+            <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700">To · vendor</p>
+            <RecipientChips
+              items={row.mailTo || []} tone="emerald" warn={missingTo}
+              empty="No contact on this vendor is marked To — the mail cannot be sent."
+            />
+          </div>
+          <div>
+            <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-sky-700">CC · vendor</p>
+            <RecipientChips items={row.mailCc || []} tone="sky" empty="None" />
+          </div>
+
+          <div className="rounded-xl bg-violet-50/50 p-3 ring-1 ring-inset ring-violet-100">
+            <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-violet-700">
+              <Lock className="h-3 w-3" /> Internal CC · our team
+            </p>
+            <RecipientChips
+              items={internalCc.map((email) => ({ email }))} tone="violet"
+              empty={p ? "None set on the PO mail rule." : "Loading…"}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -339,7 +363,6 @@ export const SendMailFields = ({ row, form }) => {
 const SendMailPopup = ({ row, onClose, onDone }) => {
   const form = useSendMailForm(row);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
   const [result, setResult] = useState(null); // "SENT" | "MANUAL" | "SKIPPED"
 
   // First sends happen inside Review PO, so this popup is normally a resend.
@@ -354,19 +377,18 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
 
   const submit = async () => {
     if (form.sendEmail && missingTo) {
-      return setError(
+      return toast.error(
         "This vendor has no contact marked To. Open Master → Vendors, edit " +
           (row.vendorName || "the vendor") +
           ", and set at least one contact's Recipient Type to To."
       );
     }
     setSaving(true);
-    setError(null);
     try {
       setResult(await submitSendMail(row.poId, form));
       setTimeout(() => onDone(), 900);
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
@@ -389,11 +411,9 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
 
   return (
     <Modal onClose={onClose} title={title}>
-      {error && <div className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
-
       {missingTo && form.sendEmail && (
-        <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
-          <span className="mt-0.5 shrink-0">⚠</span>
+        <div className="mb-4 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <span>
             <strong>{row.vendorName || "This vendor"}</strong> has no contact marked <strong>To</strong>.
             Edit the vendor and set one, or switch off Send Email Notification to record it as Sent Manually or Skip Mail.
@@ -409,8 +429,9 @@ const SendMailPopup = ({ row, onClose, onDone }) => {
         </button>
         <button
           type="button" disabled={saving || (form.sendEmail && missingTo) || needsSkipChoice(form)} onClick={submit}
-          className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-indigo-600 to-violet-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:from-indigo-500 hover:to-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
+          {form.sendEmail && <Send className="h-4 w-4" />}
           {!form.sendEmail
             ? saving ? "Saving…" : "Save"
             : saving ? (isResend ? "Resending…" : "Sending…") : isResend ? "Resend" : "Send"}

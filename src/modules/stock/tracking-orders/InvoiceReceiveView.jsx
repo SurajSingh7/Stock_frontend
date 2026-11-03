@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import toast from "react-hot-toast";
 import { fetchTrackingDetail, fetchInvoice, fetchInvoicesForTracking, fetchProductDefinition, saveInvoiceItems } from "./trackingApi";
 import { invoiceFileUrl } from "@/modules/stock/shared/InvoiceInfoPopups";
 import { unitLabel, Modal } from "@/modules/stock/shared/StockSharedUI";
@@ -451,7 +452,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
 /* ============================================================= */
 
 const STATUS_PILL = {
-  ADDED: { label: "Added", cls: "border-slate-200 bg-slate-50 text-slate-700" },
+  UPLOADED: { label: "Invoice Uploaded", cls: "border-slate-200 bg-slate-50 text-slate-700" },
   DRAFT: { label: "Draft", cls: "border-sky-200 bg-sky-50 text-sky-700" },
   REJECTED: { label: "Rejected · fix and resubmit", cls: "border-rose-200 bg-rose-50 text-rose-700" },
 };
@@ -464,7 +465,7 @@ const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 const INVOICE_STATUS_META = {
-  ADDED: { label: "Added", cls: "bg-slate-100 text-slate-700" },
+  UPLOADED: { label: "Invoice Uploaded", cls: "bg-slate-100 text-slate-700" },
   DRAFT: { label: "Draft", cls: "bg-sky-100 text-sky-700" },
   PENDING: { label: "Pending approval", cls: "bg-amber-100 text-amber-800" },
   IN_PROGRESS: { label: "In progress", cls: "bg-violet-100 text-violet-700" },
@@ -592,7 +593,6 @@ const fmtDateTime = (d) =>
 */
 const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDone }) => {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [saving, setSaving] = useState(null); // "draft" | "submit" | null
 
   const [po, setPo] = useState(null);
@@ -608,7 +608,6 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
   useEffect(() => {
     (async () => {
       setLoading(true);
-      setError(null);
       try {
         const [detail, inv, siblings] = await Promise.all([
           fetchTrackingDetail(trackingOrderId),
@@ -657,7 +656,7 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         setLines(initial);
         setActiveTabId(inv.lines?.[0] ? String(inv.lines[0].quotationItemId) : null);
       } catch (err) {
-        setError(err.message);
+        toast.error(err.message);
       } finally {
         setLoading(false);
       }
@@ -768,11 +767,9 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
   };
 
   const save = async (submit) => {
-    setError(null);
     const problem = validate(submit);
     if (problem) {
-      setError(problem);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast.error(problem);
       return;
     }
     setSaving(submit ? "submit" : "draft");
@@ -784,10 +781,10 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
           quotationItemId, receivedQuantity, focQuantity, rows, rating,
         })),
       });
+      toast.success(submit ? "Items submitted for approval" : "Draft saved");
       onDone();
     } catch (err) {
-      setError(err.message);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast.error(err.message);
     } finally {
       setSaving(null);
     }
@@ -882,14 +879,6 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         )}
       </div>
 
-      {error && (
-        <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          <span>{error}</span>
-          <button type="button" onClick={() => setError(null)} className="shrink-0 rounded p-0.5 text-rose-400 hover:text-rose-700">
-            <IconX />
-          </button>
-        </div>
-      )}
       {partial && targetEntry?.status === "REJECTED" && targetEntry.rejectedReason && (
         <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           <span className="font-semibold">Entry {targetEntry.entryNumber} rejected{targetEntry.reviewedByName ? ` by ${targetEntry.reviewedByName}` : ""}:</span> {targetEntry.rejectedReason}

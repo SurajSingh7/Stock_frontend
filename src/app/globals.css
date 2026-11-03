@@ -25,6 +25,17 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* `animate-blink` — a warning that fades fully out and back, so it catches the eye.
+   Plain CSS rather than a @theme token, so it does not depend on Tailwind's class scan. */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.1; }
+}
+
+.animate-blink {
+  animation: blink 1s ease-in-out infinite;
+}
+
 /* Light sweep across a card while it loads (AI invoice scan). */
 @keyframes shimmer {
   100% { transform: translateX(100%); }

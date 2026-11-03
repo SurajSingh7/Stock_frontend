@@ -35,7 +35,7 @@ export const navCategories = [
       // Read-only register of what was decided against. Its own moduleKey so
       // seeing that history is granted apart from the right to create it.
       {
-        name: "Not Required",
+        name: "Skipped Orders",
         path: "/stock/purchase/not-required",
         moduleKey: "not-required",
         action: ["VIEW_MENU"],

@@ -2,20 +2,26 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import toast from "react-hot-toast";
 import { fetchTrackingBoard, assignTrackingEntity, trackingAction, fetchInvoicesForTracking, deleteInvoice as removeInvoice, setInvoicePartial } from "./trackingApi";
 import { poPdfUrl } from "@/modules/stock/purchaseOrder/purchaseOrderApi";
 import { invoiceFileUrl } from "@/modules/stock/shared/InvoiceInfoPopups";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
+import { fetchScopedBranches, fetchLeafCategories } from "@/modules/stock/shared/lookupsApi";
+import { SearchableSelect as LookupSelect } from "@/modules/stock/shared/StockSharedUI";
+import DateRangeButton from "@/modules/stock/shared/DateRangeButton";
+import MailInfoPopup from "@/modules/stock/shared/MailInfoPopup";
 import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
-import StatusTracker, { stageIndexForStatus } from "./StatusTracker";
+import StatusTracker from "./StatusTracker";
+import { TRACKING_STATUS_META as STATUS_META, TRACKING_STATUS as TS } from "./trackingStatus";
 import InvoiceReceiveView from "./InvoiceReceiveView";
 import AddInvoicePopup from "./AddInvoicePopup";
 import { EntriesContent } from "./InvoiceEntries";
 import { usePermissions } from "@/context/PermissionContext";
 import { anchorRect } from "@/modules/stock/shared/anchorRect";
 import { MAIL_MODE_META } from "@/modules/stock/purchaseOrder/SendMailPopup";
-import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck } from "lucide-react";
+import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck, Truck, Trash2 } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 const fmt = (d) =>
@@ -27,67 +33,34 @@ const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
 const labelCls = "mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-700";
 
-// Same pill-style date field as the PO Approval page's date range filter.
-const DateField = ({ label, value, onChange }) => (
-  <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-    <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{label}</span>
-    <input
-      type="date"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-[150px] rounded-lg border border-slate-200 bg-white py-1.5 px-3 text-sm text-slate-900 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-    />
-  </div>
-);
-
-// `badge`/`dot` = soft ring style (filter dropdown, small chips).
-// `pill` = solid, colorful fill used on the card header — the punchy look.
-const STATUS_META = {
-  ENTITY_PENDING: { label: "Entity Pending", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", border: "border-l-amber-400", pill: "bg-amber-500 text-white" },
-  PO_PENDING: { label: "PO Pending", badge: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500", border: "border-l-orange-400", pill: "bg-orange-500 text-white" },
-  PO_GENERATED: { label: "PO Generated", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500", border: "border-l-sky-400", pill: "bg-sky-500 text-white" },
-  PO_APPROVED: { label: "PO Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
-  IN_PROGRESS: { label: "In Progress", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500", border: "border-l-amber-400", pill: "bg-amber-500 text-white" },
-  PARTIAL: { label: "Partial", badge: "bg-yellow-50 text-yellow-700 ring-yellow-200", dot: "bg-yellow-500", border: "border-l-yellow-400", pill: "bg-yellow-500 text-white" },
-  FULLY_CLOSED: { label: "Fully Closed", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", border: "border-l-emerald-400", pill: "bg-emerald-500 text-white" },
-  // Violet, not emerald: both are end states, but this one did not get
-  // everything that was ordered and should not read as a success.
-  SHORT_CLOSED: { label: "Short Closed", badge: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500", border: "border-l-violet-400", pill: "bg-violet-500 text-white" },
-  REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400", pill: "bg-rose-500 text-white" },
-  NOT_REQUIRED: { label: "Not Required", badge: "bg-slate-100 text-slate-500 ring-slate-200", dot: "bg-slate-400", border: "border-l-slate-300", pill: "bg-slate-400 text-white" },
-};
-
+// Same order as the status tracker: PO Rejected right where it happens,
+// after PO Generated; Closed Short beside Fully Received.
 const TAB_LIST = [
   { key: "", label: "All" },
-  { key: "ENTITY_PENDING", label: "Entity Pending" },
-  { key: "PO_PENDING", label: "PO Pending" },
-  { key: "PO_GENERATED", label: "PO Generated" },
-  { key: "PO_APPROVED", label: "PO Approved" },
-  { key: "IN_PROGRESS", label: "In Progress" },
-  { key: "PARTIAL", label: "Partial" },
-  { key: "FULLY_CLOSED", label: "Fully Closed" },
-  { key: "SHORT_CLOSED", label: "Short Closed" },
-  { key: "REJECTED", label: "PO Rejected" },
+  ...[
+    TS.ENTITY_PENDING, TS.PO_PENDING, TS.PO_GENERATED, TS.REJECTED, TS.PO_APPROVED,
+    TS.AWAITING_DELIVERY, TS.PARTLY_RECEIVED, TS.FULLY_RECEIVED, TS.CLOSED_SHORT,
+  ].map((key) => ({ key, label: STATUS_META[key].label })),
   // No NOT_REQUIRED tab — a vendor dropped whole leaves this board entirely
   // and is read (and undone) on the Not Required register.
 ];
 
 const DEFAULT_COUNTS = {
   ALL: 0, ENTITY_PENDING: 0, PO_PENDING: 0, PO_GENERATED: 0,
-  PO_APPROVED: 0, IN_PROGRESS: 0, PARTIAL: 0, FULLY_CLOSED: 0, SHORT_CLOSED: 0, REJECTED: 0,
+  PO_APPROVED: 0, AWAITING_DELIVERY: 0, PARTLY_RECEIVED: 0, FULLY_RECEIVED: 0, CLOSED_SHORT: 0, REJECTED: 0,
 };
 
 // Add Items only while there's still something to receive. Receiving opens at
 // PO_APPROVED — there is no PO_SENT stage any more, approving a PO mails it.
-const RECEIVABLE_STATUSES = new Set(["PO_APPROVED", "IN_PROGRESS", "PARTIAL"]);
+const RECEIVABLE_STATUSES = new Set([TS.PO_APPROVED, TS.AWAITING_DELIVERY, TS.PARTLY_RECEIVED]);
 // Overall Summary / Invoices are meaningful once the PO has been approved.
-const RECEIVING_FLOW_STATUSES = new Set(["PO_APPROVED", "IN_PROGRESS", "PARTIAL", "FULLY_CLOSED", "SHORT_CLOSED"]);
+const RECEIVING_FLOW_STATUSES = new Set([TS.PO_APPROVED, TS.AWAITING_DELIVERY, TS.PARTLY_RECEIVED, TS.FULLY_RECEIVED, TS.CLOSED_SHORT]);
 
-// Short close closes an order EARLY, so it is offered only where "we got some
+// Close Short closes an order EARLY, so it is offered only where "we got some
 // of it and that is all we are getting" is true. RECEIVABLE_STATUSES above is
-// deliberately untouched — SHORT_CLOSED is absent from it, which is what stops
+// deliberately untouched — CLOSED_SHORT is absent from it, which is what stops
 // Add Items, on the server as well as here.
-const SHORT_CLOSABLE_STATUSES = new Set(["PARTIAL"]);
+const SHORT_CLOSABLE_STATUSES = new Set([TS.PARTLY_RECEIVED]);
 
 /*
   Whether this user holds one action on the tracking-orders module.
@@ -124,7 +97,7 @@ const SearchableSelect = ({ value, onChange, options, placeholder = "All" }) => 
   const filtered = options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase()));
 
   return (
-    <div className="relative w-full sm:w-64" ref={ref}>
+    <div className="relative w-full sm:w-52" ref={ref}>
       <button
         type="button" onClick={() => setOpen((o) => !o)}
         className={`${inputCls} flex items-center justify-between text-left`}
@@ -214,12 +187,61 @@ const Modal = ({ onClose, title, children, maxWidth = "max-w-lg" }) => {
 /* Popups                                                         */
 /* ============================================================= */
 
+/*
+  Our own confirm, in place of the browser's window.confirm. tone "danger"
+  (delete) is red; "primary" (a setting switch) is indigo. onConfirm may be
+  async — the button shows the work in progress and the dialog closes after.
+*/
+const CONFIRM_TONE = {
+  danger: { icon: "bg-rose-50 text-rose-600 ring-rose-100", btn: "bg-rose-600 hover:bg-rose-500" },
+  primary: { icon: "bg-indigo-50 text-indigo-600 ring-indigo-100", btn: "bg-indigo-600 hover:bg-indigo-500" },
+};
+
+const ConfirmDialog = ({ title, message, confirmLabel = "Confirm", tone = "primary", Icon = Info, onCancel, onConfirm }) => {
+  const [busy, setBusy] = useState(false);
+  const t = CONFIRM_TONE[tone] || CONFIRM_TONE.primary;
+  const go = async () => {
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal onClose={busy ? () => {} : onCancel} maxWidth="max-w-md">
+      <div className="flex items-start gap-3">
+        <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${t.icon}`}>
+          <Icon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-base font-semibold text-slate-900">{title}</p>
+          <p className="mt-1 text-sm leading-relaxed text-slate-600">{message}</p>
+        </div>
+      </div>
+      <div className="mt-6 flex justify-end gap-2.5">
+        <button
+          type="button" onClick={onCancel} disabled={busy}
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={go} disabled={busy}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${t.btn}`}
+        >
+          {busy ? "Please wait…" : confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
 const AddEntityPopup = ({ row, onClose, onDone }) => {
   const { entities, aliases, loading } = useInternalEntities();
   const [alias, setAlias] = useState("");
   const [entityId, setEntityId] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
 
   const statesForAlias = entities.filter((e) => e.alias === alias);
   const selectedEntity = entities.find((e) => String(e._id) === String(entityId)) || null;
@@ -248,17 +270,18 @@ const AddEntityPopup = ({ row, onClose, onDone }) => {
   };
 
   const submit = async () => {
-    if (!selectedEntity) return setError("Select entity and state");
-    setBusy(true); setError(null);
+    if (!selectedEntity) return toast.error("Select entity and state");
+    setBusy(true);
     try {
       await assignTrackingEntity(row.trackingOrderId, {
         entityId: selectedEntity._id, name: selectedEntity.name, alias: selectedEntity.alias,
         gstNumber: selectedEntity.gstNumber, address: selectedEntity.address,
         state: selectedEntity.state, stateCode: selectedEntity.stateCode,
       });
+      toast.success("Entity saved");
       onDone();
     } catch (e) {
-      setError(e.message);
+      toast.error(e.message);
     } finally {
       setBusy(false);
     }
@@ -266,7 +289,6 @@ const AddEntityPopup = ({ row, onClose, onDone }) => {
 
   return (
     <Modal onClose={onClose} title={`Add Entity · ${row.vendorName}`}>
-      {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
       {loading ? (
         <div className="h-24 animate-pulse rounded-xl bg-slate-100" />
       ) : (
@@ -339,7 +361,7 @@ const AddEntityPopup = ({ row, onClose, onDone }) => {
 export const ExclusionPopup = ({
   row,
   endpoint = "not-required",
-  title = "Mark as Not Required",
+  title = "Skip Order",
   confirmLabel = "Save decision",
   onClose,
   onDone,
@@ -354,7 +376,6 @@ export const ExclusionPopup = ({
   const [keptIds, setKeptIds] = useState(() => new Set(ordered.map((it) => String(it.quotationItemId))));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
 
   const toggle = (id) =>
     setKeptIds((prev) => {
@@ -374,12 +395,13 @@ export const ExclusionPopup = ({
     excluded.every((e) => excludedIds.includes(String(e.quotationItemId)));
 
   const submit = async () => {
-    setBusy(true); setError(null);
+    setBusy(true);
     try {
       await trackingAction(row.trackingOrderId, endpoint, { excludedItemIds: excludedIds, reason: reason.trim() });
+      toast.success("Decision saved");
       onDone();
     } catch (e) {
-      setError(e.message);
+      toast.error(e.message);
     } finally {
       setBusy(false);
     }
@@ -387,12 +409,11 @@ export const ExclusionPopup = ({
 
   return (
     <Modal onClose={onClose} title={`${title} · ${row.vendorName}`}>
-      {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
 
       <div className="mb-4 flex flex-col gap-2">
         {[
-          { val: true, label: "This vendor is not required at all" },
-          { val: false, label: "Only some products are not required" },
+          { val: true, label: "Skip this vendor's whole order" },
+          { val: false, label: "Skip only some products" },
         ].map((opt) => (
           <label key={String(opt.val)} className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-700">
             <input
@@ -437,7 +458,7 @@ export const ExclusionPopup = ({
 
       {nothingLeft && !wholeVendor && (
         <p className="mb-3 text-xs font-medium text-amber-700">
-          Nothing is left ticked — this vendor will be marked Not Required.
+          Nothing is left ticked — this vendor&apos;s whole order will be skipped.
         </p>
       )}
 
@@ -508,7 +529,7 @@ const OverallSummaryPopup = ({ row, invoices, onClose }) => {
 };
 
 const INVOICE_STATUS_META = {
-  ADDED: { label: "Added", badge: "bg-slate-50 text-slate-700 ring-slate-200", dot: "bg-slate-400" },
+  UPLOADED: { label: "Invoice Uploaded", badge: "bg-slate-50 text-slate-700 ring-slate-200", dot: "bg-slate-400" },
   DRAFT: { label: "Draft", badge: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500" },
   PENDING: { label: "Pending approval", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
   APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
@@ -755,7 +776,7 @@ const ItemsCell = ({ lines }) => {
 
 // The one thing to do next on an invoice, by its status.
 const NEXT_ACTION = {
-  ADDED: { label: "+ Add Items", cls: "bg-blue-600 text-white hover:bg-blue-500" },
+  UPLOADED: { label: "+ Add Items", cls: "bg-blue-600 text-white hover:bg-blue-500" },
   DRAFT: { label: "Continue", cls: "bg-sky-600 text-white hover:bg-sky-500" },
   REJECTED: { label: "Fix items", cls: "border border-orange-200 bg-white text-orange-600 hover:bg-orange-50" },
 };
@@ -800,7 +821,7 @@ const RowActionMenu = ({ invoice, canEditInvoice, canPartial, onView, onAddItems
       : invoice.hasDraftEntry
         ? NEXT_ACTION.DRAFT
         : (invoice.qtyLeftToEnter || 0) > 0
-          ? NEXT_ACTION.ADDED
+          ? NEXT_ACTION.UPLOADED
           : null
     : NEXT_ACTION[invoice.status];
   const menu = [
@@ -1119,66 +1140,6 @@ const gstSummaryLabel = (row) => {
   return "—";
 };
 
-/*
-  How this PO reached the vendor.
-
-  Three different things can sit behind the mail icon on the card: the system
-  emailed it (Mail Sent), somebody sent it outside the system (Sent Manually),
-  or nobody sent it and the order moved on anyway (Mail Skipped). The icon's
-  colour hints which; this says which, and to whom.
-*/
-const MAIL_INFO_COPY = {
-  SENT: {
-    heading: "Mail Sent — emailed by the system",
-    body: "The PO was emailed from here and the delivery was recorded, so the addresses below are exactly what it went to.",
-    at: "Sent at",
-  },
-  MANUAL: {
-    heading: "Sent Manually — outside the system",
-    body: "Somebody sent this PO themselves — by their own email, WhatsApp, or by hand — and marked it done. Nothing was sent from this system, so there are no delivery details beyond what they recorded.",
-    at: "Recorded at",
-  },
-  SKIPPED: {
-    heading: "Mail Skipped — not sent to the vendor",
-    body: "No mail went to the vendor. The order was allowed to move on without it, and the mail can still be sent from Purchase Orders.",
-    at: "Skipped at",
-  },
-};
-
-const MailInfoPopup = ({ row, onClose }) => {
-  const mr = row.mailResult || {};
-  const bySystem = mr.mode === "SENT";
-  const copy = MAIL_INFO_COPY[mr.mode] || MAIL_INFO_COPY.MANUAL;
-  const meta = MAIL_MODE_META[mr.mode] || MAIL_MODE_META.MANUAL;
-  const list = (arr) => (arr && arr.length ? arr.join(", ") : "—");
-
-  return (
-    <Modal onClose={onClose} title={`Mail · ${row.poNumber || row.vendorName}`}>
-      <div className={`mb-4 flex items-center gap-2 rounded-xl px-3 py-2.5 ring-1 ring-inset ${meta.badge}`}>
-        <MailCheck className="h-4 w-4 shrink-0" />
-        <p className="text-sm font-semibold">{copy.heading}</p>
-      </div>
-
-      <p className="mb-3 text-sm text-slate-600">{copy.body}</p>
-
-      <div className="space-y-2 rounded-xl border border-slate-200 p-3">
-        <SummaryField label={copy.at} value={mr.sentAt ? `${fmt(mr.sentAt)} ${fmtTime(mr.sentAt)}` : "—"} />
-        {mr.note ? <SummaryField label="Note" value={mr.note} /> : null}
-        {bySystem && <SummaryField label="From" value={mr.from || "—"} />}
-        {bySystem && <SummaryField label="To" value={list(mr.to)} />}
-        {bySystem && mr.cc?.length ? <SummaryField label="Cc" value={list(mr.cc)} /> : null}
-        {mr.channel ? <SummaryField label="Channel" value={mr.channel} /> : null}
-      </div>
-
-      <div className="mt-5 flex justify-end">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">
-          Close
-        </button>
-      </div>
-    </Modal>
-  );
-};
-
 /* ============================================================= */
 /* Short close / reopen — one popup for both, because they ask    */
 /* for exactly the same thing: a reason. Only the wording, the    */
@@ -1186,11 +1147,12 @@ const MailInfoPopup = ({ row, onClose }) => {
 /* ============================================================= */
 const CLOSURE_COPY = {
   shortClose: {
-    title: "Short Close",
+    title: "Close Short",
     endpoint: "short-close",
-    confirm: "Short Close",
+    confirm: "Close Short",
     placeholder: "Vendor cancelled the remaining quantity…",
-    note: "No more items can be received against this order once it is short closed. It can be reopened later if that changes.",
+    note: "No more items can be received against this order once it is closed short. It can be reopened later if that changes.",
+    done: "Order closed short",
     tone: "amber",
   },
   reopen: {
@@ -1198,7 +1160,8 @@ const CLOSURE_COPY = {
     endpoint: "reopen",
     confirm: "Reopen",
     placeholder: "Vendor has agreed to send the balance…",
-    note: "The order goes back to Partial and items can be received against it again.",
+    note: "The order goes back to Partly Received and items can be received against it again.",
+    done: "Order reopened",
     tone: "violet",
   },
 };
@@ -1207,15 +1170,15 @@ const ClosureDecisionPopup = ({ row, mode, onClose, onDone }) => {
   const copy = CLOSURE_COPY[mode];
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
 
   const submit = async () => {
-    setBusy(true); setError(null);
+    setBusy(true);
     try {
       await trackingAction(row.trackingOrderId, copy.endpoint, { reason: reason.trim() });
+      toast.success(copy.done);
       onDone();
     } catch (e) {
-      setError(e.message);
+      toast.error(e.message);
     } finally {
       setBusy(false);
     }
@@ -1228,7 +1191,6 @@ const ClosureDecisionPopup = ({ row, mode, onClose, onDone }) => {
 
   return (
     <Modal onClose={onClose} title={`${copy.title} · ${row.vendorName}`}>
-      {error && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>}
 
       <label className="mb-1.5 block text-xs font-semibold text-slate-700">
         Reason <span className="text-rose-500">*</span>
@@ -1274,7 +1236,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
   // approving it afterwards would change a total that was already declared
   // final. The server refuses it too; this only puts the reason on screen.
   // Added / Draft count too: those goods have arrived, just not been entered.
-  const pendingInvoices = invoices.filter((inv) => ["ADDED", "DRAFT", "PENDING", "IN_PROGRESS"].includes(inv.status)).length;
+  const pendingInvoices = invoices.filter((inv) => ["UPLOADED", "DRAFT", "PENDING", "IN_PROGRESS"].includes(inv.status)).length;
 
   // How many approved products were dropped, and how many there were to begin
   // with. items[] already excludes them, so the original total is the two added
@@ -1295,34 +1257,51 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
   const tab = pickedTab ?? (hasInvoices ? "invoice" : "products");
   const setTab = setPickedTab;
   const [popup, setPopup] = useState(null); // { type: "overallSummary" | "viewInvoice" | "mailInfo" | "priceInfo", ... }
-  const [cardError, setCardError] = useState(null);
 
   // ⋮ → Partial submit ON/OFF. The server refuses it once entries are submitted.
-  const togglePartial = async (inv) => {
+  const togglePartial = (inv) => {
     const turnOn = !inv.partialSubmit;
-    const msg = turnOn
-      ? `Turn ON partial submit for ${inv.invoiceNumber}? Items can then be submitted a part at a time, each part approved on its own.`
-      : `Turn OFF partial submit for ${inv.invoiceNumber}? The whole invoice will then be submitted once, complete.`;
-    if (!window.confirm(msg)) return;
-    setCardError(null);
-    try {
-      await setInvoicePartial(inv._id, turnOn);
-      onChanged();
-    } catch (e) {
-      setCardError(e.message);
-    }
+    setPopup({
+      type: "confirm",
+      title: `Turn ${turnOn ? "ON" : "OFF"} partial submit?`,
+      message: turnOn
+        ? `${inv.invoiceNumber} — items can then be submitted a part at a time, each part approved on its own.`
+        : `${inv.invoiceNumber} — the whole invoice will then be submitted once, complete.`,
+      confirmLabel: turnOn ? "Turn ON" : "Turn OFF",
+      tone: "primary",
+      onConfirm: async () => {
+        try {
+          await setInvoicePartial(inv._id, turnOn);
+          toast.success(`Partial submit turned ${turnOn ? "ON" : "OFF"} for ${inv.invoiceNumber}`);
+          setPopup(null);
+          onChanged();
+        } catch (e) {
+          toast.error(e.message);
+        }
+      },
+    });
   };
 
   // An invoice added by mistake — the server refuses an approved one.
-  const deleteInvoice = async (inv) => {
-    if (!window.confirm(`Delete invoice ${inv.invoiceNumber}? This cannot be undone.`)) return;
-    setCardError(null);
-    try {
-      await removeInvoice(inv._id);
-      onChanged();
-    } catch (e) {
-      setCardError(e.message);
-    }
+  const deleteInvoice = (inv) => {
+    setPopup({
+      type: "confirm",
+      title: `Delete invoice ${inv.invoiceNumber}?`,
+      message: "The invoice and anything entered against it will be removed. This cannot be undone.",
+      confirmLabel: "Delete",
+      tone: "danger",
+      Icon: Trash2,
+      onConfirm: async () => {
+        try {
+          await removeInvoice(inv._id);
+          toast.success(`Invoice ${inv.invoiceNumber} deleted`);
+          setPopup(null);
+          onChanged();
+        } catch (e) {
+          toast.error(e.message);
+        }
+      },
+    });
   };
 
   const loadInvoices = useCallback(async () => {
@@ -1341,7 +1320,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
 
   return (
     <div
-      onMouseEnter={() => onHoverStage(stageIndexForStatus(row.status))}
+      onMouseEnter={() => onHoverStage(row.status)}
       onMouseLeave={() => onHoverStage(null)}
       className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm border-t-4 ${m.border ? m.border.replace("border-l-", "border-t-") : "border-t-slate-200"}`}
     >
@@ -1356,7 +1335,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
           <span className="text-base font-bold text-slate-900">
             PO Number : <span className="font-semibold text-slate-900">{row.poNumber || "—"}</span>
           </span>
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide shadow-sm ${m.pill || "bg-slate-400 text-white"}`}>
+          <span title={m.hint} className={`inline-flex cursor-default items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide shadow-sm ${m.pill || "bg-slate-400 text-white"}`}>
             <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
             {m.label || row.status}
           </span>
@@ -1408,7 +1387,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               type="button" onClick={() => onNotRequired(row)}
               className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50"
             >
-              <Ban className="h-3.5 w-3.5" /> Not Required
+              <Ban className="h-3.5 w-3.5" /> Skip Order
             </button>
           )}
           {isReceivingFlow && (
@@ -1434,10 +1413,10 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               }
               className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 shadow-sm transition hover:border-amber-400 hover:bg-amber-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
             >
-              <Ban className="h-3.5 w-3.5" /> Short Close
+              <Ban className="h-3.5 w-3.5" /> Close Short
             </button>
           )}
-          {canReopen && row.status === "SHORT_CLOSED" && (
+          {canReopen && row.status === TS.CLOSED_SHORT && (
             <button
               type="button" onClick={() => onReopen(row)}
               title="Reopen this order so items can be received again"
@@ -1457,10 +1436,10 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
           {/* Kept on screen, disabled, so the order plainly still HAS a
               receiving action that short closing took away — rather than the
               button vanishing and leaving no trace of why. */}
-          {row.status === "SHORT_CLOSED" && (
+          {row.status === TS.CLOSED_SHORT && (
             <button
               type="button" disabled
-              title="This order is short closed — reopen it to receive more"
+              title="This order is closed short — reopen it to receive more"
               className="inline-flex cursor-not-allowed items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-400 shadow-sm"
             >
               <PlusCircle className="h-3.5 w-3.5" /> Add Invoice
@@ -1560,7 +1539,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
             <span
               title={
                 droppedCount > 0
-                  ? `${droppedCount} of ${approvedTotal} approved products are Not Required — open History to see who dropped them and why`
+                  ? `${droppedCount} of ${approvedTotal} approved products are skipped — open History to see who skipped them and why`
                   : undefined
               }
               className={
@@ -1594,12 +1573,6 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
       <div className="border-t border-slate-100 px-5 py-4">
         {tab === "invoice" ? (
           <>
-            {cardError && (
-              <div className="mb-3 flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
-                <span>{cardError}</span>
-                <button type="button" onClick={() => setCardError(null)} className="font-bold">&times;</button>
-              </div>
-            )}
             <InvoiceTableBlock
               invoices={invoices}
               loading={invLoading}
@@ -1630,6 +1603,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
         />
       )}
       {popup?.type === "mailInfo" && <MailInfoPopup row={row} onClose={() => setPopup(null)} />}
+      {popup?.type === "confirm" && <ConfirmDialog {...popup} onCancel={() => setPopup(null)} />}
     </div>
   );
 };
@@ -1649,13 +1623,15 @@ const TrackingOrdersComp = () => {
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [popup, setPopup] = useState(null);
   const [hoveredStage, setHoveredStage] = useState(null);
 
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [entityAlias, setEntityAlias] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
@@ -1669,12 +1645,29 @@ const TrackingOrdersComp = () => {
     return () => clearTimeout(id);
   }, [search]);
 
+  const { aliases } = useInternalEntities();
+  const [branchOptions, setBranchOptions] = useState([]);
+  const [categoryOptions, setCategoryOptions] = useState([]);
+  useEffect(() => {
+    fetchScopedBranches("tracking-orders")
+      .then((list) => setBranchOptions(list.map((b) => ({ value: String(b._id), label: b.name }))))
+      .catch(() => setBranchOptions([]));
+    fetchLeafCategories()
+      .then((list) => setCategoryOptions(list.map((c) => ({ value: String(c._id), label: c.displayPath || c.name }))))
+      .catch(() => setCategoryOptions([]));
+  }, []);
+  // The parent entity only (WIBRO, GTEL …) — every state of it together.
+  const entityOptions = aliases.map((a) => ({ value: a, label: a }));
+
   const loadBoard = useCallback(async () => {
-    setLoading(true); setError(null);
+    setLoading(true);
     try {
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (status) params.set("status", status);
+      if (branchId) params.set("branchId", branchId);
+      if (entityAlias) params.set("entityAlias", entityAlias);
+      if (categoryId) params.set("categoryId", categoryId);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
       params.set("page", String(page));
@@ -1686,17 +1679,20 @@ const TrackingOrdersComp = () => {
       setCounts(json.data?.counts || DEFAULT_COUNTS);
       setPagination(json.pagination || { total: 0, totalPages: 1 });
     } catch (e) {
-      setError(e.message); setBoard([]);
+      toast.error(e.message || "Failed to load tracking orders"); setBoard([]);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, status, dateFrom, dateTo, page, limit]);
+  }, [debouncedSearch, status, branchId, entityAlias, categoryId, dateFrom, dateTo, page, limit]);
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
 
   const refresh = () => { loadBoard(); setPopup(null); setBoardVersion((v) => v + 1); };
-  const hasActiveFilters = !!search || !!status || !!dateFrom || !!dateTo;
-  const clearFilters = () => { setSearch(""); setStatus(""); setDateFrom(""); setDateTo(""); setPage(1); };
+  const hasActiveFilters = !!search || !!status || !!branchId || !!entityAlias || !!categoryId || !!dateFrom || !!dateTo;
+  const clearFilters = () => {
+    setSearch(""); setStatus(""); setBranchId(""); setEntityAlias(""); setCategoryId("");
+    setDateFrom(""); setDateTo(""); setPage(1);
+  };
 
   const backToBoard = () => { setView({ mode: "board" }); loadBoard(); setBoardVersion((v) => v + 1); };
 
@@ -1750,20 +1746,23 @@ const TrackingOrdersComp = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/60 p-6">
-      <div className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Tracking Orders</h1>
-        <p className="mt-0.5 text-sm text-slate-600">Follow every vendor order from entity assignment through goods receiving to completion.</p>
-      </div>
+    <div className="min-h-screen bg-slate-50/60 px-6 pb-6">
+      {/* Title, tracker and filters stay in view while the cards scroll —
+          top-14 sits them just under the fixed app header. Kept tight so the
+          cards get the screen. */}
+      <div className="sticky top-14 z-30 -mx-6 mb-4 border-b border-slate-200/70 bg-slate-50/95 px-6 pb-2.5 pt-3 backdrop-blur">
+      <h1 className="mb-2 flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+        <Truck className="h-5 w-5 text-indigo-600" /> Tracking Orders
+      </h1>
 
-      <StatusTracker activeStage={hoveredStage} />
+      <StatusTracker activeStatus={hoveredStage} />
 
-      <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm lg:flex-row lg:items-center lg:justify-between">
         <div className="relative lg:w-80">
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400"><Search className="h-4 w-4" /></span>
           <input
             value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            placeholder="Search quotation no, PO no, vendor, product..."
+            placeholder="Search quotation, PO, invoice no, vendor, product..."
             className={`${inputCls} pl-9`}
           />
         </div>
@@ -1778,8 +1777,22 @@ const TrackingOrdersComp = () => {
               count: t.key ? counts[t.key] ?? 0 : counts.ALL,
             }))}
           />
-          <DateField label="From:" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} />
-          <DateField label="To:" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} />
+          <div className="w-full sm:w-52">
+            <LookupSelect value={categoryId} onChange={(v) => { setCategoryId(v); setPage(1); }} options={categoryOptions} placeholder="All categories" />
+          </div>
+          <div className="w-full sm:w-36">
+            <LookupSelect value={entityAlias} onChange={(v) => { setEntityAlias(v); setPage(1); }} options={entityOptions} placeholder="All entities" />
+          </div>
+          {/* Branch = the vendor's branch (vendor master); an order has none of its own. */}
+          <div className="w-full sm:w-40">
+            <LookupSelect value={branchId} onChange={(v) => { setBranchId(v); setPage(1); }} options={branchOptions} placeholder="All branches" />
+          </div>
+          <DateRangeButton
+            from={dateFrom} to={dateTo}
+            onFrom={(v) => { setDateFrom(v); setPage(1); }}
+            onTo={(v) => { setDateTo(v); setPage(1); }}
+            hint="PO date; before a PO, the quotation approval date."
+          />
           {hasActiveFilters && (
             <button
               type="button" onClick={clearFilters}
@@ -1790,8 +1803,7 @@ const TrackingOrdersComp = () => {
           )}
         </div>
       </div>
-
-      {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      </div>
 
       {loading ? (
         <div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-40 animate-pulse rounded-2xl bg-slate-100" />)}</div>

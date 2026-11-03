@@ -1,16 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Sparkles, Check, RotateCw, Cpu, TriangleAlert, FileText } from "lucide-react";
-import { Modal } from "@/modules/stock/shared/StockSharedUI";
-import { ModelPicker } from "@/modules/master/aiSettings/aiSettingsShared";
+import { Sparkles, Check, RotateCw, TriangleAlert, FileText } from "lucide-react";
 
 /*
   The AI scan on Add Invoice, piece by piece:
     ScanProgress      green card while the file uploads and Claude reads it
     ScanSkeleton      shimmer where the form will appear
-    ScanResultBanner  "AI read your invoice" + warnings + Re-scan / Change model
-    ChangeModelPopup  pick the model (AI Settings · Update only), then re-scan
+    ScanResultBanner  "AI read your invoice" + warnings + Re-scan
+    ScanFailedBanner  the scan failed — Re-scan (the model is chosen in AI Settings)
 
   Upload progress is real (XHR). Claude answers in one go and reports no
   progress of its own, so the scan bar eases toward 90% against the model's
@@ -137,7 +135,7 @@ export const ScanSkeleton = () => (
   </div>
 );
 
-export const ScanResultBanner = ({ meta, warnings, onRescan, onChangeModel, busy }) => (
+export const ScanResultBanner = ({ meta, warnings, onRescan, busy }) => (
   <div className="space-y-2">
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3">
       <div className="flex items-start gap-2.5">
@@ -147,16 +145,9 @@ export const ScanResultBanner = ({ meta, warnings, onRescan, onChangeModel, busy
           <p className="text-xs text-emerald-800/80">Fields it filled are highlighted green — check them before saving.</p>
         </div>
       </div>
-      <div className="flex gap-2">
-        <button type="button" onClick={onRescan} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-50 disabled:opacity-50">
-          <RotateCw className="h-3.5 w-3.5" /> Re-scan
-        </button>
-        {onChangeModel && (
-          <button type="button" onClick={onChangeModel} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">
-            <Cpu className="h-3.5 w-3.5" /> Change model
-          </button>
-        )}
-      </div>
+      <button type="button" onClick={onRescan} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm hover:bg-emerald-50 disabled:opacity-50">
+        <RotateCw className="h-3.5 w-3.5" /> Re-scan
+      </button>
     </div>
     {warnings.length > 0 && (
       <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5">
@@ -169,42 +160,24 @@ export const ScanResultBanner = ({ meta, warnings, onRescan, onChangeModel, busy
   </div>
 );
 
-export const ScanFailedBanner = ({ message, onRescan, onChangeModel, busy }) => (
+// manualEntry: may the amount and quantities be typed by hand? When not,
+// the only way forward is a scan that works.
+export const ScanFailedBanner = ({ message, onRescan, busy, manualEntry }) => (
   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3">
-    <div>
-      <p className="text-sm font-semibold text-rose-800">AI couldn&apos;t read this invoice</p>
-      <p className="text-xs text-rose-700">{message} — fill in the details below by hand, or try again.</p>
+    <div className="flex min-w-0 items-start gap-2.5">
+      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-rose-800">AI couldn&apos;t read this invoice</p>
+        <p className="text-xs text-rose-700">{message}.</p>
+        <p className="mt-0.5 text-xs text-rose-600/80">
+          {manualEntry
+            ? "Fill in the details below by hand, or re-scan."
+            : "The amount and quantities come only from the scan — re-scan, or ask an admin to check AI Settings."}
+        </p>
+      </div>
     </div>
-    <div className="flex gap-2">
-      <button type="button" onClick={onRescan} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50">
-        <RotateCw className="h-3.5 w-3.5" /> Re-scan
-      </button>
-      {onChangeModel && (
-        <button type="button" onClick={onChangeModel} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">
-          <Cpu className="h-3.5 w-3.5" /> Change model
-        </button>
-      )}
-    </div>
+    <button type="button" onClick={onRescan} disabled={busy} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm hover:bg-rose-100 disabled:opacity-50">
+      <RotateCw className="h-3.5 w-3.5" /> Re-scan
+    </button>
   </div>
 );
-
-export const ChangeModelPopup = ({ models, current, onClose, onPick }) => {
-  const [value, setValue] = useState(current);
-  const [busy, setBusy] = useState(false);
-  return (
-    <Modal onClose={onClose} title="Change AI model" maxWidth="max-w-lg">
-      <p className="mb-3 text-xs text-slate-500">The model you pick becomes the default for every invoice scan, and this invoice is scanned again with it.</p>
-      <ModelPicker models={models} value={value} onChange={setValue} disabled={busy} />
-      <div className="mt-4 flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50">Cancel</button>
-        <button
-          type="button" disabled={busy}
-          onClick={async () => { setBusy(true); await onPick(value); setBusy(false); }}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 disabled:opacity-60"
-        >
-          {busy ? "Saving…" : value === current ? "Re-scan with this model" : "Save & re-scan"}
-        </button>
-      </div>
-    </Modal>
-  );
-};

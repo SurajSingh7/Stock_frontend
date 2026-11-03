@@ -4,6 +4,10 @@ const API_PORTAL_BACKEND_URL = process.env.NEXT_PUBLIC_PORTAL_BACKEND_URL || "ht
 const API_BACKEND_BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL_BASE  || "http://localhost:8006";
 const API_TINY_MCE = process.env.NEXT_PUBLIC_TINY_MCE || "";
 const SHOW_DEV = process.env.NEXT_PUBLIC_SHOW_DEV_MENU === "true";
+// Add Invoice: may "Amount on invoice" and the invoice quantities be typed by
+// hand? Only when this is exactly "true"; otherwise (false, anything else, or
+// unset) they are locked to what the AI scan read from the invoice.
+const INVOICE_MANUAL_ENTRY = process.env.NEXT_PUBLIC_INVOICE_MANUAL_ENTRY === "true";
 
 
-export {API_BASE_URL,API_BACKEND_URL,API_PORTAL_BACKEND_URL,API_BACKEND_BASE_URL,API_TINY_MCE,SHOW_DEV};
+export {API_BASE_URL,API_BACKEND_URL,API_PORTAL_BACKEND_URL,API_BACKEND_BASE_URL,API_TINY_MCE,SHOW_DEV,INVOICE_MANUAL_ENTRY};

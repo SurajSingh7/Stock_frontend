@@ -7,9 +7,10 @@ import { saveInvoice, invoiceReadUrl } from "./trackingApi";
 import toast from "react-hot-toast";
 import { Upload, FileText, ArrowLeft } from "lucide-react";
 import { Modal, money } from "@/modules/stock/shared/StockSharedUI";
-import { aiApi, useCan } from "@/modules/master/aiSettings/aiSettingsShared";
+import { aiApi } from "@/modules/master/aiSettings/aiSettingsShared";
+import { INVOICE_MANUAL_ENTRY } from "@/config/getEnvVariables";
 import {
-  uploadWithProgress, ScanProgress, ScanSkeleton, ScanResultBanner, ScanFailedBanner, ChangeModelPopup,
+  uploadWithProgress, ScanProgress, ScanSkeleton, ScanResultBanner, ScanFailedBanner,
 } from "./InvoiceScanParts";
 
 const inputCls =
@@ -27,26 +28,23 @@ const getData = async (path, query, fallback) => (await api.get(path, { query, f
 /*
   Add Invoice (and ⋮ → Edit invoice): the details exactly as the vendor's
   invoice states them — number, date, amount, and how many of each product.
-  Uploading the file has Claude read it (model from Master → AI Settings);
-  what it filled is highlighted and checked here before saving. If the scan
-  fails the form opens empty, to fill by hand. Items are entered afterwards,
-  from the invoice row's "+ Add Items".
+  Uploading the file has Claude read it (model from Master → AI Settings —
+  only there); what it filled is highlighted and checked here before saving.
+  "Amount on invoice" and the invoice quantities are locked to what the scan
+  read unless NEXT_PUBLIC_INVOICE_MANUAL_ENTRY is "true". Items are entered
+  afterwards, from the invoice row's "+ Add Items".
 */
 const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, invoice, onClose, onDone }) => {
   const isEdit = mode === "edit";
-  const can = useCan();
-  const canChangeModel = can("ai-settings", "UPDATE");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
 
   // AI scan: idle → uploading → scanning → done | failed
   const [scan, setScan] = useState({ phase: "idle", uploadPct: 0, startedAt: null, meta: null, error: "" });
   const [warnings, setWarnings] = useState([]);
   const [aiFilled, setAiFilled] = useState({}); // field key -> true while untouched
   const [scanCfg, setScanCfg] = useState(null); // { invoiceScan: { enabled, model }, models }
-  const [modelPopup, setModelPopup] = useState(false);
   const reading = scan.phase === "uploading" || scan.phase === "scanning";
   const untouch = (key) => setAiFilled((p) => (p[key] ? { ...p, [key]: false } : p));
 
@@ -104,7 +102,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
           setCompanyUse(!!invoice.companyUse);
         }
       } catch (e) {
-        setError(e.message);
+        toast.error(e.message);
       } finally {
         setLoading(false);
       }
@@ -121,6 +119,10 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
     return m;
   }, [invoice]);
   const qtyLocked = isEdit && ["PENDING", "APPROVED"].includes(invoice?.status);
+  // Amount + quantities by hand only when the env allows it; otherwise they
+  // are what the scan read (or, when editing, what was saved).
+  const amountLocked = !INVOICE_MANUAL_ENTRY;
+  const qtyInputLocked = qtyLocked || !INVOICE_MANUAL_ENTRY;
 
   // The same invoice priced at PO rates (+GST, + billed charges) — shown beside
   // the amount on the invoice so a mismatch is visible before saving.
@@ -135,8 +137,8 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
     return round2(lines + charges);
   }, [items, qty, extraCharges]);
 
-  // Which model will read the file — shown while scanning, and the list the
-  // "Change model" popup offers. Non-fatal: the scan works without it.
+  // Which model will read the file — shown while scanning. Non-fatal: the
+  // scan works without it. The model itself is changed only in AI Settings.
   useEffect(() => {
     if (isEdit) return;
     aiApi("/invoice-scan").then(setScanCfg).catch(() => {});
@@ -144,7 +146,6 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
   const modelLabel = (id) => scanCfg?.models?.find((m) => m.id === id)?.label || id;
 
   const runScan = async (f) => {
-    setError(null);
     setWarnings([]);
     setScan({ phase: "uploading", uploadPct: 0, startedAt: null, meta: null, error: "" });
     try {
@@ -184,50 +185,34 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
     const picked = e.target.files?.[0];
     e.target.value = "";
     if (!picked) return;
-    if (!ACCEPTED_UPLOAD_TYPES.includes(picked.type)) return setError("Only JPG, PNG, WEBP or PDF files are allowed");
-    if (picked.size > MAX_UPLOAD_BYTES) return setError("Invoice file is too large. Maximum is 5MB.");
-    setError(null);
+    if (!ACCEPTED_UPLOAD_TYPES.includes(picked.type)) return toast.error("Only JPG, PNG, WEBP or PDF files are allowed");
+    if (picked.size > MAX_UPLOAD_BYTES) return toast.error("Invoice file is too large. Maximum is 5MB.");
     setFile(picked);
     if (isEdit) return; // a replacement file does not overwrite what was checked by hand
     runScan(picked);
-  };
-
-  // "Change model": saves the pick as the default (needs AI Settings · Update), then re-scans.
-  const pickModel = async (model) => {
-    try {
-      if (model !== scanCfg?.invoiceScan?.model) {
-        setScanCfg(await aiApi("", { method: "PUT", body: { invoiceScan: { model } } }));
-        toast.success(`AI model changed to ${modelLabel(model)}`);
-      }
-      setModelPopup(false);
-      runScan(file);
-    } catch (err) {
-      toast.error(err.message);
-    }
   };
 
   const updateCharge = (idx, field, value) =>
     setExtraCharges((prev) => prev.map((c, i) => (i === idx ? { ...c, [field]: value } : c)));
 
   const save = async () => {
-    setError(null);
-    if (!isEdit && !file) return setError("Upload the invoice file first");
-    if (!invoiceNumber.trim()) return setError("Invoice number is required");
-    if (!invoiceDate) return setError("Invoice date is required");
-    if (!isEdit && !branchId) return setError("Select the branch receiving this invoice");
+    if (!isEdit && !file) return toast.error("Upload the invoice file first");
+    if (!invoiceNumber.trim()) return toast.error("Invoice number is required");
+    if (!invoiceDate) return toast.error("Invoice date is required");
+    if (!isEdit && !branchId) return toast.error("Select the branch receiving this invoice");
     const lines = items
       .map((it) => ({ quotationItemId: it.quotationItemId, invoiceQuantity: Number(qty[String(it.quotationItemId)] || 0) }))
       .filter((l) => l.invoiceQuantity > 0);
-    if (!lines.length) return setError("Enter the invoice quantity for at least one product");
+    if (!lines.length) return toast.error("Enter the invoice quantity for at least one product");
     for (const it of items) {
       const k = String(it.quotationItemId);
       const q = Number(qty[k] || 0);
       const max = (it.quantity || 0) - (invoicedElsewhere[k] || 0);
-      if (q > max) return setError(`${it.productName}: ${q} is more than is left on the PO (${Math.max(0, max)})`);
-      if (q < (enteredByKey[k] || 0)) return setError(`${it.productName}: ${enteredByKey[k]} already entered — can't be less`);
+      if (q > max) return toast.error(`${it.productName}: ${q} is more than is left on the PO (${Math.max(0, max)})`);
+      if (q < (enteredByKey[k] || 0)) return toast.error(`${it.productName}: ${enteredByKey[k]} already entered — can't be less`);
     }
     const badCharge = extraCharges.findIndex((c) => !(Number(c.amount) > 0));
-    if (badCharge !== -1) return setError(`Misc ${badCharge + 1}: enter an amount greater than 0, or remove it`);
+    if (badCharge !== -1) return toast.error(`Misc ${badCharge + 1}: enter an amount greater than 0, or remove it`);
 
     const payload = {
       invoiceNumber: invoiceNumber.trim(),
@@ -250,9 +235,10 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
     setSaving(true);
     try {
       await saveInvoice(isEdit ? { invoiceId: invoice._id } : { trackingOrderId }, fd);
+      toast.success(isEdit ? `Invoice ${invoiceNumber.trim()} updated` : `Invoice ${invoiceNumber.trim()} uploaded`);
       onDone();
     } catch (err) {
-      setError(err.message);
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
@@ -268,7 +254,6 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
         <div className="h-48 animate-pulse rounded-xl bg-slate-100" />
       ) : (
         <div className="space-y-4">
-          {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>}
 
           {/* Upload — while the AI reads it, the progress card takes its place */}
           {reading ? (
@@ -293,17 +278,14 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
           {scan.phase === "done" && scan.meta && (
             <ScanResultBanner
               meta={scan.meta} warnings={warnings} busy={reading}
-              onRescan={() => runScan(file)} onChangeModel={canChangeModel && scanCfg ? () => setModelPopup(true) : null}
+              onRescan={() => runScan(file)}
             />
           )}
           {scan.phase === "failed" && (
             <ScanFailedBanner
-              message={scan.error} busy={reading}
-              onRescan={() => runScan(file)} onChangeModel={canChangeModel && scanCfg ? () => setModelPopup(true) : null}
+              message={scan.error} busy={reading} manualEntry={INVOICE_MANUAL_ENTRY}
+              onRescan={() => runScan(file)}
             />
-          )}
-          {modelPopup && scanCfg && (
-            <ChangeModelPopup models={scanCfg.models} current={scanCfg.invoiceScan.model} onClose={() => setModelPopup(false)} onPick={pickModel} />
           )}
 
           {formReady && !reading && (
@@ -318,28 +300,18 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                   <input type="date" value={invoiceDate} onChange={(e) => { setInvoiceDate(e.target.value); untouch("invoiceDate"); }} className={`${inputCls} ${aiFilled.invoiceDate ? aiCls : ""}`} />
                 </div>
                 <div>
-                  <label className={labelCls}>Amount on invoice (₹)</label>
-                  <input type="number" min="0" value={invoiceAmount} onChange={(e) => { setInvoiceAmount(e.target.value); untouch("invoiceAmount"); }} className={`${inputCls} ${aiFilled.invoiceAmount ? aiCls : ""}`} />
+                  <label className={labelCls}>Amount on invoice (₹){amountLocked && <span className="ml-1 font-normal text-slate-400">· from scan</span>}</label>
+                  <input
+                    type="number" min="0" value={invoiceAmount} disabled={amountLocked}
+                    title={amountLocked ? "Filled from the AI scan — it cannot be typed by hand" : undefined}
+                    onChange={(e) => { setInvoiceAmount(e.target.value); untouch("invoiceAmount"); }}
+                    className={`${inputCls} ${aiFilled.invoiceAmount ? aiCls : ""}`}
+                  />
                   <p className={`mt-1 text-[11px] ${Math.abs((Number(invoiceAmount) || 0) - poRateAmount) > 1 ? "font-semibold text-amber-600" : "text-slate-400"}`}>
                     At PO rates: {money(poRateAmount)}
                   </p>
                 </div>
               </div>
-
-              <button
-                type="button" role="switch" aria-checked={companyUse} onClick={() => setCompanyUse((v) => !v)}
-                className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${companyUse ? "border-indigo-300 bg-indigo-50/60" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-              >
-                <span>
-                  <span className="block text-sm font-semibold text-slate-800">Company Use</span>
-                  <span className="block text-xs text-slate-500">
-                    {companyUse ? "This invoice is for the company's own use" : "Turn on if this invoice is for the company's own use"}
-                  </span>
-                </span>
-                <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition ${companyUse ? "bg-indigo-600" : "bg-slate-300"}`}>
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${companyUse ? "left-[18px]" : "left-0.5"}`} />
-                </span>
-              </button>
 
               <div className="overflow-hidden rounded-xl border border-slate-200">
                 <table className="w-full border-collapse text-sm">
@@ -348,7 +320,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                       <th className="px-3 py-2">Product</th>
                       <th className="px-3 py-2 text-right">PO qty</th>
                       <th className="px-3 py-2 text-right">On other invoices</th>
-                      <th className="px-3 py-2 w-36 text-right">Invoice qty</th>
+                      <th className="px-3 py-2 w-36 text-right">Invoice qty{!qtyLocked && qtyInputLocked && <span className="ml-1 font-normal normal-case text-slate-400">· from scan</span>}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -364,7 +336,8 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                           <td className="px-3 py-2 text-right tabular-nums text-slate-600">{invoicedElsewhere[k] || 0}</td>
                           <td className="px-3 py-2">
                             <input
-                              type="number" min="0" value={qty[k] ?? ""} disabled={qtyLocked}
+                              type="number" min="0" value={qty[k] ?? ""} disabled={qtyInputLocked}
+                              title={!qtyLocked && qtyInputLocked ? "Filled from the AI scan — it cannot be typed by hand" : undefined}
                               onChange={(e) => { setQty((p) => ({ ...p, [k]: e.target.value })); untouch(`qty:${k}`); }}
                               className={`${inputCls} text-right ${aiFilled[`qty:${k}`] ? aiCls : ""}`}
                             />
@@ -392,10 +365,10 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                 ) : (
                   <div className="space-y-2">
                     {extraCharges.map((c, idx) => (
-                      <div key={idx} className={`flex flex-wrap items-center gap-2 ${c.includeInBilling === false ? "opacity-75" : ""}`}>
-                        <input placeholder="e.g. Transport" value={c.note} onChange={(e) => { updateCharge(idx, "note", e.target.value); untouch(`misc:${idx}`); }} className={`${inputCls} min-w-0 flex-1 ${aiFilled[`misc:${idx}`] ? aiCls : ""}`} />
-                        <input type="number" placeholder="Amount" value={c.amount} onChange={(e) => { updateCharge(idx, "amount", e.target.value); untouch(`misc:${idx}`); }} className={`${inputCls} w-28 text-right ${aiFilled[`misc:${idx}`] ? aiCls : ""}`} />
-                        <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold">
+                      <div key={idx} className={`flex items-center gap-2 ${c.includeInBilling === false ? "opacity-75" : ""}`}>
+                        <input placeholder="e.g. Transport" value={c.note} onChange={(e) => { updateCharge(idx, "note", e.target.value); untouch(`misc:${idx}`); }} className={`${inputCls} w-auto! min-w-0 flex-1 ${aiFilled[`misc:${idx}`] ? aiCls : ""}`} />
+                        <input type="number" placeholder="Amount" value={c.amount} onChange={(e) => { updateCharge(idx, "amount", e.target.value); untouch(`misc:${idx}`); }} className={`${inputCls} w-32! shrink-0 text-right ${aiFilled[`misc:${idx}`] ? aiCls : ""}`} />
+                        <div className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold">
                           {[
                             { value: true, label: "In bill", on: "bg-blue-600 text-white" },
                             { value: false, label: "Note", on: "bg-slate-600 text-white" },
@@ -415,14 +388,27 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                             // Highlights are keyed by position — after a removal they would point at the wrong rows.
                             setAiFilled((p) => Object.fromEntries(Object.entries(p).filter(([key]) => !key.startsWith("misc:"))));
                           }}
-                          className="rounded px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600">✕</button>
+                          className="shrink-0 rounded px-2 py-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600">✕</button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
 
-              <div className={`grid gap-3 ${isEdit || branches.length <= 1 ? "" : "sm:grid-cols-2"}`}>
+              <div className={`grid items-start gap-3 ${isEdit || branches.length <= 1 ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]" : "sm:grid-cols-3"}`}>
+                <div>
+                  <label className={labelCls}>Company Use</label>
+                  <button
+                    type="button" role="switch" aria-checked={companyUse} onClick={() => setCompanyUse((v) => !v)}
+                    title="Turn on if this invoice is for the company's own use"
+                    className={`flex h-[38px] w-full items-center justify-between gap-3 rounded-lg border px-3 text-left text-sm transition ${companyUse ? "border-indigo-300 bg-indigo-50/60 text-indigo-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+                  >
+                    <span className="truncate font-medium">{companyUse ? "Company's own use" : "No"}</span>
+                    <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition ${companyUse ? "bg-indigo-600" : "bg-slate-300"}`}>
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${companyUse ? "left-[18px]" : "left-0.5"}`} />
+                    </span>
+                  </button>
+                </div>
                 {!isEdit && branches.length > 1 && (
                   <div>
                     <label className={labelCls}>Branch</label>
@@ -434,7 +420,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                 )}
                 <div>
                   <label className={labelCls}>Notes</label>
-                  <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} placeholder="Optional" />
+                  <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} placeholder="Optional" />
                 </div>
               </div>
               {!isEdit && branches.length === 0 && (

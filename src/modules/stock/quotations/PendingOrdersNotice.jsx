@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { getPendingOrders } from "./quotationApi";
 import { Modal } from "@/modules/stock/shared/StockSharedUI";
 
@@ -9,7 +9,7 @@ import { Modal } from "@/modules/stock/shared/StockSharedUI";
 /* "This category already has stock on its way."                  */
 /*                                                                */
 /* Orders still open (not fully received, not closed) for the      */
-/* same leaf category, across every branch. Shown inline while a   */
+/* same leaf category, across every branch. Shown as a tag while a  */
 /* quotation is built, and as a confirm before it is approved. A   */
 /* warning only — it never stops anything.                         */
 /* ============================================================= */
@@ -19,8 +19,8 @@ const STATUS_LABEL = {
   PO_PENDING: "PO to be made",
   PO_GENERATED: "PO made",
   PO_APPROVED: "PO approved",
-  IN_PROGRESS: "In progress",
-  PARTIAL: "Partly received",
+  AWAITING_DELIVERY: "Awaiting delivery",
+  PARTLY_RECEIVED: "Partly received",
 };
 
 // Groups keyed by categoryId, refetched whenever the set of categories changes.
@@ -83,23 +83,39 @@ const LinesTable = ({ lines }) => (
   </div>
 );
 
-/* Inline, under one category while the quotation is being built. */
-export const PendingOrdersInline = ({ group }) => {
+/* Compact tag beside a category name while the quotation is being built;
+   ⓘ opens the open orders behind the number. */
+export const PendingOrdersBadge = ({ group, categoryName }) => {
   const [open, setOpen] = useState(false);
   if (!group || !group.lines?.length) return null;
   const orders = new Set(group.lines.map((l) => l.trackingOrderId)).size;
   return (
-    <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-2 text-left">
-        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-        <span className="text-sm text-amber-900">
-          <strong>{group.totalPending}</strong> already on order for this category and not received yet
-          <span className="text-amber-700"> · {orders} open {orders === 1 ? "order" : "orders"}</span>
+    <>
+      <button
+        type="button" onClick={() => setOpen(true)}
+        title="Already ordered for this category and not received yet — click for details"
+        className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 ring-1 ring-inset ring-rose-200 transition hover:bg-rose-100"
+      >
+        {/* icon and word blink together; the figures stay steady to read */}
+        <span className="inline-flex animate-blink items-center gap-1 font-bold uppercase tracking-wide text-rose-600">
+          <AlertTriangle className="h-3.5 w-3.5" /> Warning
         </span>
-        <span className="ml-auto text-amber-700">{open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+        <span className="tabular-nums">{group.totalPending}</span> on order
+        <span className="font-normal text-rose-600">· {orders} open {orders === 1 ? "order" : "orders"}</span>
       </button>
-      {open && <div className="mt-2"><LinesTable lines={group.lines} /></div>}
-    </div>
+      {open && (
+        <Modal onClose={() => setOpen(false)} title="Already on order" maxWidth="max-w-4xl">
+          <div className="mb-3 flex items-start gap-2 rounded-xl bg-rose-50 px-3 py-2.5 text-sm text-rose-900">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+            <span>
+              <strong className="tabular-nums">{group.totalPending}</strong> of <strong>{categoryName || "this category"}</strong> ordered
+              and not received yet, across {orders} open {orders === 1 ? "order" : "orders"}.
+            </span>
+          </div>
+          <LinesTable lines={group.lines} />
+        </Modal>
+      )}
+    </>
   );
 };
 

@@ -120,7 +120,7 @@ const OrderHistoryPopup = ({ row, onClose }) => {
                   className={"rounded-xl border p-3 " + (closed ? "border-amber-200" : "border-violet-200")}
                 >
                   <p className={"text-sm font-semibold " + (closed ? "text-amber-700" : "text-violet-700")}>
-                    {closed ? "Short Closed" : "Reopened"}
+                    {closed ? "Closed Short" : "Reopened"}
                   </p>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                     <span>{fmt(c.at)} {fmtTime(c.at)}</span>
@@ -191,7 +191,7 @@ const OrderHistoryPopup = ({ row, onClose }) => {
                     "text-sm font-semibold " + (dropped ? "text-rose-700" : "text-emerald-700")
                   }
                 >
-                  {dropped ? "Marked Not Required" : "Marked Required"}
+                  {dropped ? "Skipped" : "Marked Required"}
                   {" — "}
                   {a.scope === "WHOLE_VENDOR" ? "whole vendor" : "some products"}
                 </p>

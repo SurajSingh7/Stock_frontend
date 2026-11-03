@@ -17,7 +17,7 @@ export const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
 
 const STATUS_META = {
-  ADDED: { label: "Added", cls: "bg-slate-100 text-slate-700" },
+  UPLOADED: { label: "Invoice Uploaded", cls: "bg-slate-100 text-slate-700" },
   DRAFT: { label: "Draft", cls: "bg-sky-100 text-sky-700" },
   PENDING: { label: "Pending approval", cls: "bg-amber-100 text-amber-800" },
   IN_PROGRESS: { label: "In progress", cls: "bg-violet-100 text-violet-700" },

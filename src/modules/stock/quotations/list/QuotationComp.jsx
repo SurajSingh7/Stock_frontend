@@ -275,8 +275,8 @@ const QuotationComp = () => {
         </button>
       </div>
 
-      {/* filters — one card: search + lookups on top, dates + reset below */}
-      <div className="mb-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      {/* filters — search + lookups */}
+      <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
           <div className="relative lg:col-span-2">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -300,32 +300,11 @@ const QuotationComp = () => {
             options={vendorOptions} placeholder="All vendors"
           />
         </div>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          <CalendarDays className="h-4 w-4 text-slate-400" />
-          <span className="text-sm font-medium text-slate-600">From</span>
-          <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} className={dateCls} />
-          <span className="text-sm font-medium text-slate-600">To</span>
-          <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className={dateCls} />
-          <span
-            className="cursor-help text-slate-400 hover:text-slate-600"
-            title="Pending and All use the submission date; Fully Approved, Partially Approved and Rejected use the decision date."
-          >
-            <Info className="h-4 w-4" />
-          </span>
-          {hasActiveFilters && (
-            <button
-              type="button" onClick={clearFilters}
-              className="ml-auto inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
-            >
-              <RotateCcw className="h-3.5 w-3.5" /> Reset
-            </button>
-          )}
-        </div>
       </div>
 
-      {/* status tabs */}
-      <div className="mb-4 flex flex-wrap gap-2">
+      {/* status tabs on the left; date range + reset on the right */}
+      <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+      <div className="flex flex-wrap gap-2">
         {tabs.map((t) => {
           const st = TAB_STYLES[t.key] || TAB_STYLES[""];
           const active = status === t.key;
@@ -341,6 +320,29 @@ const QuotationComp = () => {
             </button>
           );
         })}
+      </div>
+
+        <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <CalendarDays className="h-4 w-4 text-slate-400" />
+          <span className="text-sm font-medium text-slate-600">From</span>
+          <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }} className={dateCls} />
+          <span className="text-sm font-medium text-slate-600">To</span>
+          <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }} className={dateCls} />
+          <span
+            className="cursor-help text-slate-400 hover:text-slate-600"
+            title="Pending and All use the submission date; Fully Approved, Partially Approved and Rejected use the decision date."
+          >
+            <Info className="h-4 w-4" />
+          </span>
+          {hasActiveFilters && (
+            <button
+              type="button" onClick={clearFilters}
+              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Reset
+            </button>
+          )}
+        </div>
       </div>
 
       {/* table */}
