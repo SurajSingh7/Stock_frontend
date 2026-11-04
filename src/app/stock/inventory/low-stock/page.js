@@ -1,14 +1,16 @@
-import LowStockComp from '@/modules/stock/lowStock/LowStockComp';
-import React, { Suspense } from 'react'
+import { redirect } from "next/navigation";
 
-const page = () => {
-  return (
-    <div>
-        <Suspense fallback={null}>
-          <LowStockComp/>
-        </Suspense>
-    </div>
-  )
-}
+/*
+  Low Stock became the Low / Out of stock tabs of Product Inventory
+  (2026-11-04). Alerts sent before that still link here, so this address
+  forwards to Product Inventory with the same branch.
+*/
+const page = async ({ searchParams }) => {
+  const sp = await searchParams;
+  const q = new URLSearchParams();
+  if (sp?.branchId) q.set("branchId", String(sp.branchId));
+  const qs = q.toString();
+  redirect(`/stock/inventory/products${qs ? `?${qs}` : ""}`);
+};
 
 export default page;

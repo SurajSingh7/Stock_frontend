@@ -214,16 +214,16 @@ export const navCategories = [
         moduleKey: "inventory-items",
         action: ["VIEW_MENU"],
       },
+      // Everything received, and where it all is now.
       {
-        name: "Item Inventory",
-        path: "/stock/inventory/items",
+        name: "Product Inventory Summary",
+        path: "/stock/inventory/summary",
         moduleKey: "inventory-items",
         action: ["VIEW_MENU"],
       },
-      // What is at or below its threshold — where the low-stock alerts land.
       {
-        name: "Low Stock",
-        path: "/stock/inventory/low-stock",
+        name: "Available Item Inventory",
+        path: "/stock/inventory/items",
         moduleKey: "inventory-items",
         action: ["VIEW_MENU"],
       },

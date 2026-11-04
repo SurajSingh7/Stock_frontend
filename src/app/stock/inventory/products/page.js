@@ -1,10 +1,12 @@
 import ProductInventory from '@/modules/stock/inventory/ProductInventory';
-import React from 'react'
+import React, { Suspense } from 'react'
 
 const page = () => {
   return (
     <div>
-        <ProductInventory/>
+        <Suspense fallback={null}>
+          <ProductInventory/>
+        </Suspense>
     </div>
   )
 }

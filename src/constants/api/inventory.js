@@ -6,11 +6,12 @@ export const INVENTORY_API = {
     cards: "/stock/inventory-items/cards",
     productSummary: "/stock/inventory-items/product-summary",
     history: (productDefinitionId) => `/stock/inventory-items/history/${productDefinitionId}`,
+    // Product Inventory: stock against the alert threshold, per branch; and a product's history.
+    productStock: "/stock/inventory-items/product-stock",
+    // Stock Summary: everything received, and where it all is now.
+    stockSummary: "/stock/inventory-items/stock-summary",
+    productStockHistory: (productDefinitionId) => `/stock/inventory-items/product-stock/${productDefinitionId}/history`,
     timeline: (itemId) => `/stock/inventory-items/${itemId}/timeline`,
-  },
-
-  lowStock: {
-    list: "/stock/low-stock",
   },
 
   stockReports: {
