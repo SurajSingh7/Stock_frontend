@@ -1,7 +1,7 @@
 "use client";
 
 /*
-  Product Inventory — every product's stock against its alert threshold.
+  Available Product — every product's stock against its alert threshold.
   Took over the Low Stock page (2026-11-04): pick the Low / Out of stock tab
   for what used to be that list. Low-stock alerts link here with the branch
   already chosen.
@@ -21,7 +21,7 @@ import { fetchLeafCategories, fetchScopedBranches, fetchProductOptions } from "@
 import Pagination from "@/shared/ui/pagination/Pagination";
 import {
   RotateCcw, History, ArrowLeft, ArrowRight, Search, Boxes, Package, ChevronDown, ChevronRight, PackageCheck, PackageOpen, UserCheck, Users,
-  Wrench, PackageMinus, Undo2, ArrowLeftRight, AlertTriangle, Receipt, Archive,
+  Wrench, PackageMinus, Undo2, ArrowLeftRight, AlertTriangle, Receipt, Archive, Truck,
 } from "lucide-react";
 import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { SOURCE_LABEL } from "./itemBadges";
@@ -77,13 +77,14 @@ const sourceLabel = (t) => (t === "INVOICE" ? "Invoice" : SOURCE_LABEL[t] || (t 
 /* History — what came in, and where it is now                    */
 /* ============================================================= */
 
-// Where the issued / used stock is now — same names as the Product Inventory Summary.
+// Where the issued / used stock is now — same names as Product Summary.
 const ISSUED_PARTS = [
   { key: "subscribers", label: "Subscribers", icon: Users, tone: "bg-sky-50 text-sky-700 ring-sky-100" },
   { key: "employees", label: "Employees", icon: UserCheck, tone: "bg-cyan-50 text-cyan-700 ring-cyan-100" },
   { key: "repair", label: "Repair & Warranty", icon: Wrench, tone: "bg-amber-50 text-amber-700 ring-amber-100" },
   { key: "returned", label: "Returned to Vendor", icon: Undo2, tone: "bg-rose-50 text-rose-700 ring-rose-100" },
   { key: "sent", label: "Sent to Branches", icon: ArrowLeftRight, tone: "bg-violet-50 text-violet-700 ring-violet-100" },
+  { key: "inTransit", label: "On the Way", icon: Truck, tone: "bg-indigo-50 text-indigo-700 ring-indigo-100" },
   { key: "unrecorded", label: "Not recorded", icon: AlertTriangle, tone: "bg-amber-50 text-amber-800 ring-amber-200" },
 ];
 
@@ -249,7 +250,7 @@ const ProductInventory = () => {
   useEffect(() => {
     (async () => {
       try { setCategories(await fetchLeafCategories()); } catch {}
-      try { setBranches(await fetchScopedBranches("inventory-items")); } catch {}
+      try { setBranches(await fetchScopedBranches("available-products")); } catch {}
     })();
   }, []);
 
@@ -289,7 +290,7 @@ const ProductInventory = () => {
   const hasActiveFilters = !!search || !!categoryId || !!productId || !!branchId || !!level;
   const clearFilters = () => { setSearch(""); setCategoryId(""); setProductId(""); setBranchId(""); setLevel(""); setPage(1); };
 
-  // Items of this product in Item Inventory — paged there, however many there are.
+  // Items of this product in Available Item — paged there, however many there are.
   const openItems = (p) => {
     const q = new URLSearchParams({ productDefinitionId: String(p.productDefinitionId) });
     if (branchId) q.set("branchId", branchId);
@@ -313,7 +314,7 @@ const ProductInventory = () => {
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
           <Boxes className="h-5 w-5" />
         </span>
-        Product Inventory
+        Available Product
       </h1>
 
       {/* filters */}
@@ -432,7 +433,7 @@ const ProductInventory = () => {
                         <td className="px-4 py-3.5 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
-                              type="button" onClick={() => openItems(p)} title="Items in Item Inventory" aria-label="Items"
+                              type="button" onClick={() => openItems(p)} title="Items in Available Item" aria-label="Items"
                               className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100 transition hover:bg-indigo-100"
                             >
                               <Package className="h-4 w-4" />

@@ -1,67 +1,65 @@
 import { api } from "@/lib/apiClient";
 import { API_ENDPOINTS } from "@/constants/api";
-import { fetchProductDefinitions } from "@/modules/stock/shared/lookupsApi";
 
-const EP = API_ENDPOINTS.inventory.transferRequests;
+const REQ = API_ENDPOINTS.inventory.stockRequests;
 
-// Branch pickers for every transfer screen. Served by the transfer-requests
-// module rather than /branches/active, so branch staff don't need the
-// Master > Branch permission just to name a branch.
-//
-// `branches` is every active branch (a transfer's counterparty is by
-// definition another branch); `defaultBranchId` is the caller's own branch,
-// the only branch they may raise a request on behalf of.
-export async function fetchTransferBranches() {
-  const json = await api.get(EP.branches, { fallback: "Failed to load branches" });
+/*
+  Branch pickers for every transfer screen, in the scope of the module the
+  screen serves (my-stock-requests | stock-requests-to-us | stock-transfer-history).
+  Not /branches/active, so branch staff need no Master > Branch permission.
+
+    branches         every active branch (the other side of a transfer)
+    defaultBranchId  the caller's own branch
+    myBranchIds      every branch the caller may act for; null = all
+*/
+export async function fetchTransferBranches(module) {
+  const json = await api.get(API_ENDPOINTS.inventory.transferBranches, { query: { module }, fallback: "Failed to load branches" });
   return {
     branches: json.data?.branches || [],
     defaultBranchId: json.data?.defaultBranchId ? String(json.data.defaultBranchId) : "",
+    myBranchIds: json.data?.myBranchIds ? json.data.myBranchIds.map(String) : null,
   };
 }
 
-// For the screens that only ever need the flat list.
-export async function fetchActiveBranches() {
-  return (await fetchTransferBranches()).branches;
-}
+/* ── Lists and detail — side: "mine" | "to-us" | "history" ────────────── */
 
-// One shared fetch for the /transfer-requests/board endpoint — each page
-// passes its own fixed `role` (or none) and the query params it wants to
-// let the user control (status/search/pagination).
-export async function fetchTransferBoard({ branchId, role, status, search, page, limit }) {
-  const json = await api.get(EP.board, {
+// mine / to-us: otherBranchId = the other side; from / to = requested between.
+// history: direction ("sent" | "received"); from / to = closed between.
+export async function fetchRequests({ side, status, search, branchId, otherBranchId, direction, from, to, page, limit }) {
+  const json = await api.get(REQ.list(side), {
     query: {
-      page,
-      limit,
-      branchId,
-      role: branchId ? role : undefined,
-      status,
-      search: search?.trim(),
+      status: status || undefined, search: search?.trim() || undefined, branchId: branchId || undefined, otherBranchId: otherBranchId || undefined,
+      direction: direction || undefined, from: from || undefined, to: to || undefined, page, limit,
     },
-    fallback: "Failed to fetch transfer requests",
+    fallback: "Failed to load requests",
   });
-  return {
-    rows: json.data?.rows || [],
-    counts: json.data?.counts || { ALL: 0, PENDING: 0, COMPLETED: 0, REJECTED: 0 },
-    total: json.pagination?.total ?? 0,
-  };
+  return { rows: json.data || [], total: json.pagination?.total ?? 0, counts: json.meta?.counts || {} };
 }
 
-export const fetchTransferDetail = async (id) =>
-  (await api.get(EP.byId(id), { fallback: "Failed to load transfer request" })).data;
+// The request with its transfer in full (units, batches, history) as transferId.
+export const fetchRequest = async (side, id) => (await api.get(REQ.byId(side, id), { fallback: "Failed to load request" })).data;
 
-// Free, approved units of one product at the branch that will send them.
-export const fetchAvailableUnits = async (branchId, productDefinitionId) =>
-  (
-    await api.get(API_ENDPOINTS.inventory.inventoryItems.list, {
-      query: { branchId, productDefinitionId, status: "AVAILABLE", approvalStatus: "APPROVED", limit: 200 },
-      fallback: "Failed to load available units",
-    })
-  ).data || [];
+/* ── My Requests ──────────────────────────────────────────────────────── */
 
-export const fetchAllProducts = () => fetchProductDefinitions({ limit: 1000 });
+// [{ _id, path, trackingMethod, unit }] — what a request can ask for.
+export const fetchRequestCategories = async () =>
+  (await api.get(REQ.categories, { fallback: "Failed to load categories" })).data || [];
+export const createRequest = (body) => api.post(REQ.create, body, { fallback: "Failed to send request" });
+export const receiveRequest = (id) => api.patch(REQ.receive(id), {}, { fallback: "Failed to receive stock" });
+export const reportProblem = (id, note) => api.patch(REQ.reportProblem(id), { note }, { fallback: "Failed to report the problem" });
 
-export const createTransferRequest = (payload) =>
-  api.post(EP.list, payload, { fallback: "Failed to create transfer request" });
+/* ── Requests to Us ───────────────────────────────────────────────────── */
 
-export const processTransferRequest = (id, body) =>
-  api.patch(EP.process(id), body, { fallback: "Failed to process transfer request" });
+export const sendAgainstRequest = (id, body) => api.patch(REQ.send(id), body, { fallback: "Failed to send stock" });
+export const declineRequest = (id, reason) => api.patch(REQ.decline(id), { reason }, { fallback: "Failed to decline request" });
+// lines: [{ lineId, keepItemIds } | { lineId, keepQty }]
+export const correctAndResend = (id, body) => api.patch(REQ.correct(id), body, { fallback: "Failed to correct and resend" });
+
+/* ── The Send page ─────────────────────────────────────────────────── */
+
+// { [requestLineId]: [{ _id, name, trackingMethod, unit, available }] }
+export const fetchSendOptions = async (id) =>
+  (await api.get(REQ.sendOptions(id), { fallback: "Failed to load products" })).data || {};
+// { fields: [{ code, label }], units: [{ _id, fieldValues }] } — free units, oldest first.
+export const fetchSendUnits = async (id, productDefinitionId) =>
+  (await api.get(REQ.sendUnits(id), { query: { productDefinitionId }, fallback: "Failed to load units" })).data || { fields: [], units: [] };

@@ -208,23 +208,26 @@ export const navCategories = [
     group: "Inventory",
     icon: "stock",
     items: [
+      // Each product's stock in the store, against its alert threshold.
       {
-        name: "Product Inventory",
+        name: "Available Product",
         path: "/stock/inventory/products",
-        moduleKey: "inventory-items",
+        moduleKey: "available-products",
         action: ["VIEW_MENU"],
       },
-      // Everything received, and where it all is now.
+      // Each unit in the store right now.
       {
-        name: "Product Inventory Summary",
-        path: "/stock/inventory/summary",
-        moduleKey: "inventory-items",
-        action: ["VIEW_MENU"],
-      },
-      {
-        name: "Available Item Inventory",
+        name: "Available Item",
         path: "/stock/inventory/items",
-        moduleKey: "inventory-items",
+        moduleKey: "available-items",
+        action: ["VIEW_MENU"],
+      },
+      // Everything received, and where it all is now. ("Item Summary" joins
+      // here once it is built.)
+      {
+        name: "Product Summary",
+        path: "/stock/inventory/summary",
+        moduleKey: "product-summary",
         action: ["VIEW_MENU"],
       },
       // Inventory reports (the Reports menu is billing).
@@ -277,31 +280,35 @@ export const navCategories = [
     ],
   },
 
+  // Stock Transfer — every transfer starts as a request: what we asked for,
+  // what others asked us for (both open, every step done from the row), and
+  // everything finished.
   {
-    category: "Transfer",
+    category: "Stock Transfer",
     group: "Inventory",
     icon: "transfer",
     items: [
       {
-        name: "Transfer Requests",
-        path: "/stock/inventory/transfers/requests",
-        moduleKey: "transfer-requests",
+        name: "My Requests",
+        path: "/stock/inventory/transfers/my-requests",
+        moduleKey: "my-stock-requests",
         action: ["VIEW_MENU"],
       },
       {
-        name: "Incoming Requests",
-        path: "/stock/inventory/transfers/incoming",
-        moduleKey: "transfer-requests",
+        name: "Requests to Us",
+        path: "/stock/inventory/transfers/requests-to-us",
+        moduleKey: "stock-requests-to-us",
         action: ["VIEW_MENU"],
       },
       {
         name: "Transfer History",
         path: "/stock/inventory/transfers/history",
-        moduleKey: "transfer-requests",
+        moduleKey: "stock-transfer-history",
         action: ["VIEW_MENU"],
       },
     ],
   },
+
 
   // Allotment — who our stock went to, or who asked for it: subscribers and
   // our own employees, one column each.

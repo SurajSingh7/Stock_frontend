@@ -1,7 +1,7 @@
 "use client";
 
 /* Small, shared read-outs for a unit's origin, condition and warranty — used
-   by Item Inventory and Opening Stock so both say the same thing the same way. */
+   by Available Item and Opening Stock so both say the same thing the same way. */
 
 export const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";

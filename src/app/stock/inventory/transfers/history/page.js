@@ -1,12 +1,11 @@
-import TransferHistoryComp from '@/modules/stock/inventoryTransfer/TransferHistoryComp';
-import React from 'react'
+import { Suspense } from "react";
+import TransferHistoryPage from "@/modules/stock/inventoryTransfer/TransferHistoryPage";
 
-const page = () => {
+// Suspense: the page reads ?search= (links from notifications).
+export default function Page() {
   return (
-    <div>
-        <TransferHistoryComp/>
-    </div>
-  )
+    <Suspense>
+      <TransferHistoryPage />
+    </Suspense>
+  );
 }
-
-export default page;

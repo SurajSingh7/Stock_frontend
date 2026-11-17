@@ -1,10 +1,10 @@
 "use client";
 
 /*
-  Available Item Inventory — what is in the store right now (AVAILABLE units), one row
+  Available Item — what is in the store right now (AVAILABLE units), one row
   per serial-tracked unit and one row per product + branch for batch stock.
   Where everything else is (with subscribers, employees, in repair) belongs to
-  the Item Inventory Report.
+  Item Summary (planned).
 
   Columns: the "Show in list" fields (Serial, MAC…) each get their own column;
   any other field goes in Details — the first one shown, the rest behind +N —
@@ -465,7 +465,7 @@ const ItemInventory = () => {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  // Product Inventory and the report send the product and branch along.
+  // Available Product and Product Summary send the product and branch along.
   const [productId, setProductId] = useState(searchParams.get("productDefinitionId") || "");
   const [branchId, setBranchId] = useState(searchParams.get("branchId") || "");
   const [from, setFrom] = useState("");
@@ -493,7 +493,7 @@ const ItemInventory = () => {
   useEffect(() => {
     (async () => {
       try { setCategories(await fetchLeafCategories()); } catch {}
-      try { setBranches(await fetchScopedBranches("inventory-items")); } catch {}
+      try { setBranches(await fetchScopedBranches("available-items")); } catch {}
       try { setVendors(await fetchVendors()); } catch {}
     })();
   }, []);
@@ -559,7 +559,7 @@ const ItemInventory = () => {
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
           <PackageCheck className="h-5 w-5" />
         </span>
-        Available Item Inventory
+        Available Item
       </h1>
 
       {/* filters */}

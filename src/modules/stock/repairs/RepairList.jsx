@@ -303,7 +303,7 @@ const RepairList = () => {
                             <p>{[r.repair.claimRef, fmtDate(r.repair.sentAt), r.repair.inWarranty === false ? "out of warranty" : ""].filter(Boolean).join(" · ")}</p>
                             {r.repair.note && <p className="text-slate-400">{r.repair.note}</p>}
                           </>
-                        : status === "VENDOR_REPLACED" ? "Replaced — see the new unit in Item Inventory" : "—"}
+                        : status === "VENDOR_REPLACED" ? "Replaced — see the new unit in Available Item" : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1.5">

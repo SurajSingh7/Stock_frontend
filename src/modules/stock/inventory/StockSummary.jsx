@@ -1,7 +1,7 @@
 "use client";
 
 /*
-  Product Inventory Summary — everything received, and where it all is now.
+  Product Summary — everything received, and where it all is now.
 
     Total Received = Available + Issued / Used, for every product and in total.
 
@@ -99,7 +99,7 @@ const OutPopup = ({ row, single, onClose, go }) => {
       <div className="space-y-0.5">
         <Line icon={Undo2} tone="bg-rose-50 text-rose-600 ring-rose-100" label="Returned to Vendor" value={row.returned} unit={unit} onOpen={row.returned > 0 ? () => go("/stock/purchase/faulty-items") : null} />
         {single && <Line icon={ArrowLeftRight} tone="bg-violet-50 text-violet-600 ring-violet-100" label="Sent to Branches" value={row.sent} unit={unit} onOpen={row.sent > 0 ? () => go("/stock/inventory/transfers/history") : null} />}
-        {row.inTransit > 0 && <Line icon={ArrowLeftRight} tone="bg-violet-50 text-violet-600 ring-violet-100" label="In Transit" value={row.inTransit} unit={unit} />}
+        {row.inTransit > 0 && <Line icon={ArrowLeftRight} tone="bg-indigo-50 text-indigo-600 ring-indigo-100" label="On the Way" value={row.inTransit} unit={unit} onOpen={() => go("/stock/inventory/transfers/requests-to-us")} />}
         <Line icon={Users} tone="bg-sky-50 text-sky-600 ring-sky-100" label="In Use" value={inUse} unit={unit}  />
         <Line sub label="Subscribers" value={row.subscribers} unit={unit} />
         <Line sub label="Employees" value={row.employees} unit={unit} />
@@ -161,7 +161,7 @@ const StockSummary = () => {
   useEffect(() => {
     (async () => {
       try { setCategories(await fetchLeafCategories()); } catch {}
-      try { setBranches(await fetchScopedBranches("inventory-items")); } catch {}
+      try { setBranches(await fetchScopedBranches("product-summary")); } catch {}
     })();
   }, []);
 
@@ -205,7 +205,7 @@ const StockSummary = () => {
   const hasActiveFilters = !!search || !!categoryId || !!productId || !!branchId || !!from || !!to;
   const clearFilters = () => { setSearch(""); setCategoryId(""); setProductId(""); setBranchId(""); setFrom(""); setTo(""); setPage(1); };
 
-  // "items" opens Item Inventory on this product (and branch) with a status;
+  // "items" opens Available Item on this product (and branch) with a status;
   // anything else is a screen path of its own.
   const go = (row) => (target, status) => {
     if (target !== "items") { router.push(target); return; }
@@ -227,7 +227,7 @@ const StockSummary = () => {
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
             <Layers className="h-5 w-5" />
           </span>
-          Product Inventory Summary
+          Product Summary
         </h1>
 
         {/* Total Received = Available + Issued / Used */}
