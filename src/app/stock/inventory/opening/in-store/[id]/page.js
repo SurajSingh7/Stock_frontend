@@ -2,14 +2,10 @@
 import OpeningStockEditor from "@/modules/stock/openingStock/OpeningStockEditor";
 import { useParams } from "next/navigation";
 
-// "new" opens an empty draft; anything else is an entry id.
+// "new" opens an empty draft; an entry id opens it to read (Edit is /edit).
 const Page = () => {
   const { id } = useParams();
-  return (
-    <div>
-      <OpeningStockEditor key={id} entryId={id} />
-    </div>
-  );
+  return <OpeningStockEditor key={id} entryId={id} mode={id === "new" ? "edit" : "view"} />;
 };
 
 export default Page;

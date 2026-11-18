@@ -291,6 +291,17 @@ const emptyBankAccount = (label) => ({
   state: { key: "", name: "", code: "" }, city: "", accountNumber: "", rtgsCode: "", neftCode: "",
 });
 
+// Merge a saved record onto form defaults, skipping null/undefined so a
+// field stored as null keeps its "" default — a null `value` on a controlled
+// input triggers React's "value prop should not be null" warning.
+const withDefaults = (defaults, data) => {
+  const out = { ...defaults };
+  Object.entries(data || {}).forEach(([k, v]) => {
+    if (v !== null && v !== undefined) out[k] = v;
+  });
+  return out;
+};
+
 const defaultVendor = () => ({
   name: "",
   vendorCode: "",
@@ -1414,10 +1425,17 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
       // Only the read-only view asks for soft-deleted vendors — editing one has
       // to keep failing, so the edit path sends no flag.
       const data = await fetchVendor(vendorId, { includeInactive: readOnly });
+      const base = defaultVendor();
       const loaded = {
-        ...defaultVendor(),
-        ...data,
-        gst: { ...defaultVendor().gst, ...data.gst },
+        ...withDefaults(base, data),
+        gst: withDefaults(base.gst, data.gst),
+        address: withDefaults(base.address, data.address),
+        contacts: data.contacts?.length
+          ? data.contacts.map((c) => withDefaults(emptyContact(c.label), c))
+          : base.contacts,
+        bankAccounts: data.bankAccounts?.length
+          ? data.bankAccounts.map((b) => withDefaults(emptyBankAccount(b.label), b))
+          : base.bankAccounts,
         // populate gives categoryId as an object ({_id, name, type}) — flatten
         // to id + name so the Assign Products card renders immediately.
         // Soft-deleted categories populate as null → filtered out safely.

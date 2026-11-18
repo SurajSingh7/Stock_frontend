@@ -3,14 +3,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { ArrowLeft, Plus, FileSpreadsheet, Trash2, Send, Save, AlertTriangle, CopyPlus, UserRound } from "lucide-react";
+import { ArrowLeft, Plus, FileSpreadsheet, Trash2, Send, Save, AlertTriangle, CopyPlus, UserRound, ClipboardList, Boxes, Building2, CalendarDays, MessageSquareText, PackageOpen, Receipt, Store, IndianRupee, ShieldCheck, Pencil } from "lucide-react";
 import { usePermissions } from "@/context/PermissionContext";
-import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { Modal, SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { fmtDate } from "@/modules/stock/inventory/itemBadges";
 import { PersonSearch, PersonCard } from "@/modules/stock/people/PersonSearch";
 import { canDo, StatusBadge } from "./OpeningStockList";
 import { ProductPickerModal, ExcelUploadModal, ConfirmModal } from "./OpeningStockModals";
-import FloatingSelect from "./FloatingSelect";
 import { entryApi } from "./openingStockApi";
 import { kindConfig } from "./openingKinds";
 
@@ -18,8 +17,9 @@ import { kindConfig } from "./openingKinds";
 /* Helpers                                                        */
 /* ============================================================= */
 
-let keySeq = 0;
-const nextKey = () => `l${++keySeq}`;
+// Random, not a module counter — a counter restarts on a hot reload and two
+// rows would share a key (editing one would change the other).
+const nextKey = () => crypto.randomUUID();
 const ymd = (d) => (d ? String(d).slice(0, 10) : "");
 const todayYmd = () => {
   const d = new Date();
@@ -104,7 +104,7 @@ const iconBtn = "inline-flex h-[38px] w-[38px] items-center justify-center round
 
 // Fixed column widths (px). The table never squeezes a column below these and
 // spreads any extra screen width evenly, instead of letting one column balloon.
-const COL = { num: 36, field: 180, qty: 100, condition: 100, state: 180, vendor: 200, date: 150, cost: 100, warranty: 270, del: 46 };
+const COL = { num: 36, field: 180, qty: 100, condition: 100, state: 180, purchase: 190, del: 46 };
 
 const FieldInput = ({ field, value, onChange, disabled }) => {
   if (field.inputType === "boolean")
@@ -117,6 +117,81 @@ const FieldInput = ({ field, value, onChange, disabled }) => {
     );
   const type = field.inputType === "date" || field.inputType === "datetime" ? "date" : field.inputType === "number" || field.inputType === "decimal" ? "number" : "text";
   return <input type={type} disabled={disabled} value={value ?? ""} onChange={(e) => onChange(e.target.value)} className={`${inp} ${field.isUnique ? "font-mono" : ""}`} />;
+};
+
+/*
+  Purchase Details — vendor, purchase date, cost per unit and warranty, in
+  one small cell: a summary ("Acme · 12 Jan 2026 · ₹500 · 12 mo"), or "Add
+  details". A click opens a popup with all four; Save writes them to the row.
+  All of it is optional — whatever is known.
+*/
+const PurchaseDetailsCell = ({ line, editable, vendorOptions, onSave }) => {
+  const [form, setForm] = useState(null); // open while set — a working copy
+  const vendor = vendorOptions.find((v) => v.value === line.vendorId)?.label;
+  const warranty = line.warrantyEndDate ? `till ${fmtDate(line.warrantyEndDate)}` : line.warrantyMonths !== "" ? `${line.warrantyMonths} mo` : "";
+  const parts = [vendor, line.purchaseDate && fmtDate(line.purchaseDate), line.purchaseCost !== "" && `₹${Number(line.purchaseCost).toLocaleString("en-IN")}`, warranty].filter(Boolean);
+  const open = () => setForm({ vendorId: line.vendorId, purchaseDate: line.purchaseDate, purchaseCost: line.purchaseCost, warrantyMonths: line.warrantyMonths, warrantyEndDate: line.warrantyEndDate });
+  const f = form || {};
+  const formEnd = form && !f.warrantyEndDate ? addMonths(f.purchaseDate, f.warrantyMonths) : null;
+
+  return (
+    <>
+      <button
+        type="button" onClick={open}
+        className={`flex h-[38px] w-full items-center gap-1.5 rounded-lg border px-2.5 text-left text-xs transition ${parts.length ? "border-slate-200 bg-white text-slate-700 hover:border-indigo-300" : "border-dashed border-slate-300 bg-white text-slate-400 hover:border-indigo-300 hover:text-indigo-600"}`}
+        title={parts.join(" · ") || undefined}
+      >
+        <Receipt className="h-3.5 w-3.5 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{parts.length ? parts.join(" · ") : editable ? "Add details" : "—"}</span>
+        {editable && <Pencil className="h-3 w-3 shrink-0 text-slate-300" />}
+      </button>
+      {form && (
+        <Modal title="Purchase Details" onClose={() => setForm(null)} maxWidth="max-w-lg">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-700"><Store className="h-3.5 w-3.5 text-slate-400" /> Vendor</label>
+              {editable ? (
+                <SearchableSelect value={f.vendorId} onChange={(v) => setForm({ ...f, vendorId: v })} options={vendorOptions} placeholder="Unknown" />
+              ) : <p className="py-2 text-sm text-slate-800">{vendor || "—"}</p>}
+            </div>
+            <div>
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-700"><CalendarDays className="h-3.5 w-3.5 text-slate-400" /> Purchase date</label>
+              <input type="date" disabled={!editable} value={f.purchaseDate} onChange={(e) => setForm({ ...f, purchaseDate: e.target.value })} className={inp} />
+            </div>
+            <div>
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-700"><IndianRupee className="h-3.5 w-3.5 text-slate-400" /> Cost / unit</label>
+              <input type="number" min="0" disabled={!editable} value={f.purchaseCost} onChange={(e) => setForm({ ...f, purchaseCost: e.target.value })} placeholder="—" className={inp} />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-slate-700"><ShieldCheck className="h-3.5 w-3.5 text-slate-400" /> Warranty — months or end date</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number" min="1" max="120" placeholder="Months" disabled={!editable || !!f.warrantyEndDate}
+                  value={f.warrantyMonths} onChange={(e) => setForm({ ...f, warrantyMonths: e.target.value })}
+                  className={`${inpBase} w-28 shrink-0`}
+                />
+                <span className="text-xs text-slate-400">or</span>
+                <input
+                  type="date" title="Warranty end date" disabled={!editable || f.warrantyMonths !== ""}
+                  value={f.warrantyEndDate} onChange={(e) => setForm({ ...f, warrantyEndDate: e.target.value })}
+                  className={`${inpBase} flex-1`}
+                />
+              </div>
+              <p className="mt-1 text-xs text-slate-400">
+                {f.warrantyEndDate ? `Till ${fmtDate(f.warrantyEndDate)}` : formEnd ? `Till ${fmtDate(formEnd)}` : f.warrantyMonths !== "" ? "Needs the purchase date" : "Unknown — leave blank"}
+              </p>
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" onClick={() => setForm(null)} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50">{editable ? "Cancel" : "Close"}</button>
+            {editable && (
+              <button type="button" onClick={() => { onSave(form); setForm(null); }} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">Save</button>
+            )}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
 };
 
 /* ============================================================= */
@@ -133,28 +208,31 @@ const ProductSection = ({ product, rows, editable, issued, vendorOptions, issues
     ...fields.map(() => COL.field),
     ...(isQty ? [COL.qty] : []),
     ...(issued ? [] : [COL.condition, COL.state]),
-    COL.vendor, COL.date, COL.cost, COL.warranty, COL.del,
+    COL.purchase, COL.del,
   ];
   const colCount = widths.length;
   const minWidth = widths.reduce((s, w) => s + w, 0);
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
-        <div>
-          <span className="font-semibold text-slate-900">{product.name}</span>
-          <span className="ml-2 text-xs text-slate-500">
-            {product.categoryPath || ""} · {isQty ? `Group (${unitLabel(product.unit) || "qty"})` : "Individual"} · {rows.length} line(s)
-          </span>
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100"><PackageOpen className="h-4 w-4" /></span>
+          <div>
+            <p className="text-sm font-bold text-slate-900">{product.name}</p>
+            <p className="text-xs text-slate-500">
+              {product.categoryPath || ""} · {isQty ? `Counted by ${unitLabel(product.unit) || "quantity"}` : "One row per unit"} · {rows.length} row{rows.length === 1 ? "" : "s"}
+            </p>
+          </div>
         </div>
         {editable && (
           <div className="flex gap-1.5">
-            <button type="button" onClick={() => onAddRow(1)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-700">
-              <Plus className="h-3.5 w-3.5" /> Row
+            <button type="button" onClick={() => onAddRow(1)} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50">
+              <Plus className="h-3.5 w-3.5" /> Add Row
             </button>
             {!isQty && (
-              <button type="button" onClick={() => onAddRow(10)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-indigo-300 hover:text-indigo-700">
-                <CopyPlus className="h-3.5 w-3.5" /> 10 rows
+              <button type="button" onClick={() => onAddRow(10)} className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50">
+                <CopyPlus className="h-3.5 w-3.5" /> 10 Rows
               </button>
             )}
           </div>
@@ -175,13 +253,10 @@ const ProductSection = ({ product, rows, editable, issued, vendorOptions, issues
                   {f.isUnique && <span className="ml-1 rounded bg-violet-100 px-1 text-[10px] text-violet-700">unique</span>}
                 </th>
               ))}
-              {isQty && <th className={thc}>Qty *</th>}
+              {isQty && <th className={thc}>Qty <span className="text-rose-500">*</span></th>}
               {!issued && <th className={thc}>Condition</th>}
               {!issued && <th className={thc}>Working state</th>}
-              <th className={thc}>Vendor</th>
-              <th className={thc}>Purchase date</th>
-              <th className={thc}>Cost / unit</th>
-              <th className={thc}>Warranty: months or end date</th>
+              <th className={thc}>Purchase Details</th>
               <th className={thc} />
             </tr>
           </thead>
@@ -189,7 +264,6 @@ const ProductSection = ({ product, rows, editable, issued, vendorOptions, issues
             {rows.map(({ line, number }) => {
               const issues = issuesByKey.get(line._k) || [];
               const set = (patch) => onChange(line._k, patch);
-              const monthsEnd = !line.warrantyEndDate ? addMonths(line.purchaseDate, line.warrantyMonths) : null;
               return (
                 <React.Fragment key={line._k}>
                   <tr className={`border-b border-slate-50 ${issues.length ? "bg-rose-50/40" : ""}`}>
@@ -223,59 +297,23 @@ const ProductSection = ({ product, rows, editable, issued, vendorOptions, issues
                           {Object.entries(WORKING_STATES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                         </select>
                         {line.workingState !== "WORKING" && (
-                          <input
-                            disabled={!editable}
-                            value={line.faultNote}
-                            onChange={(e) => set({ faultNote: e.target.value })}
-                            placeholder="Fault / reason *"
-                            className={`${inp} mt-1`}
-                          />
+                          <>
+                            <input
+                              disabled={!editable}
+                              value={line.faultNote}
+                              onChange={(e) => set({ faultNote: e.target.value })}
+                              placeholder="Fault / reason"
+                              className={`${inp} mt-1`}
+                            />
+                            <p className="mt-0.5 text-[11px] text-slate-500">Fault / reason <span className="text-rose-500">*</span></p>
+                          </>
                         )}
                         {line.workingState === "FAULTY" && <p className="mt-0.5 text-[11px] font-medium text-amber-700">Goes to Repair &amp; Warranty</p>}
                         {line.workingState === "BEYOND_REPAIR" && <p className="mt-0.5 text-[11px] font-medium text-rose-700">Kept on record as scrapped</p>}
                       </td>
                     )}
                     <td className={cell}>
-                      {editable ? (
-                        <FloatingSelect value={line.vendorId} onChange={(v) => set({ vendorId: v })} options={vendorOptions} placeholder="Unknown" />
-                      ) : (
-                        <span className="block pt-2 text-slate-700">{vendorOptions.find((v) => v.value === line.vendorId)?.label || "—"}</span>
-                      )}
-                    </td>
-                    <td className={cell}>
-                      <input type="date" disabled={!editable} value={line.purchaseDate} onChange={(e) => set({ purchaseDate: e.target.value })} className={inp} />
-                    </td>
-                    <td className={cell}>
-                      <input type="number" min="0" disabled={!editable} value={line.purchaseCost} onChange={(e) => set({ purchaseCost: e.target.value })} placeholder="—" className={inp} />
-                    </td>
-                    <td className={cell}>
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          type="number" min="1" max="120" placeholder="Months"
-                          disabled={!editable || !!line.warrantyEndDate}
-                          value={line.warrantyMonths}
-                          onChange={(e) => set({ warrantyMonths: e.target.value })}
-                          className={`${inpBase} w-19 shrink-0`}
-                        />
-                        <span className="shrink-0 text-xs text-slate-400">or</span>
-                        <input
-                          type="date"
-                          title="Warranty end date"
-                          disabled={!editable || line.warrantyMonths !== ""}
-                          value={line.warrantyEndDate}
-                          onChange={(e) => set({ warrantyEndDate: e.target.value })}
-                          className={`${inpBase} flex-1`}
-                        />
-                      </div>
-                      <p className="mt-0.5 text-[11px] text-slate-400">
-                        {line.warrantyEndDate
-                          ? `Till ${fmtDate(line.warrantyEndDate)}`
-                          : monthsEnd
-                            ? `Till ${fmtDate(monthsEnd)}`
-                            : line.warrantyMonths !== ""
-                              ? "Needs purchase date"
-                              : "Unknown"}
-                      </p>
+                      <PurchaseDetailsCell line={line} editable={editable} vendorOptions={vendorOptions} onSave={set} />
                     </td>
                     <td className={`${cell} text-center`}>
                       {editable && (
@@ -304,10 +342,45 @@ const ProductSection = ({ product, rows, editable, issued, vendorOptions, issues
   );
 };
 
+// A numbered section with an icon — the vendor form's card look.
+const Card = ({ index, icon: Icon, title, subtitle, action, children }) => (
+  <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-t-2xl bg-slate-50/60 px-6 py-4">
+      <div className="flex items-center gap-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-sm font-semibold text-white">{index}</span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100"><Icon className="h-4 w-4" /></span>
+        <div>
+          <h2 className="text-sm font-bold text-slate-900">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
+        </div>
+      </div>
+      {action}
+    </div>
+    <div className="border-t border-slate-100 px-6 pb-6 pt-5">{children}</div>
+  </section>
+);
+
+// A labelled field — icon, label, a red * when it is required, and a hint.
+const Field = ({ icon: Icon, label, required, hint, children }) => (
+  <div className="flex min-w-0 flex-col gap-1.5">
+    <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+      {Icon && <Icon className="h-3.5 w-3.5 text-slate-400" />}
+      {label} {required && <span className="text-rose-500">*</span>}
+    </label>
+    {children}
+    {hint && <p className="text-xs text-slate-400">{hint}</p>}
+  </div>
+);
+
 /* ============================================================= */
 /* Editor — Opening Stock (STORE) or Opening Issued Stock (ISSUED) */
 /* ============================================================= */
-const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
+/*
+  mode: "view" reads an entry (no inputs, no Save / Post — a draft offers
+  Edit); "edit" opens a draft to change. A new entry is always "edit", and a
+  posted one can only be read whatever the address says.
+*/
+const OpeningStockEditor = ({ entryId, kind = "STORE", mode = "edit" }) => {
   const router = useRouter();
   const cfg = kindConfig(kind);
   const issued = cfg.kind === "ISSUED";
@@ -333,9 +406,13 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
   const [confirm, setConfirm] = useState(null); // "post" | "delete"
 
   const isDraft = !entry || entry.status === "DRAFT";
-  const editable = isDraft && canDo(permissions, isAdmin, isNew ? "CREATE" : "UPDATE", cfg.moduleKey);
-  const canPost = isDraft && !isNew && canDo(permissions, isAdmin, "POST", cfg.moduleKey);
-  const canDelete = isDraft && !isNew && canDo(permissions, isAdmin, "DELETE", cfg.moduleKey);
+  const viewOnly = !isNew && mode === "view";
+  const canEdit = isDraft && canDo(permissions, isAdmin, isNew ? "CREATE" : "UPDATE", cfg.moduleKey);
+  const editable = canEdit && !viewOnly;
+  // Post is offered on a new entry too — it saves first, then posts.
+  const canPost = isDraft && !viewOnly && canDo(permissions, isAdmin, "POST", cfg.moduleKey);
+  const canDelete = isDraft && !isNew && !viewOnly && canDo(permissions, isAdmin, "DELETE", cfg.moduleKey);
+  const editPath = (id) => `${cfg.path}/${id}/edit`;
 
   // Server issues are by line index in the order sent — pin them to the
   // client keys so they follow the row, and vanish from a row once it is edited.
@@ -389,18 +466,20 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
   }, [dirty]);
 
   const touch = () => setDirty(true);
+  // Newest first: a new product's section goes on top, and a new row on top
+  // of its section — what was just added is what you see first.
   const addProductLines = (product, newLines) => {
     setProducts((m) => new Map(m).set(String(product._id), product));
-    setLines((ls) => [...ls, ...newLines]);
+    setLines((ls) => [...newLines, ...ls]);
     touch();
   };
   const addRows = (productId, n) => {
     setLines((ls) => {
-      const prev = [...ls].reverse().find((l) => l.productDefinitionId === productId);
+      // The newest row of this product — its vendor / dates carry over.
+      const prev = ls.find((l) => l.productDefinitionId === productId);
       const add = Array.from({ length: n }, () => blankLine(productId, prev));
-      // Insert after the product's last line, so its section stays together.
-      const lastIdx = ls.map((l) => l.productDefinitionId).lastIndexOf(productId);
-      return lastIdx < 0 ? [...ls, ...add] : [...ls.slice(0, lastIdx + 1), ...add, ...ls.slice(lastIdx + 1)];
+      const firstIdx = ls.findIndex((l) => l.productDefinitionId === productId);
+      return firstIdx < 0 ? [...add, ...ls] : [...ls.slice(0, firstIdx), ...add, ...ls.slice(firstIdx)];
     });
     touch();
   };
@@ -412,21 +491,28 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
   const removeLine = (k) => { setLines((ls) => ls.filter((l) => l._k !== k)); touch(); };
   const choosePerson = (p) => { setPerson(p); setChangingPerson(false); touch(); };
 
-  // Sections in order of first appearance; line numbers are global.
+  // Sections in order of first appearance (newest product on top). Rows are
+  // numbered within their section, the newest the highest.
   const sections = useMemo(() => {
     const order = [];
     const byProduct = new Map();
-    lines.forEach((line, i) => {
+    lines.forEach((line) => {
       if (!byProduct.has(line.productDefinitionId)) { byProduct.set(line.productDefinitionId, []); order.push(line.productDefinitionId); }
-      byProduct.get(line.productDefinitionId).push({ line, number: i + 1 });
+      byProduct.get(line.productDefinitionId).push(line);
     });
-    return order.map((id) => ({ product: products.get(id), rows: byProduct.get(id) })).filter((s) => s.product);
+    return order
+      .map((id) => {
+        const list = byProduct.get(id);
+        return { product: products.get(id), rows: list.map((line, i) => ({ line, number: list.length - i })) };
+      })
+      .filter((sec) => sec.product);
   }, [lines, products]);
 
   const vendorOptions = useMemo(() => options.vendors.map((v) => ({ value: String(v._id), label: v.name })), [options.vendors]);
   const issueCount = issuesByKey.size;
 
-  const save = async () => {
+  // stay: Post saves first and moves to the entry's page itself afterwards.
+  const save = async ({ stay = false } = {}) => {
     if (!header.branchId) { toast.error(issued ? "Choose the branch whose stock this is" : "Choose the branch this stock is in"); return null; }
     if (issued && !person) { toast.error("Choose who has these items"); return null; }
     setSaving(true);
@@ -441,7 +527,7 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
       const data = isNew ? await api.createEntry(payload) : await api.updateEntry(entryId, payload);
       absorb(data, sent);
       toast.success(data.issues?.length ? `Saved — ${data.issues.length} line(s) need fixing` : "Saved");
-      if (isNew) router.replace(`${cfg.path}/${data._id}`);
+      if (isNew && !stay) router.replace(editPath(data._id));
       return data;
     } catch (err) {
       toast.error(err.message);
@@ -454,13 +540,22 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
   const doPost = async () => {
     setSaving(true);
     try {
-      if (dirty) {
-        const saved = await save();
+      // A new or changed entry is saved first; rows that need fixing stop the post.
+      let id = entryId;
+      if (isNew || dirty) {
+        const saved = await save({ stay: true });
         if (!saved) return;
-        if (saved.issues?.length) { setConfirm(null); return; }
+        id = saved._id;
+        if (saved.issues?.length) {
+          setConfirm(null);
+          if (isNew) router.replace(editPath(id));
+          return;
+        }
       }
-      const data = await api.postEntry(entryId);
+      const data = await api.postEntry(id);
       absorb(data, lines);
+      // Posted — nothing left to edit, so it opens to read.
+      router.replace(`${cfg.path}/${id}`);
       toast.success(
         issued
           ? `${data.entryNumber} posted — ${data.lines.length} item(s) are now with ${data.issuedTo?.name || "them"}`
@@ -495,25 +590,37 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
   const personName = person?.name || person?.username || "";
 
   return (
-    <div className="min-h-screen bg-slate-50/60 p-6 pb-28">
-      <button type="button" onClick={() => router.push(cfg.path)} className="mb-3 inline-flex items-center gap-1 text-sm font-medium text-slate-500 hover:text-slate-800">
-        <ArrowLeft className="h-4 w-4" /> {cfg.title}
-      </button>
+    <div className="min-h-screen bg-slate-50/60">
+    <div className="mx-auto w-full max-w-6xl p-6 pb-12">
+      {/* Header — the same as the vendor form: back, then the title and status. */}
+      <div className="mb-6 flex flex-wrap items-center gap-4">
+        <button
+          type="button" onClick={() => router.push(cfg.path)}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back to {cfg.title}
+        </button>
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">{entry?.entryNumber || cfg.newTitle}</h1>
+        {entry && <StatusBadge status={entry.status} />}
+        {viewOnly && canEdit && (
+          <button
+            type="button" onClick={() => router.push(editPath(entryId))}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+          >
+            <Pencil className="h-4 w-4" /> Edit Draft
+          </button>
+        )}
+        {entry?.status === "POSTED" && (
+          <span className="text-sm text-slate-500">
+            Posted {fmtDate(entry.postedAt)}{entry.postedBy?.name ? ` by ${entry.postedBy.name}` : ""}
+          </span>
+        )}
+      </div>
 
-      <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">{entry?.entryNumber || cfg.newTitle}</h1>
-          {entry && <StatusBadge status={entry.status} />}
-          {entry?.status === "POSTED" && (
-            <span className="text-sm text-slate-500">
-              Posted {fmtDate(entry.postedAt)}{entry.postedBy?.name ? ` by ${entry.postedBy.name}` : ""}
-            </span>
-          )}
-        </div>
-        <div className={`grid gap-3 ${issued ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"}`}>
-          <div>
-            <label className="text-xs font-semibold text-slate-600">Branch *</label>
-            <div className="mt-1">
+      <div className="space-y-6">
+        <Card index={1} icon={ClipboardList} title="Entry Details" subtitle={issued ? "Whose stock it is, and since when the person has had it" : "Which branch this stock is in, and the day it was counted"}>
+          <div className={`grid grid-cols-1 gap-5 ${issued ? "sm:grid-cols-2 lg:grid-cols-4" : "sm:grid-cols-3"}`}>
+            <Field icon={Building2} label="Branch" required>
               {editable ? (
                 <SearchableSelect
                   value={header.branchId}
@@ -522,116 +629,106 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
                   placeholder="Select branch"
                 />
               ) : (
-                <p className="py-2 text-sm font-medium text-slate-800">{entry?.branchId?.name || "—"}</p>
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-800">{entry?.branchId?.name || "—"}</p>
               )}
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-600">Entry date</label>
-            <input type="date" disabled={!editable} value={header.entryDate} onChange={(e) => { setHeader((h) => ({ ...h, entryDate: e.target.value })); touch(); }} className={`${inp} mt-1 py-2`} />
-          </div>
-          {issued && (
-            <div>
-              <label className="text-xs font-semibold text-slate-600">With them since</label>
+            </Field>
+            <Field icon={CalendarDays} label={issued ? "Entry date" : "Stock as of"}>
+              <input type="date" disabled={!editable} value={header.entryDate} onChange={(e) => { setHeader((h) => ({ ...h, entryDate: e.target.value })); touch(); }} className={inp} />
+            </Field>
+            {issued && (
+              <Field icon={CalendarDays} label="With them since" hint="Leave blank if not known">
+                <input
+                  type="date" disabled={!editable} max={header.entryDate || undefined} value={header.issuedSince}
+                  onChange={(e) => { setHeader((h) => ({ ...h, issuedSince: e.target.value })); touch(); }}
+                  className={inp}
+                />
+              </Field>
+            )}
+            <Field icon={MessageSquareText} label="Remarks">
               <input
-                type="date"
-                disabled={!editable}
-                max={header.entryDate || undefined}
-                value={header.issuedSince}
-                onChange={(e) => { setHeader((h) => ({ ...h, issuedSince: e.target.value })); touch(); }}
-                className={`${inp} mt-1 py-2`}
+                disabled={!editable} value={header.remarks}
+                onChange={(e) => { setHeader((h) => ({ ...h, remarks: e.target.value })); touch(); }}
+                placeholder={issued ? "e.g. Laptop + charger since joining" : "e.g. Delhi store physical count"}
+                className={inp}
               />
-              <p className="mt-0.5 text-[11px] text-slate-400">Leave blank if not known</p>
-            </div>
-          )}
-          <div>
-            <label className="text-xs font-semibold text-slate-600">Remarks</label>
-            <input
-              disabled={!editable}
-              value={header.remarks}
-              onChange={(e) => { setHeader((h) => ({ ...h, remarks: e.target.value })); touch(); }}
-              placeholder={issued ? "e.g. Laptop + charger since joining" : "e.g. Delhi store physical count"}
-              className={`${inp} mt-1 py-2`}
-            />
+            </Field>
           </div>
-        </div>
-      </div>
+        </Card>
 
-      {issued && (
-        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-3 flex items-center gap-2">
-            <UserRound className="h-4 w-4 text-indigo-600" />
-            <h2 className="text-sm font-semibold text-slate-900">Who has these items? <span className="text-rose-500">*</span></h2>
-            <span className="text-xs text-slate-400">Employee or subscriber — one person per entry</span>
-          </div>
-          {person && !changingPerson ? (
-            <PersonCard person={person} onChange={editable ? () => setChangingPerson(true) : null} />
-          ) : editable ? (
-            <div>
-              <PersonSearch module={cfg.moduleKey} onPick={choosePerson} autoFocus={changingPerson} />
-              {changingPerson && (
-                <button type="button" onClick={() => setChangingPerson(false)} className="mt-2 text-xs font-semibold text-slate-500 hover:text-slate-700">
-                  Keep {personName}
+        {issued && (
+          <Card index={2} icon={UserRound} title={<>Who has these items? <span className="text-rose-500">*</span></>} subtitle="Employee or subscriber — one person per entry">
+            {person && !changingPerson ? (
+              <PersonCard person={person} onChange={editable ? () => setChangingPerson(true) : null} />
+            ) : editable ? (
+              <div>
+                <PersonSearch module={cfg.moduleKey} onPick={choosePerson} autoFocus={changingPerson} />
+                {changingPerson && (
+                  <button type="button" onClick={() => setChangingPerson(false)} className="mt-2 text-xs font-semibold text-slate-500 hover:text-slate-700">
+                    Keep {personName}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">—</p>
+            )}
+          </Card>
+        )}
+
+        <Card
+          index={issued ? 3 : 2} icon={Boxes} title="Items"
+          subtitle={issued ? "Each item this person has — serial numbers make them traceable" : "Add items one by one, or upload a product's Excel template"}
+          action={editable && (
+            <div className="flex flex-wrap gap-2">
+              {!issued && (
+                <button type="button" onClick={() => setUploading(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-50">
+                  <FileSpreadsheet className="h-3.5 w-3.5" /> Upload Excel
                 </button>
               )}
+              <button type="button" onClick={() => setPicking(true)} className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50">
+                <Plus className="h-3.5 w-3.5" /> Add Item
+              </button>
+            </div>
+          )}
+        >
+          {issueCount > 0 && (
+            <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <AlertTriangle className="mr-1 inline h-4 w-4" />
+              {issueCount} row(s) need fixing before this entry can be posted — they are marked below.
+            </div>
+          )}
+          {sections.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 py-12 text-center">
+              <Boxes className="mx-auto h-8 w-8 text-slate-300" />
+              <p className="mt-2 text-sm font-medium text-slate-700">No items yet</p>
+              <p className="mt-1 text-sm text-slate-400">{editable ? "Use Add Item to start." : "This entry has no items."}</p>
             </div>
           ) : (
-            <p className="text-sm text-slate-500">—</p>
+            <div className="space-y-4">
+              {sections.map((sec) => (
+                <ProductSection
+                  key={sec.product._id}
+                  product={sec.product}
+                  rows={sec.rows}
+                  editable={editable}
+                  issued={issued}
+                  vendorOptions={vendorOptions}
+                  issuesByKey={issuesByKey}
+                  onChange={changeLine}
+                  onRemove={removeLine}
+                  onAddRow={(n) => addRows(String(sec.product._id), n)}
+                />
+              ))}
+            </div>
           )}
-        </div>
-      )}
-
-      {editable && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button type="button" onClick={() => setPicking(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 shadow-sm hover:bg-indigo-50">
-            <Plus className="h-4 w-4" /> Add Item
-          </button>
-          {!issued && (
-            <button type="button" onClick={() => setUploading(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-50">
-              <FileSpreadsheet className="h-4 w-4" /> Upload Excel
-            </button>
-          )}
-        </div>
-      )}
-
-      {issueCount > 0 && (
-        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          <AlertTriangle className="mr-1 inline h-4 w-4" />
-          {issueCount} line(s) need fixing before this entry can be posted — they are marked below.
-        </div>
-      )}
-
-      {sections.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white py-14 text-center">
-          <p className="text-sm font-medium text-slate-700">No items yet</p>
-          <p className="mt-1 text-sm text-slate-400">
-            {issued ? "Add each item this person has — serial numbers make them traceable." : "Add items one by one, or upload a product's Excel template."}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {sections.map((s) => (
-            <ProductSection
-              key={s.product._id}
-              product={s.product}
-              rows={s.rows}
-              editable={editable}
-              issued={issued}
-              vendorOptions={vendorOptions}
-              issuesByKey={issuesByKey}
-              onChange={changeLine}
-              onRemove={removeLine}
-              onAddRow={(n) => addRows(String(s.product._id), n)}
-            />
-          ))}
-        </div>
-      )}
+        </Card>
+      </div>
 
       {(editable || canPost || canDelete) && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-6 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.04)] backdrop-blur">
+        // At the end of the page, in the page width — like the other forms.
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-slate-600">
-              <span className="font-semibold text-slate-900">{lines.length}</span> line(s)
+              <span className="font-semibold text-slate-900">{lines.length}</span> row(s)
               {issued && personName && <> · with <span className="font-semibold text-slate-900">{personName}</span></>}
               {faultyCount > 0 && <> · <span className="font-semibold text-amber-700">{faultyCount}</span> faulty</>}
               {beyondCount > 0 && <> · <span className="font-semibold text-rose-700">{beyondCount}</span> beyond repair</>}
@@ -639,12 +736,12 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
             </p>
             <div className="flex gap-2">
               {canDelete && (
-                <button type="button" onClick={() => setConfirm("delete")} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50">
+                <button type="button" onClick={() => setConfirm("delete")} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50">
                   Delete draft
                 </button>
               )}
               {editable && (
-                <button type="button" disabled={saving} onClick={save} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <button type="button" disabled={saving} onClick={() => save()} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-50">
                   <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save draft"}
                 </button>
               )}
@@ -654,7 +751,7 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
                   disabled={saving || !lines.length || (!dirty && issueCount > 0) || (issued && !person)}
                   onClick={() => setConfirm("post")}
                   title={!dirty && issueCount > 0 ? "Fix the marked lines first" : issued && !person ? "Choose who has these items first" : ""}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Send className="h-4 w-4" /> {issued ? "Post & assign" : "Post to stock"}
                 </button>
@@ -702,6 +799,7 @@ const OpeningStockEditor = ({ entryId, kind = "STORE" }) => {
           Nothing has gone into stock from it — the draft and its {lines.length} line(s) will be removed.
         </ConfirmModal>
       )}
+    </div>
     </div>
   );
 };

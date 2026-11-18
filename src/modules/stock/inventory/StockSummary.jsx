@@ -3,12 +3,14 @@
 /*
   Product Summary — everything received, and where it all is now.
 
-    Total Received = Available + Issued / Used, for every product and in total.
+    Total Received = Available + Not Available, for every product and in total.
 
-  ⓘ beside Total Received says where it came from (purchase, opening stock,
-  other branches); ⓘ beside Issued / Used says where it went (returned to
-  vendor, sent to branches, in use, repair & warranty), each line opening the
-  screen that lists those units.
+  Not Available = everything received that cannot be used from the store
+  right now (on the way, in use, repair & warranty, debited, sent
+  to branches). The ⓘ in its column header explains that; ⓘ beside a row's
+  Total Received says where it came from (purchase, opening stock, other
+  branches) and ⓘ beside a row's Not Available says where it is, each line
+  opening the screen that lists those units.
 
   With All branches, stock moved between our own branches is inside the
   company and counts nowhere — the backend only counts transfers that cross
@@ -95,9 +97,9 @@ const OutPopup = ({ row, single, onClose, go }) => {
   const unit = unitLabel(row.unit);
   const inUse = row.subscribers + row.employees;
   return (
-    <Modal title={`${row.productName} · Issued / Used`} onClose={onClose} maxWidth="max-w-md">
+    <Modal title={`${row.productName} · Not Available`} onClose={onClose} maxWidth="max-w-md">
       <div className="space-y-0.5">
-        <Line icon={Undo2} tone="bg-rose-50 text-rose-600 ring-rose-100" label="Returned to Vendor" value={row.returned} unit={unit} onOpen={row.returned > 0 ? () => go("/stock/purchase/faulty-items") : null} />
+        <Line icon={Undo2} tone="bg-rose-50 text-rose-600 ring-rose-100" label="Debited" value={row.returned} unit={unit} onOpen={row.returned > 0 ? () => go("/stock/purchase/faulty-items") : null} />
         {single && <Line icon={ArrowLeftRight} tone="bg-violet-50 text-violet-600 ring-violet-100" label="Sent to Branches" value={row.sent} unit={unit} onOpen={row.sent > 0 ? () => go("/stock/inventory/transfers/history") : null} />}
         {row.inTransit > 0 && <Line icon={ArrowLeftRight} tone="bg-indigo-50 text-indigo-600 ring-indigo-100" label="On the Way" value={row.inTransit} unit={unit} onOpen={() => go("/stock/inventory/transfers/requests-to-us")} />}
         <Line icon={Users} tone="bg-sky-50 text-sky-600 ring-sky-100" label="In Use" value={inUse} unit={unit}  />
@@ -108,12 +110,45 @@ const OutPopup = ({ row, single, onClose, go }) => {
           <Line icon={AlertTriangle} tone="bg-amber-50 text-amber-600 ring-amber-200" label="Not recorded" value={row.unrecorded} unit={unit} warn />
         )}
       </div>
-      <TotalLine label="Total Issued / Used" value={row.outOfStore} unit={unit} />
+      <TotalLine label="Total Not Available" value={row.outOfStore} unit={unit} />
       {row.unrecorded > 0 && (
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Received but not found anywhere — stock that left without an entry. Worth checking.
         </p>
       )}
+    </Modal>
+  );
+};
+
+/* What the Not Available column is made of — the ⓘ in its header. */
+const NotAvailableInfo = ({ single, onClose }) => {
+  const parts = [
+    { icon: ArrowLeftRight, tone: "bg-indigo-50 text-indigo-600 ring-indigo-100", label: "On the Way", text: "Sent to another branch in a stock transfer, not received there yet." },
+    { icon: Users, tone: "bg-sky-50 text-sky-600 ring-sky-100", label: "In Use", text: "Issued to subscribers, or given to our employees." },
+    { icon: Wrench, tone: "bg-amber-50 text-amber-600 ring-amber-100", label: "Repair & Warranty", text: "Faulty, in repair, or with the vendor on a warranty claim." },
+    { icon: Undo2, tone: "bg-rose-50 text-rose-600 ring-rose-100", label: "Debited", text: "Sent back on a debit note — the money was deducted from the vendor's bill. No longer ours (not a warranty claim — that is Repair & Warranty)." },
+    ...(single ? [{ icon: ArrowLeftRight, tone: "bg-violet-50 text-violet-600 ring-violet-100", label: "Sent to Branches", text: "Moved to another branch for good (shown when one branch is picked)." }] : []),
+    { icon: AlertTriangle, tone: "bg-amber-50 text-amber-600 ring-amber-200", label: "Not recorded", text: "Received, but not found anywhere — left without an entry. Shown only when it happens." },
+  ];
+  return (
+    <Modal title="Not Available — what it includes" onClose={onClose} maxWidth="max-w-md">
+      <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 ring-1 ring-inset ring-slate-200">
+        Everything received that <b>cannot be used from the store right now</b>.
+        <br />
+        <b>Total Received = Available + Not Available</b>
+      </p>
+      <div className="space-y-1">
+        {parts.map((p) => (
+          <div key={p.label} className="flex items-start gap-3 rounded-xl px-2 py-1.5">
+            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ${p.tone}`}><p.icon className="h-4 w-4" /></span>
+            <div>
+              <p className="text-sm font-semibold text-slate-800">{p.label}</p>
+              <p className="text-xs text-slate-500">{p.text}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-slate-400">Each product&apos;s own split is behind the ⓘ beside its number.</p>
     </Modal>
   );
 };
@@ -153,7 +188,7 @@ const StockSummary = () => {
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
-  const [popup, setPopup] = useState(null); // { kind: "received" | "out", row }
+  const [popup, setPopup] = useState(null); // { kind: "received" | "out" | "notAvailableInfo", row }
   const [historyFor, setHistoryFor] = useState(null);
 
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
@@ -230,7 +265,7 @@ const StockSummary = () => {
           Product Summary
         </h1>
 
-        {/* Total Received = Available + Issued / Used */}
+        {/* Total Received = Available + Not Available */}
         <div className="flex flex-wrap items-center gap-2">
           <Stat
             label="Total Received" value={t.received} icon={PackageOpen}
@@ -241,9 +276,9 @@ const StockSummary = () => {
           <Stat label="Available" value={t.inStore} icon={PackageCheck} className="border border-emerald-200 bg-emerald-50 text-emerald-800" />
           <Op>+</Op>
           <Stat
-            label="Issued / Used" value={t.outOfStore} icon={Users}
+            label="Not Available" value={t.outOfStore} icon={Users}
             className="border border-slate-200 bg-white text-slate-700"
-            title={`In use ${qty((t.subscribers || 0) + (t.employees || 0))} · Repair ${qty(t.repair)} · Returned ${qty(t.returned)}${single ? ` · Sent ${qty(t.sent)}` : ""}`}
+            title={`On the way ${qty(t.inTransit)} · In use ${qty((t.subscribers || 0) + (t.employees || 0))} · Repair ${qty(t.repair)} · Debited ${qty(t.returned)}${single ? ` · Sent ${qty(t.sent)}` : ""}`}
           />
         </div>
       </div>
@@ -287,7 +322,17 @@ const StockSummary = () => {
                 <th className={th}>Product</th>
                 <th className={thRight}>Total Received</th>
                 <th className={thRight}>Available</th>
-                <th className={thRight}>Issued / Used</th>
+                <th className={thRight}>
+                  <span className="inline-flex items-center gap-1">
+                    Not Available
+                    <button
+                      type="button" onClick={() => setPopup({ kind: "notAvailableInfo" })} title="What Not Available includes" aria-label="What Not Available includes"
+                      className="flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-indigo-600"
+                    >
+                      <Info className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -344,7 +389,7 @@ const StockSummary = () => {
                             <span className="text-sm font-bold tabular-nums text-slate-700">{qty(r.outOfStore)}</span>
                             <span className="text-xs text-slate-400">{unit}</span>
                             <button
-                              type="button" onClick={() => setPopup({ kind: "out", row: r })} title="Where it went" aria-label="Issued / used details"
+                              type="button" onClick={() => setPopup({ kind: "out", row: r })} title="Where it is" aria-label="Not available details"
                               className="flex h-6 w-6 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100"
                             >
                               <Info className="h-4 w-4" />
@@ -375,6 +420,7 @@ const StockSummary = () => {
           onHistory={() => { setHistoryFor(popup.row); setPopup(null); }}
         />
       )}
+      {popup?.kind === "notAvailableInfo" && <NotAvailableInfo single={single} onClose={() => setPopup(null)} />}
       {popup?.kind === "out" && (
         <OutPopup row={popup.row} single={single} onClose={() => setPopup(null)} go={go(popup.row)} />
       )}

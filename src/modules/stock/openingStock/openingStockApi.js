@@ -24,7 +24,8 @@ export const entryApi = (kind = "STORE") => {
 
     fetchEntries: async (query) => {
       const body = await api.get(BASE, { query, fallback: "Failed to load entries" });
-      return { rows: body.data || [], total: body.pagination?.total ?? 0 };
+      // counts: entries per status under the other filters (the status tabs).
+      return { rows: body.data || [], total: body.pagination?.total ?? 0, counts: body.meta?.counts || {} };
     },
 
     fetchEntry: async (id) => (await api.get(`${BASE}/${id}`, { fallback: "Failed to load the entry" })).data,

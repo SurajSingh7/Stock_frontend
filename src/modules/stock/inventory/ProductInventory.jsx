@@ -77,12 +77,12 @@ const sourceLabel = (t) => (t === "INVOICE" ? "Invoice" : SOURCE_LABEL[t] || (t 
 /* History — what came in, and where it is now                    */
 /* ============================================================= */
 
-// Where the issued / used stock is now — same names as Product Summary.
+// Where the not-available stock is now — same names as Product Summary.
 const ISSUED_PARTS = [
   { key: "subscribers", label: "Subscribers", icon: Users, tone: "bg-sky-50 text-sky-700 ring-sky-100" },
   { key: "employees", label: "Employees", icon: UserCheck, tone: "bg-cyan-50 text-cyan-700 ring-cyan-100" },
   { key: "repair", label: "Repair & Warranty", icon: Wrench, tone: "bg-amber-50 text-amber-700 ring-amber-100" },
-  { key: "returned", label: "Returned to Vendor", icon: Undo2, tone: "bg-rose-50 text-rose-700 ring-rose-100" },
+  { key: "returned", label: "Debited", icon: Undo2, tone: "bg-rose-50 text-rose-700 ring-rose-100" },
   { key: "sent", label: "Sent to Branches", icon: ArrowLeftRight, tone: "bg-violet-50 text-violet-700 ring-violet-100" },
   { key: "inTransit", label: "On the Way", icon: Truck, tone: "bg-indigo-50 text-indigo-700 ring-indigo-100" },
   { key: "unrecorded", label: "Not recorded", icon: AlertTriangle, tone: "bg-amber-50 text-amber-800 ring-amber-200" },
@@ -131,7 +131,7 @@ export const ProductHistory = ({ product, branchId, branchName, onBack }) => {
         <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-slate-100" />)}</div>
       ) : (
         <>
-          {/* Total Received = Available + Issued / Used */}
+          {/* Total Received = Available + Not Available */}
           <div className="mb-5 flex flex-col gap-2 lg:flex-row lg:items-stretch">
             <div className="rounded-xl bg-linear-to-br from-indigo-600 to-violet-600 px-3.5 py-2.5 text-white shadow-sm shadow-indigo-200 lg:w-48">
               <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-indigo-100"><PackageOpen className="h-3.5 w-3.5" /> Total Received</p>
@@ -150,11 +150,11 @@ export const ProductHistory = ({ product, branchId, branchName, onBack }) => {
             <span className="hidden items-center text-lg font-light text-slate-300 lg:flex">+</span>
             <div className="flex-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 shadow-sm">
               <div className="flex items-baseline justify-between gap-3">
-                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600"><PackageMinus className="h-3.5 w-3.5" /> Issued / Used</p>
+                <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-600"><PackageMinus className="h-3.5 w-3.5" /> Not Available</p>
                 <p className="text-xl font-extrabold tabular-nums text-slate-900">{qty(s.outOfStore)} <span className="text-xs font-medium text-slate-400">{unit}</span></p>
               </div>
               {issuedParts.length === 0 ? (
-                <p className="mt-2 text-xs text-slate-400">Nothing issued yet.</p>
+                <p className="mt-2 text-xs text-slate-400">Nothing outside the store yet.</p>
               ) : (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {issuedParts.map((p) => (
