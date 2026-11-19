@@ -11,6 +11,9 @@ export const INVENTORY_API = {
     stockSummary: "/stock/inventory-items/stock-summary",
     productStockHistory: (productDefinitionId) => `/stock/inventory-items/product-stock/${productDefinitionId}/history`,
     timeline: (itemId) => `/stock/inventory-items/${itemId}/timeline`,
+    // Item Summary: every unit wherever it is, and a unit's history under its own module.
+    itemSummary: "/stock/inventory-items/item-summary",
+    itemSummaryTimeline: (itemId) => `/stock/inventory-items/item-summary/${itemId}/timeline`,
   },
 
   stockReports: {

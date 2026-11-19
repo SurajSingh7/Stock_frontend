@@ -222,12 +222,18 @@ export const navCategories = [
         moduleKey: "available-items",
         action: ["VIEW_MENU"],
       },
-      // Everything received, and where it all is now. ("Item Summary" joins
-      // here once it is built.)
+      // Everything received, and where it all is now — per product.
       {
         name: "Product Summary",
         path: "/stock/inventory/summary",
         moduleKey: "product-summary",
+        action: ["VIEW_MENU"],
+      },
+      // Every unit we hold and who has it — in store, in use, repair, debited.
+      {
+        name: "Item Summary",
+        path: "/stock/inventory/item-summary",
+        moduleKey: "item-summary",
         action: ["VIEW_MENU"],
       },
       // Inventory reports (the Reports menu is billing).

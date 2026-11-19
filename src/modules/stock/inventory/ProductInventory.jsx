@@ -20,21 +20,24 @@ import { API_ENDPOINTS } from "@/constants/api";
 import { fetchLeafCategories, fetchScopedBranches, fetchProductOptions } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import {
-  RotateCcw, History, ArrowLeft, ArrowRight, Search, Boxes, Package, ChevronDown, ChevronRight, PackageCheck, PackageOpen, UserCheck, Users,
-  Wrench, PackageMinus, Undo2, ArrowLeftRight, AlertTriangle, Receipt, Archive, Truck,
+  History, ArrowLeft, ArrowRight, Boxes, Package, ChevronDown, ChevronRight, PackageCheck, PackageOpen, UserCheck, Users,
+  Wrench, PackageMinus, Undo2, ArrowLeftRight, AlertTriangle, Receipt, Archive, Truck, PackageX,
 } from "lucide-react";
 import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { SOURCE_LABEL } from "./itemBadges";
+import { Tile } from "@/modules/stock/reports/reportUi";
+import { SearchBox, ResetButton } from "@/modules/stock/inventoryTransfer/shared";
 
 const EP = API_ENDPOINTS.inventory.inventoryItems;
 
-const inputCls =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600";
 const thRight = "px-4 py-3 text-right text-xs font-bold uppercase tracking-wide text-slate-600";
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—");
 const qty = (n) => Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 3 });
+// "5 pcs · 120 m" — each unit on its own, never added together.
+const availableText = (list = []) =>
+  list.length ? list.map((t) => `${qty(t.quantity)} ${t.unit === "meter" ? "m" : "pcs"}`).join(" · ") : "0";
 
 const LEVEL_META = {
   OUT: { label: "Out of stock", dot: "bg-rose-500", chip: "bg-rose-50 text-rose-700 ring-rose-200", text: "text-rose-700" },
@@ -226,6 +229,7 @@ const ProductInventory = () => {
 
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({});
+  const [totals, setTotals] = useState({ available: [] });
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState("");
@@ -273,6 +277,7 @@ const ProductInventory = () => {
       const json = await api.get(EP.productStock, { query, fallback: "Failed to fetch product inventory" });
       setRows(json.data?.rows || []);
       setCounts(json.data?.counts || {});
+      setTotals(json.data?.totals || { available: [] });
       setTotal(json.data?.total ?? 0);
     } catch (err) {
       toast.error(err.message);
@@ -310,33 +315,36 @@ const ProductInventory = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
-      <h1 className="mb-5 flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
-          <Boxes className="h-5 w-5" />
-        </span>
-        Available Product
-      </h1>
-
-      {/* filters */}
-      <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <div className="relative sm:col-span-2">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text" value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Search product name..."
-              className={`${inputCls} pl-9`}
-            />
-          </div>
-          <SearchableSelect value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }} options={categoryOptions} placeholder="All categories" />
-          <SearchableSelect value={productId} onChange={(v) => { setProductId(v); setPage(1); }} options={productOptions} placeholder="All products" />
-          <SearchableSelect value={branchId} onChange={(v) => { setBranchId(v); setPage(1); setExpanded({}); }} options={branchOptions} placeholder="All branches" />
+      {/* Title, and on the right the totals for the current filters (not the tab). */}
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+          <Boxes className="h-5 w-5 text-indigo-600" /> Available Product
+        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tile icon={Package} label="Products" value={qty(counts.ALL)} tone="border-slate-200 bg-white text-slate-700" />
+          <Tile icon={PackageCheck} label="Available" value={availableText(totals.available)} tone="border-emerald-200 bg-emerald-50 text-emerald-700" />
+          <Tile icon={AlertTriangle} label="Low" value={qty(counts.LOW)} tone="border-amber-200 bg-amber-50 text-amber-700" />
+          <Tile icon={PackageX} label="Out" value={qty(counts.OUT)} tone="border-rose-200 bg-rose-50 text-rose-700" />
         </div>
       </div>
 
+      {/* One row of filters, then the status tabs. */}
+      <div className="mb-2.5 flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="w-full sm:w-72"><SearchBox value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Search product name…" /></div>
+        <div className="w-full sm:w-52">
+          <SearchableSelect value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }} options={categoryOptions} placeholder="All categories" />
+        </div>
+        <div className="w-full sm:w-52">
+          <SearchableSelect value={productId} onChange={(v) => { setProductId(v); setPage(1); }} options={productOptions} placeholder="All products" />
+        </div>
+        <div className="w-full sm:w-52">
+          <SearchableSelect value={branchId} onChange={(v) => { setBranchId(v); setPage(1); setExpanded({}); }} options={branchOptions} placeholder="All branches" />
+        </div>
+        {hasActiveFilters && <ResetButton onClick={clearFilters} />}
+      </div>
+
       {/* status tabs */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2">
         {TABS.map((t) => {
           const on = level === t.key;
           return (
@@ -349,14 +357,6 @@ const ProductInventory = () => {
             </button>
           );
         })}
-        {hasActiveFilters && (
-          <button
-            type="button" onClick={clearFilters}
-            className="ml-auto inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-sm font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-100"
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Reset
-          </button>
-        )}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">

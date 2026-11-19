@@ -24,16 +24,22 @@ import Pagination from "@/shared/ui/pagination/Pagination";
 import DateRangeButton from "@/modules/stock/shared/DateRangeButton";
 import {
   RotateCcw, Boxes, Info, Eye, Search, SlidersHorizontal, MoreVertical, AlertTriangle, ArrowLeft, Receipt, Archive,
-  RefreshCw, ShieldCheck, ShieldAlert, ShieldX, Shield, History as HistoryIcon, PackageCheck, Tag,
+  RefreshCw, ShieldCheck, ShieldAlert, ShieldX, Shield, History as HistoryIcon, PackageCheck, Tag, Package, Recycle,
 } from "lucide-react";
 import { SearchableSelect, Modal, unitLabel, money } from "@/modules/stock/shared/StockSharedUI";
 import { ConditionBadge, SOURCE_LABEL, fmtDate } from "./itemBadges";
+import { Tile } from "@/modules/stock/reports/reportUi";
 
 const EP = API_ENDPOINTS.inventory.inventoryItems;
 
 const inputCls =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
 const th = "px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap";
+
+// "12 pcs · 95 m" — each unit on its own, never added together.
+const qtyNum = (n) => Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 3 });
+const unitTotals = (list = []) =>
+  list.length ? list.map((t) => `${qtyNum(t.quantity)} ${t.unit === "meter" ? "m" : "pcs"}`).join(" · ") : "0";
 
 const fmtDateTime = (d) =>
   d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -56,8 +62,8 @@ const WARRANTY_OPTIONS = [
   { value: "NONE", label: "No warranty" },
 ];
 
-const fieldsOf = (card) => (card.productDefinitionId?.selectedFields || []).map((sf) => sf.fieldDefId).filter(Boolean);
-const valueOf = (card, code) =>
+export const fieldsOf = (card) => (card.productDefinitionId?.selectedFields || []).map((sf) => sf.fieldDefId).filter(Boolean);
+export const valueOf = (card, code) =>
   card.cardType === "group" && card.variedFields?.includes(code) ? "Multiple" : card.fieldValues?.[code];
 
 /* ============================================================= */
@@ -121,7 +127,7 @@ const BatchBreakdownModal = ({ productName, unitText, defId, branchId, fields = 
 /* Popups from the row                                            */
 /* ============================================================= */
 
-const InfoRow = ({ label, children }) => (
+export const InfoRow = ({ label, children }) => (
   <div className="flex items-start justify-between gap-4 py-2">
     <span className="text-sm text-slate-500">{label}</span>
     <span className="text-right text-sm font-semibold text-slate-900">{children ?? "—"}</span>
@@ -312,7 +318,7 @@ const describeMovement = (m) => {
   return m.note && !m.note.startsWith(label) ? `${label}: ${m.note}` : m.note || label;
 };
 
-const Section = ({ title, icon: Icon, children }) => (
+export const Section = ({ title, icon: Icon, children }) => (
   <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/70 px-5 py-3">
       <Icon className="h-4 w-4 text-indigo-600" />
@@ -322,7 +328,12 @@ const Section = ({ title, icon: Icon, children }) => (
   </section>
 );
 
-const ItemDetailsView = ({ card, onBack }) => {
+/*
+  A unit's (or a batch row's) full page. Item Summary reuses it with its own
+  timeline endpoint, status badge and a "Where it is" section (children);
+  its batch rows have no receipt list (showBatches false).
+*/
+export const ItemDetailsView = ({ card, onBack, timelineUrl = EP.timeline, badge, showBatches = true, qtyLabel = "Available quantity", children }) => {
   const def = card.productDefinitionId || {};
   const isGroup = card.cardType === "group";
   const unit = unitLabel(def.unit);
@@ -333,13 +344,14 @@ const ItemDetailsView = ({ card, onBack }) => {
   useEffect(() => {
     (async () => {
       try {
+        if (isGroup && !showBatches) return;
         if (isGroup) {
           const query = { status: "AVAILABLE" };
           if (card.branchId?._id) query.branchId = card.branchId._id;
           const json = await api.get(EP.history(def._id), { query, fallback: "Failed to load batches" });
           setBatches(json.data || []);
         } else {
-          const json = await api.get(EP.timeline(card._id), { fallback: "Failed to load history" });
+          const json = await api.get(timelineUrl(card.itemId || card._id), { fallback: "Failed to load history" });
           setTimeline(json.data?.movements || []);
         }
       } catch (err) {
@@ -347,7 +359,7 @@ const ItemDetailsView = ({ card, onBack }) => {
         if (isGroup) setBatches([]); else setTimeline([]);
       }
     })();
-  }, [card._id, card.branchId?._id, def._id, isGroup]);
+  }, [card._id, card.itemId, card.branchId?._id, def._id, isGroup, showBatches, timelineUrl]);
 
   const src = card.source || {};
   const w = warrantyOf(card.warranty?.endDate);
@@ -365,15 +377,17 @@ const ItemDetailsView = ({ card, onBack }) => {
           <h1 className="text-lg font-bold tracking-tight text-slate-900">{def.name || "Item"}</h1>
           <p className="truncate text-sm text-slate-500">{def.categoryPath || "—"} · {card.branchId?.name || "—"}</p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Available
-        </span>
+        {badge ?? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Available
+          </span>
+        )}
       </div>
 
       <div className="mb-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Section title="Item" icon={Tag}>
           <div className="divide-y divide-slate-100">
-            {isGroup && <InfoRow label="Available quantity"><span className="text-indigo-700">{card.totalQty} {unit}</span></InfoRow>}
+            {isGroup && <InfoRow label={qtyLabel}><span className="text-indigo-700">{card.totalQty ?? card.quantity} {unit}</span></InfoRow>}
             {isGroup && <InfoRow label="Batches">{card.batchCount}</InfoRow>}
             {fields.map((fd) => <InfoRow key={fd._id} label={fd.label}>{valueOf(card, fd.code) ?? "—"}</InfoRow>)}
             <InfoRow label="Condition"><ConditionBadge condition={card.condition} /></InfoRow>
@@ -396,7 +410,9 @@ const ItemDetailsView = ({ card, onBack }) => {
         )}
       </div>
 
-      {isGroup ? (
+      {children}
+
+      {isGroup && !showBatches ? null : isGroup ? (
         <Section title="Batches" icon={Boxes}>
           {batches === null ? (
             <div className="my-2 h-12 animate-pulse rounded-lg bg-slate-100" />
@@ -484,6 +500,7 @@ const ItemInventory = () => {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [total, setTotal] = useState(0);
+  const [totals, setTotals] = useState({});
 
   const [viewing, setViewing] = useState(null);
   const [popup, setPopup] = useState(null); // { kind: "origin" | "fields" | "batches" | "faulty", card }
@@ -521,6 +538,7 @@ const ItemInventory = () => {
       const json = await api.get(EP.cards, { query, fallback: "Failed to fetch items" });
       setRows(json.data || []);
       setListFields(json.meta?.listFields || []);
+      setTotals(json.meta?.totals || {});
       setTotal(json.pagination?.total ?? 0);
     } catch (err) {
       toast.error(err.message);
@@ -555,26 +573,32 @@ const ItemInventory = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
-      <h1 className="mb-5 flex items-center gap-2 text-xl font-semibold tracking-tight text-slate-900">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100">
-          <PackageCheck className="h-5 w-5" />
-        </span>
-        Available Item
-      </h1>
+      {/* Title, and on the right the totals for the current filters. */}
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+          <PackageCheck className="h-5 w-5 text-indigo-600" /> Available Item
+        </h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tile icon={Package} label="Items" value={qtyNum(total)} tone="border-slate-200 bg-white text-slate-700" />
+          <Tile icon={PackageCheck} label="Quantity" value={unitTotals(totals.quantity)} tone="border-emerald-200 bg-emerald-50 text-emerald-700" />
+          <Tile icon={Recycle} label="Used" value={unitTotals(totals.used)} tone="border-amber-200 bg-amber-50 text-amber-700" />
+          <Tile icon={ShieldAlert} label="Warranty Ending" value={unitTotals(totals.warrantyEnding)} tone="border-rose-200 bg-rose-50 text-rose-700" />
+        </div>
+      </div>
 
-      {/* filters */}
-      <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative w-72">
+      {/* One row of filters; the less-used ones sit behind the sliders button. */}
+      <div className="mb-5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative w-full sm:w-72">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="text" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               placeholder="Search serial, MAC, product..." className={`${inputCls} pl-9`}
             />
           </div>
-          <div className="w-52"><SearchableSelect value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }} options={categoryOptions} placeholder="All categories" /></div>
-          <div className="w-48"><SearchableSelect value={productId} onChange={setAndReset(setProductId)} options={productOptions} placeholder="All products" /></div>
-          <div className="w-44"><SearchableSelect value={branchId} onChange={setAndReset(setBranchId)} options={branches.map((b) => ({ value: b._id, label: b.name }))} placeholder="All branches" /></div>
+          <div className="w-full sm:w-52"><SearchableSelect value={categoryId} onChange={(v) => { setCategoryId(v); setProductId(""); setPage(1); }} options={categoryOptions} placeholder="All categories" /></div>
+          <div className="w-full sm:w-52"><SearchableSelect value={productId} onChange={setAndReset(setProductId)} options={productOptions} placeholder="All products" /></div>
+          <div className="w-full sm:w-52"><SearchableSelect value={branchId} onChange={setAndReset(setBranchId)} options={branches.map((b) => ({ value: b._id, label: b.name }))} placeholder="All branches" /></div>
           <DateRangeButton from={from} to={to} onFrom={setAndReset(setFrom)} onTo={setAndReset(setTo)} hint="Received between these dates" />
 
           {/* the less-used filters, in one popover */}
@@ -611,6 +635,22 @@ const ItemInventory = () => {
                       <SearchableSelect value={warranty} onChange={setAndReset(setWarranty)} options={WARRANTY_OPTIONS} placeholder="Any warranty" />
                     </div>
                   </div>
+                  {/* Filters apply as they are picked; Done just closes the box. */}
+                  <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+                    <button
+                      type="button" disabled={!moreCount}
+                      onClick={() => { setSourceType(""); setCondition(""); setVendorId(""); setWarranty(""); setPage(1); }}
+                      className="text-sm font-semibold text-rose-600 transition hover:text-rose-700 disabled:cursor-default disabled:text-slate-300"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button" onClick={() => setMoreOpen(false)}
+                      className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+                    >
+                      Done
+                    </button>
+                  </div>
                 </div>
               </>
             )}
@@ -619,7 +659,7 @@ const ItemInventory = () => {
           {hasActiveFilters && (
             <button
               type="button" onClick={clearFilters}
-              className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100"
+              className="inline-flex h-9.5 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-100"
             >
               <RotateCcw className="h-3.5 w-3.5" /> Reset
             </button>
