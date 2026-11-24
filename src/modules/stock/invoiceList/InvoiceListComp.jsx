@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
 import { fetchInvoiceList, fetchDebitNotes, scheduleInvoice } from "@/modules/stock/invoiceList/invoiceListApi";
 import { fetchVendors } from "@/modules/stock/shared/lookupsApi";
@@ -370,8 +371,10 @@ const InvoiceListComp = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  // ?search= opens the list already narrowed (Debit Note Items links here by invoice no.).
+  const searchParams = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get("search") || "");
+  const [debouncedSearch, setDebouncedSearch] = useState(() => searchParams.get("search") || "");
   const [vendorId, setVendorId] = useState("");
   // The tabs. Payable Now / Later stays a dropdown beside them — it narrows
   // what the tabs show rather than being another way to read the page.
@@ -577,11 +580,6 @@ const InvoiceListComp = () => {
                   <td className={td}>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="font-semibold text-slate-900">{r.invoiceNumber}</span>
-                      {r.companyUse && (
-                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200">
-                          Company Use
-                        </span>
-                      )}
                       {r.invoiceFile && (
                         <button
                           type="button" onClick={() => setPopup({ type: "file", row: r })}

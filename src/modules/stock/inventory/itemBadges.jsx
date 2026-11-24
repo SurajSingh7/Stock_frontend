@@ -7,13 +7,14 @@ export const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 export const SOURCE_LABEL = { PURCHASE: "Invoice", OPENING_STOCK: "Opening Stock", VENDOR_REPLACEMENT: "Vendor Replacement" };
-export const CONDITION_LABEL = { NEW: "New", USED: "Used" };
+export const CONDITION_LABEL = { NEW: "New", USED: "Used", REFURBISHED: "Refurbished" };
+const CONDITION_TONE = { NEW: "bg-emerald-50 text-emerald-700 ring-emerald-200", USED: "bg-amber-50 text-amber-700 ring-amber-200", REFURBISHED: "bg-sky-50 text-sky-700 ring-sky-200" };
 
 const pill = "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset";
 
 export const ConditionBadge = ({ condition }) =>
   condition ? (
-    <span className={`${pill} ${condition === "NEW" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"}`}>
+    <span className={`${pill} ${CONDITION_TONE[condition] || CONDITION_TONE.USED}`}>
       {CONDITION_LABEL[condition] || condition}
     </span>
   ) : null;

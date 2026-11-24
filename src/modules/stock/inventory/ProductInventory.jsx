@@ -84,7 +84,10 @@ const sourceLabel = (t) => (t === "INVOICE" ? "Invoice" : SOURCE_LABEL[t] || (t 
 const ISSUED_PARTS = [
   { key: "subscribers", label: "Subscribers", icon: Users, tone: "bg-sky-50 text-sky-700 ring-sky-100" },
   { key: "employees", label: "Employees", icon: UserCheck, tone: "bg-cyan-50 text-cyan-700 ring-cyan-100" },
-  { key: "repair", label: "Repair & Warranty", icon: Wrench, tone: "bg-amber-50 text-amber-700 ring-amber-100" },
+  { key: "faulty", label: "Faulty", icon: AlertTriangle, tone: "bg-amber-50 text-amber-700 ring-amber-100" },
+  { key: "inRepair", label: "In Repair", icon: Wrench, tone: "bg-orange-50 text-orange-700 ring-orange-100" },
+  { key: "scrapped", label: "Dead / Scrapped", icon: PackageMinus, tone: "bg-slate-100 text-slate-600 ring-slate-200" },
+  { key: "lost", label: "Lost", icon: AlertTriangle, tone: "bg-red-50 text-red-700 ring-red-100" },
   { key: "returned", label: "Debited", icon: Undo2, tone: "bg-rose-50 text-rose-700 ring-rose-100" },
   { key: "sent", label: "Sent to Branches", icon: ArrowLeftRight, tone: "bg-violet-50 text-violet-700 ring-violet-100" },
   { key: "inTransit", label: "On the Way", icon: Truck, tone: "bg-indigo-50 text-indigo-700 ring-indigo-100" },

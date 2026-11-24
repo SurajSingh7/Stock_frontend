@@ -2,7 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import toast from "react-hot-toast";
-import { fetchTrackingDetail, fetchInvoice, fetchInvoicesForTracking, fetchProductDefinition, saveInvoiceItems } from "./trackingApi";
+import {
+  fetchTrackingDetail, fetchInvoice, fetchInvoicesForTracking, fetchProductDefinition, saveInvoiceItems,
+  downloadSerialTemplate, parseSerialUpload,
+} from "./trackingApi";
 import { invoiceFileUrl } from "@/modules/stock/shared/InvoiceInfoPopups";
 import { unitLabel, Modal } from "@/modules/stock/shared/StockSharedUI";
 import { EntriesContent, entryView } from "./InvoiceEntries";
@@ -192,7 +195,180 @@ const GroupFieldSet = ({ label, fields, values, onChange }) => (
   </div>
 );
 
-const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alreadyReceived, onOpenRating }) => {
+/*
+  Upload Excel → preview. The server already marked each row's own problems
+  (required field empty, repeated in the file, already in stock); here two
+  more are added that only the screen knows: a serial already typed into a
+  row on this product, and rows beyond what is left on the invoice. Good rows
+  fill the empty paid rows first, then go on top as new rows.
+*/
+const keyOf = (code, v) => `${code}:${String(v ?? "").trim().toUpperCase()}`;
+
+const reviewUploadRows = (result, existingRows, capacity) => {
+  const uniqueCodes = result.fields.filter((f) => f.isUnique).map((f) => f.code);
+  const taken = new Set();
+  existingRows.forEach((r) =>
+    uniqueCodes.forEach((c) => {
+      if (String(r.fieldValues?.[c] ?? "").trim()) taken.add(keyOf(c, r.fieldValues[c]));
+    })
+  );
+
+  let accepted = 0;
+  const rows = result.rows.map((r) => {
+    const errors = [...r.errors];
+    uniqueCodes.forEach((c) => {
+      if (r.fieldValues[c] && taken.has(keyOf(c, r.fieldValues[c]))) {
+        errors.push(`${result.fields.find((f) => f.code === c)?.label || c} "${r.fieldValues[c]}" is already on this screen`);
+      }
+    });
+    if (errors.length) return { ...r, errors, take: false };
+    if (accepted >= capacity) return { ...r, errors, take: false, extra: true };
+    accepted += 1;
+    return { ...r, errors, take: true };
+  });
+  return { rows, accepted };
+};
+
+const SerialUploadPreview = ({ result, productName, existingRows, capacity, onClose, onApply }) => {
+  const { rows, accepted } = reviewUploadRows(result, existingRows, capacity);
+  const bad = rows.filter((r) => r.errors.length).length;
+  const extra = rows.filter((r) => r.extra).length;
+
+  return (
+    <Modal onClose={onClose} title={`Upload preview · ${productName}`} maxWidth="max-w-3xl">
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs font-semibold">
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">{rows.length} rows in file</span>
+        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700 ring-1 ring-inset ring-emerald-200">✓ {accepted} will be added</span>
+        {bad > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-1 text-rose-700 ring-1 ring-inset ring-rose-200">✕ {bad} with problems</span>}
+        {extra > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700 ring-1 ring-inset ring-amber-200">{extra} extra — only {capacity} left on the invoice</span>}
+      </div>
+
+      <div className="max-h-[55vh] overflow-auto rounded-xl border border-slate-200">
+        <table className="w-full border-collapse text-sm">
+          <thead className="sticky top-0 bg-slate-50">
+            <tr className="border-b border-slate-200 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <th className="px-3 py-2 w-14">Row</th>
+              {result.fields.map((f) => <th key={f.code} className="px-3 py-2">{f.label}</th>)}
+              <th className="px-3 py-2">Status</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.rowNumber} className={r.take ? "" : r.extra ? "bg-amber-50/50" : "bg-rose-50/50"}>
+                <td className="px-3 py-2 tabular-nums text-slate-400">{r.rowNumber}</td>
+                {result.fields.map((f) => (
+                  <td key={f.code} className="px-3 py-2 text-slate-800">{r.fieldValues[f.code] || <span className="text-slate-300">—</span>}</td>
+                ))}
+                <td className="px-3 py-2 text-xs">
+                  {r.take ? (
+                    <span className="font-semibold text-emerald-700">✓ OK</span>
+                  ) : r.extra ? (
+                    <span className="font-medium text-amber-700">Extra — not added</span>
+                  ) : (
+                    <span className="font-medium text-rose-700">{r.errors.join(" · ")}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+          Cancel
+        </button>
+        <button
+          type="button" disabled={!accepted}
+          onClick={() => onApply(rows.filter((r) => r.take).map((r) => r.fieldValues))}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Add {accepted} row{accepted === 1 ? "" : "s"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+/*
+  ⬇ Template → this popup first. It shows what the Excel will look like (the
+  product's columns, the rules) so people can understand it without
+  downloading; Download asks once more, so a file is saved only on purpose.
+*/
+const exampleValue = (fd) => (/mac/i.test(`${fd.code} ${fd.label}`) ? "AA:BB:CC:DD:EE:01" : "SN123456");
+
+const SerialTemplatePreview = ({ productName, fields, left, busy, onClose, onDownload }) => {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <Modal onClose={onClose} title={`Excel template · ${productName}`} maxWidth="max-w-2xl">
+      <p className="mb-2 text-xs text-slate-500">
+        This is how the Excel looks. Fill one row per unit from row 2, then use <b>⬆ Upload Excel</b>.
+      </p>
+
+      <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              <th className="w-10 border-b border-r border-slate-200 bg-slate-100 px-2 py-1.5 text-[10px] text-slate-400">1</th>
+              {fields.map(({ def, isRequired }) => (
+                <th key={def._id} className="border-b border-r border-indigo-500 bg-indigo-600 px-3 py-1.5 text-left text-xs font-bold text-white last:border-r-0">
+                  {def.label}{isRequired ? " *" : ""}{def.isUnique ? " (unique)" : ""}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[2, 3, 4].map((n) => (
+              <tr key={n}>
+                <td className="border-r border-t border-slate-200 bg-slate-100 px-2 py-1.5 text-center text-[10px] text-slate-400">{n}</td>
+                {fields.map(({ def }) => (
+                  <td key={def._id} className="border-r border-t border-slate-200 px-3 py-1.5 text-xs italic text-slate-300 last:border-r-0">
+                    {n === 2 ? `e.g. ${exampleValue(def)}` : ""}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-slate-600">
+        <li>Units still to enter on this invoice: <b>{left}</b>. Extra rows are left out on upload.</li>
+        <li>Columns marked <b>*</b> must be filled; <b>(unique)</b> values can never repeat.</li>
+        <li>Only paid units go in the file — FOC units are added from the 🎁 FOC button.</li>
+        <li>The grey example is only shown here; the downloaded file starts empty. Don&apos;t rename or reorder the columns.</li>
+      </ul>
+
+      {confirming ? (
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+          <p className="mr-auto text-sm font-medium text-amber-800">Are you sure you want to download this template?</p>
+          <button type="button" onClick={() => setConfirming(false)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">
+            No
+          </button>
+          <button
+            type="button" disabled={busy} onClick={onDownload}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {busy ? "Downloading…" : "Yes, download"}
+          </button>
+        </div>
+      ) : (
+        <div className="mt-4 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+            Close
+          </button>
+          <button type="button" onClick={() => setConfirming(true)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500">
+            ⬇ Download
+          </button>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+const isBlankRow = (r) => !Object.values(r.fieldValues || {}).some((v) => String(v ?? "").trim());
+
+const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alreadyReceived, onOpenRating, invoiceId }) => {
   const isIndividual = productDef?.trackingMethod === "individual";
   const unit = unitLabel(productDef?.unit);
   const orderedQty = poLine.quantity;
@@ -223,6 +399,20 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
       ...(removedFoc ? { focQuantity: String(rows.filter((r) => r.isFoc).length || "") } : {}),
     });
   };
+  // Action → ⇄ flips one row between Paid and FOC, keeping what is typed in it.
+  // The FOC count follows the rows. A FOC row can't become Paid once the paid
+  // rows already cover the invoice quantity.
+  const toggleRowType = (idx) => {
+    const row = lineState.rows[idx];
+    if (!row) return;
+    if (row.isFoc && usedByOthers + paidRows.length + 1 > orderedQty) {
+      toast.error(`Can't make it Paid — the invoice has only ${orderedQty} ${unit}, all already entered as Paid`);
+      return;
+    }
+    const rows = lineState.rows.map((r, i) => (i === idx ? { ...r, isFoc: !r.isFoc } : r));
+    const focCount = rows.filter((r) => r.isFoc).length;
+    onLineChange({ ...lineState, rows, focQuantity: focCount ? String(focCount) : "" });
+  };
   const setRowField = (idx, code, value) => {
     const rows = lineState.rows.map((r, i) => (i === idx ? { ...r, fieldValues: { ...r.fieldValues, [code]: value } } : r));
     onLineChange({ ...lineState, rows });
@@ -251,6 +441,39 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
       }
     }
     onLineChange({ ...lineState, focQuantity: val, rows });
+  };
+
+  // Excel: template download + upload → preview → rows.
+  const canExcel = isIndividual && selectedFields.length > 0 && !!invoiceId && !!productDef?._id;
+  const [excelBusy, setExcelBusy] = useState(null); // "template" | "upload" | null
+  const [uploadResult, setUploadResult] = useState(null);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const fileRef = React.useRef(null);
+  const getTemplate = async () => {
+    setExcelBusy("template");
+    try {
+      await downloadSerialTemplate(invoiceId, productDef._id);
+      setTemplateOpen(false);
+    } catch (e) { toast.error(e.message); } finally { setExcelBusy(null); }
+  };
+  const readFile = async (file) => {
+    if (!file) return;
+    setExcelBusy("upload");
+    try { setUploadResult(await parseSerialUpload(invoiceId, productDef._id, file)); } catch (e) { toast.error(e.message); } finally {
+      setExcelBusy(null);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+  // Blank paid rows are filled first; the rest go on top as new paid rows.
+  const blankPaidCount = paidRows.filter(isBlankRow).length;
+  const uploadCapacity = blankPaidCount + Math.max(0, orderedQty - usedByOthers - paidRows.length);
+  const applyUpload = (valuesList) => {
+    const queue = [...valuesList];
+    const filled = lineState.rows.map((r) => (!r.isFoc && isBlankRow(r) && queue.length ? { ...r, fieldValues: { ...queue.shift() } } : r));
+    const rows = [...queue.reverse().map((fv) => ({ fieldValues: { ...fv }, isFoc: false })), ...filled];
+    onLineChange({ ...lineState, rows });
+    setUploadResult(null);
+    toast.success(`${valuesList.length} row${valuesList.length === 1 ? "" : "s"} added from Excel`);
   };
 
   // Shown in stored order — newest first.
@@ -303,6 +526,25 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
                   Clear all
                 </button>
               )}
+              {canExcel && (
+                <>
+                  <span className="mx-1 self-stretch border-l border-slate-200" aria-hidden="true" />
+                  <button
+                    type="button" onClick={() => setTemplateOpen(true)} disabled={!!excelBusy}
+                    title="See the Excel template for this product"
+                    className="inline-flex items-center justify-center rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-50 disabled:opacity-50"
+                  >
+                    Template
+                  </button>
+                  <button
+                    type="button" onClick={() => fileRef.current?.click()} disabled={!!excelBusy}
+                    className="inline-flex items-center justify-center rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-50"
+                  >
+                    {excelBusy === "upload" ? "Reading…" : "⬆ Upload Excel"}
+                  </button>
+                  <input ref={fileRef} type="file" accept=".xlsx" className="hidden" onChange={(e) => readFile(e.target.files?.[0])} />
+                </>
+              )}
             </div>
           </div>
         ) : (
@@ -340,6 +582,28 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
         <p className="mb-3 text-[11px] font-medium text-amber-600">
           {focQtyNum} FOC row{focQtyNum > 1 ? "s" : ""} added below — must be filled before submitting.
         </p>
+      )}
+
+      {templateOpen && (
+        <SerialTemplatePreview
+          productName={productDef?.name || poLine.productName || ""}
+          fields={fields}
+          left={Math.max(0, orderedQty - usedByOthers - paidRows.filter((r) => !isBlankRow(r)).length)}
+          busy={excelBusy === "template"}
+          onClose={() => setTemplateOpen(false)}
+          onDownload={getTemplate}
+        />
+      )}
+
+      {uploadResult && (
+        <SerialUploadPreview
+          result={uploadResult}
+          productName={productDef?.name || poLine.productName || ""}
+          existingRows={lineState.rows}
+          capacity={uploadCapacity}
+          onClose={() => setUploadResult(null)}
+          onApply={applyUpload}
+        />
       )}
 
       {focPopup !== null && (
@@ -402,7 +666,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
                 {selectedFields.map((fd) => (
                   <th key={fd._id} className="px-3 py-2">{fd.label}</th>
                 ))}
-                <th className="px-3 py-2 w-16">Action</th>
+                <th className="px-3 py-2 w-24">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -428,9 +692,20 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
                       </td>
                     ))}
                     <td className="px-3 py-2">
-                      <button type="button" onClick={() => removeRow(realIdx)} title="Delete row" className="rounded-md border border-rose-200 bg-white p-1.5 text-rose-600 shadow-sm transition hover:bg-rose-50">
-                        <IconTrash />
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button" onClick={() => toggleRowType(realIdx)}
+                          title={row.isFoc ? "Change to Paid" : "Change to FOC"}
+                          className={`rounded-md border bg-white px-1.5 py-1 text-[10px] font-bold uppercase shadow-sm transition ${
+                            row.isFoc ? "border-slate-300 text-slate-600 hover:bg-slate-50" : "border-amber-300 text-amber-700 hover:bg-amber-50"
+                          }`}
+                        >
+                          ⇄ {row.isFoc ? "Paid" : "FOC"}
+                        </button>
+                        <button type="button" onClick={() => removeRow(realIdx)} title="Delete row" className="rounded-md border border-rose-200 bg-white p-1.5 text-rose-600 shadow-sm transition hover:bg-rose-50">
+                          <IconTrash />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1085,6 +1360,7 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
             onLineChange={(next) => setLineState(activeTabId, next)}
             alreadyReceived={othersByKey[activeTabId] || 0}
             onOpenRating={() => setRatingPopupFor(activeTabId)}
+            invoiceId={invoiceId}
           />
         )}
       </section>

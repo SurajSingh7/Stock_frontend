@@ -16,8 +16,29 @@ export const INVENTORY_API = {
     itemSummaryTimeline: (itemId) => `/stock/inventory-items/item-summary/${itemId}/timeline`,
   },
 
-  stockReports: {
-    base: "/stock/stock-reports",
+  // Lost Items: report units lost / found; the approval side reads and decides.
+  lostEntries: {
+    list: "/stock/lost-entries",
+    create: "/stock/lost-entries",
+    byId: (id) => `/stock/lost-entries/${id}`,
+    unitOptions: "/stock/lost-entries/unit-options",
+    batchSources: "/stock/lost-entries/batch-sources",
+    approvalList: "/stock/lost-entries/approval",
+    approvalById: (id) => `/stock/lost-entries/approval/${id}`,
+    approve: (id) => `/stock/lost-entries/approval/${id}/approve`,
+    reject: (id) => `/stock/lost-entries/approval/${id}/reject`,
+  },
+  // Dead Items: the same flow, its own routes and modules.
+  deadEntries: {
+    list: "/stock/dead-entries",
+    create: "/stock/dead-entries",
+    byId: (id) => `/stock/dead-entries/${id}`,
+    unitOptions: "/stock/dead-entries/unit-options",
+    batchSources: "/stock/dead-entries/batch-sources",
+    approvalList: "/stock/dead-entries/approval",
+    approvalById: (id) => `/stock/dead-entries/approval/${id}`,
+    approve: (id) => `/stock/dead-entries/approval/${id}/approve`,
+    reject: (id) => `/stock/dead-entries/approval/${id}/reject`,
   },
 
   // Opening — one kind of entry, two modules (see openingKinds.js).

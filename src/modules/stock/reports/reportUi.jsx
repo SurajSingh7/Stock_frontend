@@ -65,12 +65,14 @@ export const ReportHeader = ({ title, subtitle, onRefresh, right = null }) => (
   </div>
 );
 
-export const Tile = ({ icon: Icon, label, value, tone }) => (
+// sub: an optional small line under the value ("Faulty 3 · In Repair 0").
+export const Tile = ({ icon: Icon, label, value, tone, sub }) => (
   <div className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2 ${tone}`}>
     {Icon && <Icon className="h-4 w-4 shrink-0 opacity-70" />}
     <div className="min-w-0">
       <p className="text-[10px] font-semibold uppercase tracking-wider opacity-70">{label}</p>
       <p className="truncate text-sm font-bold tabular-nums">{value}</p>
+      {sub && <p className="truncate text-[10px] font-medium opacity-80">{sub}</p>}
     </div>
   </div>
 );

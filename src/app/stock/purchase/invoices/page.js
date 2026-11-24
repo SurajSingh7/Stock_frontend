@@ -1,12 +1,10 @@
-import InvoiceListComp from '@/modules/stock/invoiceList/InvoiceListComp';
-import React from 'react'
+import { Suspense } from "react";
+import InvoiceListComp from "@/modules/stock/invoiceList/InvoiceListComp";
 
-const page = () => {
-  return (
-    <div>
-        <InvoiceListComp/>
-    </div>
-  )
-}
+const Page = () => (
+  <Suspense fallback={null}>
+    <InvoiceListComp />
+  </Suspense>
+);
 
-export default page;
+export default Page;

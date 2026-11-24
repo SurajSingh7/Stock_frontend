@@ -89,7 +89,8 @@ const blankLine = (productId, prev) => ({
 const personFromSnapshot = (s) => (s?.personId ? { ...s, personId: String(s.personId), extraFields: s.extraFields || {} } : null);
 
 // Does the unit work? Separate from New / Used.
-const WORKING_STATES = { WORKING: "Working", FAULTY: "Faulty (Repairable)", BEYOND_REPAIR: "Beyond Repair (Dead)" };
+// Dead stock is entered as Faulty, then written off on Dead Items (approval).
+const WORKING_STATES = { WORKING: "Working", FAULTY: "Faulty (Repairable)" };
 
 const cell = "px-2 py-2 align-top";
 // One control height everywhere (38px) — the same as the shared SearchableSelect
@@ -309,7 +310,7 @@ const ProductSection = ({ product, rows, editable, issued, vendorOptions, issues
                           </>
                         )}
                         {line.workingState === "FAULTY" && <p className="mt-0.5 text-[11px] font-medium text-amber-700">Goes to Repair &amp; Warranty</p>}
-                        {line.workingState === "BEYOND_REPAIR" && <p className="mt-0.5 text-[11px] font-medium text-rose-700">Kept on record as scrapped</p>}
+                        {line.workingState === "BEYOND_REPAIR" && <p className="mt-0.5 text-[11px] font-medium text-rose-700">Beyond Repair is no longer entered here — change it to Faulty</p>}
                       </td>
                     )}
                     <td className={cell}>

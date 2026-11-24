@@ -60,7 +60,6 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
   const [qty, setQty] = useState({}); // quotationItemId -> invoice quantity (string)
   const [extraCharges, setExtraCharges] = useState([]);
   const [notes, setNotes] = useState("");
-  const [companyUse, setCompanyUse] = useState(false);
   const [branchId, setBranchId] = useState("");
 
   useEffect(() => {
@@ -99,7 +98,6 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
           setQty(q);
           setExtraCharges((invoice.extraCharges || []).map((c) => ({ ...c, includeInBilling: c.includeInBilling !== false })));
           setNotes(invoice.notes || "");
-          setCompanyUse(!!invoice.companyUse);
         }
       } catch (e) {
         toast.error(e.message);
@@ -219,7 +217,6 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
       invoiceDate,
       invoiceAmount: Number(invoiceAmount) || 0,
       notes: notes.trim(),
-      companyUse,
       extraCharges: extraCharges.map((c) => ({
         amount: Number(c.amount),
         note: c.note || "",
@@ -395,20 +392,7 @@ const AddInvoicePopup = ({ mode = "create", layout = "modal", trackingOrderId, i
                 )}
               </div>
 
-              <div className={`grid items-start gap-3 ${isEdit || branches.length <= 1 ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]" : "sm:grid-cols-3"}`}>
-                <div>
-                  <label className={labelCls}>Company Use</label>
-                  <button
-                    type="button" role="switch" aria-checked={companyUse} onClick={() => setCompanyUse((v) => !v)}
-                    title="Turn on if this invoice is for the company's own use"
-                    className={`flex h-[38px] w-full items-center justify-between gap-3 rounded-lg border px-3 text-left text-sm transition ${companyUse ? "border-indigo-300 bg-indigo-50/60 text-indigo-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
-                  >
-                    <span className="truncate font-medium">{companyUse ? "Company's own use" : "No"}</span>
-                    <span className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition ${companyUse ? "bg-indigo-600" : "bg-slate-300"}`}>
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${companyUse ? "left-[18px]" : "left-0.5"}`} />
-                    </span>
-                  </button>
-                </div>
+              <div className={`grid items-start gap-3 ${!isEdit && branches.length > 1 ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]" : ""}`}>
                 {!isEdit && branches.length > 1 && (
                   <div>
                     <label className={labelCls}>Branch</label>

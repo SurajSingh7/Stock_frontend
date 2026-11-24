@@ -92,7 +92,8 @@ export const ReasonChip = ({ type, reason }) =>
 /* choices as Opening Stock: Condition and Working State.        */
 /* value: { itemCondition: NEW|USED, workingState, note }        */
 /* ============================================================= */
-export const WORKING_STATES = { WORKING: "Working", FAULTY: "Faulty (Repairable)", BEYOND_REPAIR: "Beyond Repair (Dead)" };
+// A dead unit comes back as Faulty, then is written off on Dead Items (approval).
+export const WORKING_STATES = { WORKING: "Working", FAULTY: "Faulty (Repairable)" };
 export const emptyReturnState = () => ({ itemCondition: "USED", workingState: "WORKING", note: "" });
 export const returnStateOk = (s) => s.workingState === "WORKING" || !!s.note.trim();
 export const returnStateBody = (s) => ({ itemCondition: s.itemCondition, workingState: s.workingState, note: s.note.trim() });
@@ -129,8 +130,7 @@ export const ReturnStateFields = ({ value, onChange, compact = false }) => {
           placeholder={value.workingState === "WORKING" ? "Note (optional)" : "Fault / reason *"}
           className={`${inputCls} ${!returnStateOk(value) ? "border-rose-300" : ""}`}
         />
-        {value.workingState === "FAULTY" && <p className="mt-0.5 text-[11px] font-medium text-amber-700">Goes to Repair &amp; Warranty</p>}
-        {value.workingState === "BEYOND_REPAIR" && <p className="mt-0.5 text-[11px] font-medium text-rose-700">Kept on record as scrapped — never stock again</p>}
+        {value.workingState === "FAULTY" && <p className="mt-0.5 text-[11px] font-medium text-amber-700">Goes to Repair &amp; Warranty (dead? write it off on Dead Items)</p>}
         {value.workingState === "WORKING" && !compact && <p className="mt-0.5 text-[11px] text-slate-500">Back on the shelf as {value.itemCondition === "NEW" ? "New" : "Used"}</p>}
       </div>
     </div>

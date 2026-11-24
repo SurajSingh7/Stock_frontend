@@ -32,6 +32,7 @@ import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
 // Shared with the Tracking Orders page on purpose: both boards show the same
 // reset history, and two copies of it would drift.
 import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
+import StateChangeInfo from "./StateChangeInfo";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 
 /* ============================================================= */
@@ -1003,12 +1004,12 @@ const PurchaseOrderPage = () => {
 
               <div className="hidden grid-cols-12 gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-700 lg:grid">
                 <span className="col-span-2">Vendor</span>
-                <span className="col-span-2">PO No</span>
+                <span className="col-span-1">PO No</span>
                 <span className="col-span-1">Products</span>
                 <span className="col-span-1 text-right">Total</span>
                 <span className="col-span-1 text-right">Qty</span>
                 <span className="col-span-2">Status</span>
-                <span className="col-span-1">Entity</span>
+                <span className="col-span-2">Entity Details</span>
                 <span className="col-span-2 text-right">Actions</span>
               </div>
 
@@ -1027,7 +1028,7 @@ const PurchaseOrderPage = () => {
                         <IconPhone /> {row.phone || "—"}
                       </p>
                     </div>
-                    <div className="col-span-2 text-sm font-medium text-indigo-600">
+                    <div className="col-span-1 min-w-0 text-sm font-medium text-indigo-600">
                       <TruncateText text={row.poNumber} title="PO Number" />
                     </div>
                     <div className="col-span-1">
@@ -1061,8 +1062,23 @@ const PurchaseOrderPage = () => {
                         </button>
                       )}
                     </div>
-                    <div className="col-span-1 text-sm font-medium text-slate-700">
-                      <TruncateText text={row.entityAlias} title="Entity" />
+                    <div className="col-span-2 flex min-w-0 items-center gap-1 text-sm text-slate-700">
+                      {row.entityAlias ? (
+                        <span
+                          className="truncate"
+                          title={[row.buyerEntity?.name, row.buyerEntity?.gstNumber && `GST ${row.buyerEntity.gstNumber}`].filter(Boolean).join(" · ")}
+                        >
+                          <span className="font-semibold text-slate-900">{row.entityAlias}</span>
+                          {row.buyerEntity?.state && (
+                            <span className="text-slate-600">
+                              {" "}({row.buyerEntity.state}{row.buyerEntity.stateCode ? `-${row.buyerEntity.stateCode}` : ""})
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                      <StateChangeInfo change={row.stateChange} entityAlias={row.entityAlias} />
                     </div>
                     <div className="col-span-2 flex flex-wrap items-center justify-end gap-1.5">
                       <ActionBar row={row} canReset={canReset} on={(type, r) => onAction(type, r, q)} />

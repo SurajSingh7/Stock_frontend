@@ -8,6 +8,7 @@ import {
 import { fetchPurchaseOrder, createPurchaseOrder, updatePurchaseOrder, resolveVendorTerms, fetchActiveTerms } from "./purchaseOrderApi";
 import { unitLabel, Modal } from "@/modules/stock/shared/StockSharedUI";
 import { usePermissions } from "@/context/PermissionContext";
+import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 
 const SHIPMENT_PREFERENCE_OPTIONS = [
   "Self Pickup", "Vendor Delivery", "Courier", "Transport", "Third-Party Logistics", "Hand Delivery",
@@ -60,14 +61,16 @@ const fmtDate = (v) =>
 const TaxCell = ({ amount, rate, base, label, product }) => {
   const [open, setOpen] = useState(false);
   return (
-    <span className="inline-flex items-center justify-end gap-1">
+    <span className="relative inline-block">
+      {/* The amount is centred under its heading; the ⓘ hangs just outside it
+          (absolute), so it never pulls the amount off centre. */}
       {money(amount)}
       <button
         type="button" onClick={() => setOpen(true)}
-        title={`${label} rate`} aria-label={`${label} rate`}
-        className="rounded-full p-0.5 text-slate-300 transition hover:bg-indigo-50 hover:text-indigo-600"
+        title={`${label} ${rate}% — how it was worked out`} aria-label={`${label} rate`}
+        className="absolute left-full top-1/2 ml-0.5 -translate-y-1/2 rounded-full p-0.5 text-slate-300 transition hover:bg-indigo-50 hover:text-indigo-600"
       >
-        <Info className="h-3.5 w-3.5" />
+        <Info className="h-3 w-3" />
       </button>
       {open && (
         <Modal onClose={() => setOpen(false)} title={`${label} · ${product}`} maxWidth="max-w-sm">
@@ -113,7 +116,24 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   // Tracking Orders page and consumed here read-only (see Backend
   // createPurchaseOrder, which derives it server-side from the tracking
   // order rather than trusting anything sent from this form).
-  const selectedEntity = contextBuyerEntity || null;
+  const assignedEntity = contextBuyerEntity?.alias ? contextBuyerEntity : null;
+
+  // The STATE may still be switched here, to another state record of the same
+  // entity (own GST + address) — with a mandatory reason, because it decides
+  // CGST+SGST vs IGST. The backend re-resolves the id and refuses another alias.
+  const { entities } = useInternalEntities();
+  const [pickedEntityId, setPickedEntityId] = useState("");
+  const [stateReason, setStateReason] = useState("");
+  const statesForAlias = assignedEntity ? entities.filter((e) => e.alias === assignedEntity.alias) : [];
+  const assignedId = String(assignedEntity?.entityId || "");
+  const canChangeState = !isEdit && statesForAlias.length > 1 && statesForAlias.some((e) => String(e._id) === assignedId);
+  const picked = pickedEntityId && pickedEntityId !== assignedId
+    ? statesForAlias.find((e) => String(e._id) === pickedEntityId) || null
+    : null;
+  const stateChanged = !!picked;
+  const selectedEntity = picked
+    ? { entityId: picked._id, alias: picked.alias, name: picked.name, state: picked.state, stateCode: picked.stateCode }
+    : assignedEntity;
 
   // Requester is whoever is signed in — displayed here, but stamped by the
   // backend from the session, which is why nothing below ever sends it.
@@ -236,6 +256,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   const submit = async () => {
     if (!selectedEntity) return toast.error("No entity assigned yet — add one in Tracking Orders first");
     if (!isEdit) {
+      if (stateChanged && !stateReason.trim()) return toast.error("Give a reason for changing the state");
       if (checked.length === 0) return toast.error("Select at least one item for the PO");
       if (unchecked.some((r) => !r.reason.trim())) return toast.error("Give a reason for every unchecked (skipped) item");
       if (termsSource === "NONE" && !selectedTermsId) return toast.error("Terms & Conditions is required.");
@@ -254,6 +275,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           // requester is stamped server-side from the session, not sent.
           poDate, shipmentPreference: shipment, notes,
           termsConditionId: selectedTermsId || undefined,
+          ...(stateChanged ? { buyerEntityId: String(picked._id), stateChangeReason: stateReason.trim() } : {}),
         });
         toast.success(`PO generated for ${vendorName || "the vendor"}`);
       }
@@ -313,7 +335,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
       {/* buyer entity — read-only: assigned once on Tracking Orders */}
       <Section
         icon={Building2} tone="bg-emerald-500" title="Buyer entity"
-        right={<span className="rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-inset ring-slate-200">Set in Tracking Orders</span>}
+        right={<span className="rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-inset ring-slate-200">{canChangeState ? "Entity set in Tracking Orders · state can be changed" : "Set in Tracking Orders"}</span>}
       >
         {/* row 1 — who: requester, entity, state */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -328,15 +350,29 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                 <p className={valueCls}>{selectedEntity.alias}</p>
               </div>
               <div>
-                <label className={labelCls}><MapPin className="h-3.5 w-3.5 text-emerald-500" /> State</label>
-                <div className={`${valueCls} flex items-center justify-between gap-2`}>
-                  <span className="truncate">{selectedEntity.state} - {selectedEntity.stateCode}</span>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ring-inset ${
+                <label className={`${labelCls} justify-between`}>
+                  <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-emerald-500" /> State</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal ring-1 ring-inset ${
                     sameState ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-indigo-50 text-indigo-700 ring-indigo-200"
                   }`}>
                     {sameState ? "CGST + SGST" : "IGST"}
                   </span>
-                </div>
+                </label>
+                {canChangeState ? (
+                  <select
+                    value={picked ? String(picked._id) : assignedId}
+                    onChange={(e) => setPickedEntityId(e.target.value)}
+                    className={`${inputCls} font-semibold ${stateChanged ? "border-amber-300 bg-amber-50/40" : ""}`}
+                  >
+                    {statesForAlias.map((e) => (
+                      <option key={e._id} value={String(e._id)}>
+                        {e.state} - {e.stateCode}{String(e._id) === assignedId ? "  (assigned)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className={valueCls}>{selectedEntity.state} - {selectedEntity.stateCode}</p>
+                )}
               </div>
             </>
           ) : (
@@ -345,6 +381,30 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             </p>
           )}
         </div>
+
+        {stateChanged && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3.5">
+            <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-amber-800">
+              State changed:
+              <span className="rounded-md bg-white px-2 py-0.5 text-xs font-bold text-slate-600 line-through ring-1 ring-inset ring-amber-200">
+                {assignedEntity.state} ({assignedEntity.stateCode})
+              </span>
+              →
+              <span className="rounded-md bg-white px-2 py-0.5 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
+                {picked.state} ({picked.stateCode})
+              </span>
+              <button type="button" onClick={() => { setPickedEntityId(""); setStateReason(""); }} className="ml-auto text-xs font-semibold text-amber-700 underline hover:text-amber-900">
+                Undo
+              </button>
+            </p>
+            <label className={`${labelCls} mt-3`}>Reason for state change <span className="text-rose-500">*</span></label>
+            <textarea
+              value={stateReason} onChange={(e) => setStateReason(e.target.value)} rows={2} maxLength={500}
+              placeholder="Why is this PO raised in a different state?"
+              className={`${inputCls} resize-none`}
+            />
+          </div>
+        )}
 
         {/* row 2 — when and how: PO date, shipment, notes */}
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -393,21 +453,21 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             <thead>
               <tr className="border-b border-indigo-100 bg-indigo-50/50 text-left text-xs font-bold uppercase tracking-wide text-indigo-900/70">
                 {!isEdit && <th className="w-10 px-4 py-3"></th>}
-                <th className="w-12 px-4 py-3">Sr.</th>
+                <th className="w-12 px-4 py-3 text-center">Sr.</th>
                 <th className="px-4 py-3">Description</th>
                 <th className="px-4 py-3">Product</th>
-                <th className="px-4 py-3 text-right">Qty</th>
-                <th className="px-4 py-3 text-right">Unit Price</th>
-                <th className="px-4 py-3 text-right">Basic Price</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Qty</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Unit Price</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Basic Price</th>
                 {taxType === "CGST_SGST" ? (
                   <>
-                    <th className="px-4 py-3 text-right">CGST</th>
-                    <th className="px-4 py-3 text-right">SGST</th>
+                    <th className="w-28 whitespace-nowrap px-4 py-3 text-center">CGST</th>
+                    <th className="w-28 whitespace-nowrap px-4 py-3 text-center">SGST</th>
                   </>
                 ) : (
-                  <th className="px-4 py-3 text-right">{taxType === "IGST" ? "IGST" : "GST"}</th>
+                  <th className="w-28 whitespace-nowrap px-4 py-3 text-center">{taxType === "IGST" ? "IGST" : "GST"}</th>
                 )}
-                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Amount</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -430,30 +490,31 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                         </td>
                       )}
                       <td className="px-4 py-3.5 align-top">
-                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 tabular-nums">{idx + 1}</span>
+                        <span className="mx-auto flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 tabular-nums">{idx + 1}</span>
                       </td>
                       <td className={`px-4 py-3.5 align-top font-medium ${skipped ? "text-slate-400 line-through" : "text-slate-600"}`}>{r.categoryName}</td>
                       <td className={`px-4 py-3.5 align-top font-bold ${skipped ? "text-slate-400 line-through" : "text-slate-900"}`}>{r.productName}</td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top font-semibold tabular-nums text-slate-800">
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top font-semibold tabular-nums text-slate-800">
+                        {/* "10 Meter" on one line, centred under a centred QTY heading */}
                         {r.quantity} <span className="text-xs font-medium text-slate-400">{unitLabel(r.unit)}</span>
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top tabular-nums text-slate-700">{money(r.unitPrice)}</td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top tabular-nums text-slate-700">{money(c.base)}</td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">{money(r.unitPrice)}</td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">{money(c.base)}</td>
                       {taxType === "CGST_SGST" ? (
                         <>
-                          <td className="whitespace-nowrap px-4 py-3.5 text-right align-top tabular-nums text-slate-700">
+                          <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">
                             <TaxCell amount={c.cgst} rate={Number(r.gstRate || 0) / 2} base={c.base} label="CGST" product={r.productName} />
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3.5 text-right align-top tabular-nums text-slate-700">
+                          <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">
                             <TaxCell amount={c.sgst} rate={Number(r.gstRate || 0) / 2} base={c.base} label="SGST" product={r.productName} />
                           </td>
                         </>
                       ) : (
-                        <td className="whitespace-nowrap px-4 py-3.5 text-right align-top tabular-nums text-slate-700">
+                        <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">
                           <TaxCell amount={taxType === "IGST" ? c.igst : c.gst} rate={Number(r.gstRate || 0)} base={c.base} label={taxType === "IGST" ? "IGST" : "GST"} product={r.productName} />
                         </td>
                       )}
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top font-extrabold tabular-nums text-slate-900">{money(c.total)}</td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top font-extrabold tabular-nums text-slate-900">{money(c.total)}</td>
                     </tr>
                     {!LOCK_CHECKBOX && !isEdit && !r.checked && (
                       <tr>

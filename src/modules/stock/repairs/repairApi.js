@@ -14,7 +14,5 @@ const step = (path, fallback) => async (id, body) => (await api.patch(EP.step(id
 export const reportFaulty = step("report-faulty", "Failed to report the fault");
 export const sendForRepair = step("send-repair", "Failed to send for repair");
 export const repairResult = step("repair-result", "Failed to save the repair result");
-export const sendClaim = step("claim", "Failed to send the warranty claim");
-export const claimOutcome = step("claim-outcome", "Failed to close the claim");
+export const oldUnitReturned = step("old-unit-returned", "Failed to take the old unit back");
 export const markOk = step("mark-ok", "Failed to mark it working");
-export const scrapUnit = step("scrap", "Failed to scrap");

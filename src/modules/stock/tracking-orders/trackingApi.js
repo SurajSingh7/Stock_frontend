@@ -1,4 +1,4 @@
-import { api, apiUrl } from "@/lib/apiClient";
+import { api, apiUrl, saveDownload } from "@/lib/apiClient";
 import { API_ENDPOINTS } from "@/constants/api";
 
 const T = API_ENDPOINTS.purchase.trackingOrders;
@@ -43,6 +43,18 @@ export const deleteInvoice = (id) => api.delete(INV.byId(id), { fallback: "Faile
 export const setInvoicePartial = (id, on) => api.patch(INV.partial(id), { on }, { fallback: "Failed to change partial submit" });
 
 export const saveInvoiceItems = (id, body) => api.put(INV.items(id), body, { fallback: "Failed to save" });
+
+// Add Serial / Qty → Excel: per-product template, and reading a filled one
+// back (rows + their problems — nothing is saved until Save / Submit).
+export const downloadSerialTemplate = async (invoiceId, productId) => {
+  const res = await api.raw(INV.serialTemplate(invoiceId, productId), { fallback: "Failed to download the template" });
+  await saveDownload(res, "serials.xlsx");
+};
+export const parseSerialUpload = async (invoiceId, productId, file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return (await api.post(INV.serialUpload(invoiceId, productId), form, { fallback: "Failed to read the file" })).data;
+};
 
 // Approve / reject the whole invoice, or one entry of a partial submit.
 export const decideInvoice = (id, entryId, action, body) =>

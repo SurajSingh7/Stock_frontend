@@ -18,9 +18,9 @@ import { fetchLeafCategories, fetchScopedBranches, fetchProductOptions, fetchVen
 import Pagination from "@/shared/ui/pagination/Pagination";
 import DateRangeButton from "@/modules/stock/shared/DateRangeButton";
 import {
-  ClipboardList, Package, PackageCheck, Users, Wrench, Undo2, SlidersHorizontal, Eye, MapPin,
+  ClipboardList, Package, PackageCheck, Users, Wrench, Undo2, SlidersHorizontal, Eye, MapPin, Info,
 } from "lucide-react";
-import { SearchableSelect, unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import { SearchableSelect, Modal, unitLabel } from "@/modules/stock/shared/StockSharedUI";
 import { Tile } from "@/modules/stock/reports/reportUi";
 import { SearchBox, ResetButton } from "@/modules/stock/inventoryTransfer/shared";
 import { SOURCE_LABEL, fmtDate } from "./itemBadges";
@@ -39,11 +39,15 @@ const CHIPS = [
   { key: "AVAILABLE", label: "Available", active: "border-emerald-600 bg-emerald-600 text-white", idle: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
   { key: "SUBSCRIBERS", label: "Subscribers", active: "border-sky-600 bg-sky-600 text-white", idle: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
   { key: "EMPLOYEES", label: "Employees", active: "border-cyan-600 bg-cyan-600 text-white", idle: "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100" },
-  { key: "REPAIR", label: "Repair & Warranty", active: "border-amber-500 bg-amber-500 text-white", idle: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
+  { key: "FAULTY", label: "Faulty", active: "border-amber-500 bg-amber-500 text-white", idle: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
+  { key: "IN_REPAIR", label: "In Repair", active: "border-orange-600 bg-orange-600 text-white", idle: "border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100" },
   { key: "ON_THE_WAY", label: "On the Way", active: "border-violet-600 bg-violet-600 text-white", idle: "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100" },
   { key: "DEBITED", label: "Debited", active: "border-rose-600 bg-rose-600 text-white", idle: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
-  { key: "SCRAPPED", label: "Scrapped", active: "border-slate-600 bg-slate-600 text-white", idle: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50" },
+  { key: "SCRAPPED", label: "Dead / Scrapped", active: "border-slate-600 bg-slate-600 text-white", idle: "border-slate-200 bg-white text-slate-600 hover:bg-slate-50" },
+  { key: "LOST", label: "Lost", active: "border-red-600 bg-red-600 text-white", idle: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
 ];
+// Kept apart, after a divider: never part of All or the totals.
+const REPLACED_CHIP = { key: "REPLACED", label: "Replaced", active: "border-slate-500 bg-slate-500 text-white", idle: "border-dashed border-slate-300 bg-white text-slate-500 hover:bg-slate-50" };
 
 // The row's status, with the repair step spelled out.
 const STATUS_META = {
@@ -51,19 +55,30 @@ const STATUS_META = {
   SUBSCRIBERS: { label: "Subscriber", cls: "bg-sky-50 text-sky-700 ring-sky-200", dot: "bg-sky-500" },
   EMPLOYEES: { label: "Employee", cls: "bg-cyan-50 text-cyan-700 ring-cyan-200", dot: "bg-cyan-500" },
   FAULTY: { label: "Faulty", cls: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
-  IN_REPAIR: { label: "In Repair", cls: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
-  AT_VENDOR: { label: "At Vendor", cls: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500" },
+  IN_REPAIR: { label: "In Repair", cls: "bg-orange-50 text-orange-700 ring-orange-200", dot: "bg-orange-500" },
   ON_THE_WAY: { label: "On the Way", cls: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500" },
   DEBITED: { label: "Debited", cls: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
-  SCRAPPED: { label: "Scrapped", cls: "bg-slate-100 text-slate-600 ring-slate-200", dot: "bg-slate-400" },
+  SCRAPPED: { label: "Dead / Scrapped", cls: "bg-slate-100 text-slate-600 ring-slate-200", dot: "bg-slate-400" },
+  LOST: { label: "Lost", cls: "bg-red-50 text-red-700 ring-red-200", dot: "bg-red-500" },
+  REPLACED: { label: "Replaced", cls: "bg-slate-50 text-slate-500 ring-slate-200", dot: "bg-slate-300" },
 };
-const metaOf = (r) => STATUS_META[r.bucket === "REPAIR" ? r.status : r.bucket] || STATUS_META.SCRAPPED;
+const REPAIR_TYPE_LABEL = { WARRANTY: "Warranty", PAID: "Paid", IN_HOUSE: "In-house" };
+const metaOf = (r) => STATUS_META[r.bucket] || STATUS_META.SCRAPPED;
 
 const StatusBadge = ({ row }) => {
   const m = metaOf(row);
-  return (
+  const badge = (
     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${m.cls}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} /> {m.label}
+      {row.status === "IN_REPAIR" && REPAIR_TYPE_LABEL[row.repair?.type] ? ` · ${REPAIR_TYPE_LABEL[row.repair.type]}` : ""}
+    </span>
+  );
+  if (!row.lock) return badge;
+  // Held by a pending Lost Items entry until it is decided.
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {badge}
+      <span title={`On pending Lost entry ${row.lock.refNumber}`} className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 ring-1 ring-inset ring-red-200">🔒 Lost pending</span>
     </span>
   );
 };
@@ -80,15 +95,20 @@ const whereOf = (r) => {
     case "FAULTY":
       return { main: r.fault?.note || "Waiting for repair", sub: r.fault?.requestNumber ? `From ${r.fault.requestNumber}` : "Not sent yet" };
     case "IN_REPAIR":
-      return { main: "Our repair", sub: r.repair?.note };
-    case "AT_VENDOR":
-      return { main: r.repair?.vendorName || "Vendor", sub: [r.repair?.claimRef && `Claim ${r.repair.claimRef}`, r.repair?.note].filter(Boolean).join(" · ") };
+      return {
+        main: r.repair?.vendorName || (r.repair?.type === "IN_HOUSE" ? "Our technician" : "Repair"),
+        sub: [r.repair?.claimRef, r.repair?.estimatedCost != null && `₹${Number(r.repair.estimatedCost).toLocaleString("en-IN")}`, r.repair?.note].filter(Boolean).join(" · "),
+      };
+    case "REPLACED":
+      return { main: r.replacedBy ? `New unit: ${r.replacedBy}` : "Replaced", sub: "The vendor kept this one" };
+    case "LOST":
+      return { main: r.lost?.holder || { SUBSCRIBER: "Subscriber", EMPLOYEE: "Employee", STORE: "Not found in store" }[r.lost?.reason] || "Lost", sub: r.lost?.note };
     case "IN_TRANSIT":
       return { main: `To ${r.transit?.toBranchId?.name || "branch"}`, sub: r.transit?.transferNumber };
     case "DEBITED":
       return { main: r.dnNumbers?.length ? r.dnNumbers.join(", ") : "Debit note", sub: "Money taken back from the vendor" };
     default:
-      return { main: r.scrapNote || "Scrapped" };
+      return { main: r.scrapNote || "Dead / Scrapped" };
   }
 };
 
@@ -122,6 +142,7 @@ const ItemSummary = () => {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [viewing, setViewing] = useState(null);
+  const [replacedInfo, setReplacedInfo] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
 
@@ -214,7 +235,10 @@ const ItemSummary = () => {
           <Tile icon={Package} label="Total" value={unitTotals(totals.total)} tone="border-slate-200 bg-white text-slate-700" />
           <Tile icon={PackageCheck} label="Available" value={unitTotals(totals.available)} tone="border-emerald-200 bg-emerald-50 text-emerald-700" />
           <Tile icon={Users} label="In Use" value={unitTotals(totals.inUse)} tone="border-sky-200 bg-sky-50 text-sky-700" />
-          <Tile icon={Wrench} label="Repair" value={unitTotals(totals.repair)} tone="border-amber-200 bg-amber-50 text-amber-700" />
+          <Tile
+            icon={Wrench} label="Repair" value={unitTotals(totals.repair)} tone="border-amber-200 bg-amber-50 text-amber-700"
+            sub={`Faulty ${unitTotals(totals.faulty)} · In Repair ${unitTotals(totals.inRepair)}`}
+          />
           <Tile icon={Undo2} label="Debited" value={unitTotals(totals.debited)} tone="border-rose-200 bg-rose-50 text-rose-700" />
         </div>
       </div>
@@ -276,9 +300,9 @@ const ItemSummary = () => {
         {hasActiveFilters && <ResetButton onClick={clearFilters} />}
       </div>
 
-      {/* status chips */}
+      {/* status chips — Replaced sits apart: it is never in All or the totals */}
       <div className="mb-5 flex flex-wrap items-center gap-2">
-        {CHIPS.map((c) => {
+        {[...CHIPS, REPLACED_CHIP].map((c) => {
           const on = bucket === c.key;
           return (
             <button
@@ -289,8 +313,32 @@ const ItemSummary = () => {
               <span className={`rounded-full px-1.5 text-xs tabular-nums ${on ? "bg-white/25" : "bg-white/70"}`}>{counts[c.count || c.key] ?? 0}</span>
             </button>
           );
-        })}
+        }).flatMap((el, i, all) => (i === all.length - 1 ? [<span key="divider" className="mx-1 h-6 w-px bg-slate-300" />, el] : [el]))}
+        <button
+          type="button" onClick={() => setReplacedInfo(true)} title="Why Replaced is not counted" aria-label="Why Replaced is not counted"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-indigo-600"
+        >
+          <Info className="h-4 w-4" />
+        </button>
       </div>
+
+      {replacedInfo && (
+        <Modal title="Replaced" onClose={() => setReplacedInfo(false)} maxWidth="max-w-md">
+          <div className="space-y-3 text-sm text-slate-700">
+            <p className="flex items-start gap-2 rounded-lg bg-indigo-50 px-3 py-2 font-medium text-indigo-800">
+              <Info className="mt-0.5 h-4 w-4 shrink-0" /> These units are not counted in All or the totals.
+            </p>
+            <p>The vendor kept each of these and sent a new unit in its place. The new unit is counted under Available, so counting the old one too would show the same item twice.</p>
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Example: SN-111 faulty → the vendor kept it → sent SN-999. Count: <b>1</b> (SN-999).
+            </p>
+            <p className="text-xs text-slate-500">If the vendor later gives the old unit back too, it returns to stock and both are counted.</p>
+          </div>
+          <div className="mt-5 flex justify-end">
+            <button type="button" onClick={() => setReplacedInfo(false)} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500">OK</button>
+          </div>
+        </Modal>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">

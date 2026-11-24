@@ -53,14 +53,6 @@ export const navCategories = [
         moduleKey: "invoice-list",
         action: ["VIEW_MENU"],
       },
-      // Everything debit notes claimed as faulty — its own module, so it can be
-      // given to someone who does not get the Invoice List.
-      {
-        name: "Faulty Items",
-        path: "/stock/purchase/faulty-items",
-        moduleKey: "faulty-items",
-        action: ["VIEW_MENU"],
-      },
     ],
   },
   {
@@ -90,6 +82,18 @@ export const navCategories = [
         name: "Payments & Debit Notes",
         path: "/stock/approval/payments",
         moduleKey: "payment-approval",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Lost Items",
+        path: "/stock/approval/lost-items",
+        moduleKey: "lost-approval",
+        action: ["VIEW_MENU"],
+      },
+      {
+        name: "Dead Items",
+        path: "/stock/approval/dead-items",
+        moduleKey: "dead-approval",
         action: ["VIEW_MENU"],
       },
     ],
@@ -198,6 +202,18 @@ export const navCategories = [
         moduleKey: "invoice-breakup",
         action: ["VIEW_MENU"],
       },
+      /*
+        Every unit sent back on a debit note and the money deducted — read-only,
+        so it sits with the vendor-money reports (moved from Purchase
+        2026-11-20). Debit notes are still raised from the Invoice List and
+        approved under Approval. Its own module, so it can be granted alone.
+      */
+      {
+        name: "Debit Note Items",
+        path: "/stock/reports/debit-note-items",
+        moduleKey: "debit-note-items",
+        action: ["VIEW_MENU"],
+      },
     ],
   },
 
@@ -236,11 +252,18 @@ export const navCategories = [
         moduleKey: "item-summary",
         action: ["VIEW_MENU"],
       },
-      // Inventory reports (the Reports menu is billing).
+      // Units reported lost (or found again) — each entry goes for approval.
       {
-        name: "Stock Reports",
-        path: "/stock/inventory/reports",
-        moduleKey: "stock-reports",
+        name: "Lost Items",
+        path: "/stock/inventory/lost-items",
+        moduleKey: "lost-items",
+        action: ["VIEW_MENU"],
+      },
+      // Units written off as dead — each entry goes for approval.
+      {
+        name: "Dead Items",
+        path: "/stock/inventory/dead-items",
+        moduleKey: "dead-items",
         action: ["VIEW_MENU"],
       },
     ],
@@ -261,12 +284,12 @@ export const navCategories = [
         action: ["VIEW_MENU"],
       },
       // …and stock that was already with someone (employee / subscriber).
-      {
-        name: "With People",
-        path: "/stock/inventory/opening/with-people",
-        moduleKey: "opening-issued-stock",
-        action: ["VIEW_MENU"],
-      },
+      // {
+      //   name: "With People",
+      //   path: "/stock/inventory/opening/with-people",
+      //   moduleKey: "opening-issued-stock",
+      //   action: ["VIEW_MENU"],
+      // },
     ],
   },
 

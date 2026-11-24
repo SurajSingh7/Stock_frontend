@@ -44,6 +44,8 @@ export const PURCHASE_API = {
     board: "/stock/invoices/board",
     byId: (id) => `/stock/invoices/${id}`,
     items: (id) => `/stock/invoices/${id}/items`,
+    serialTemplate: (id, productId) => `/stock/invoices/${id}/serial-template/${productId}`,
+    serialUpload: (id, productId) => `/stock/invoices/${id}/serial-upload/${productId}`,
     partial: (id) => `/stock/invoices/${id}/partial`,
     // approve | reject … — on the whole invoice, or one entry of a partial submit
     decide: (id, action) => `/stock/invoices/${id}/${action}`,
@@ -79,10 +81,10 @@ export const PURCHASE_API = {
     },
   },
 
-  faultyItems: {
-    list: "/stock/faulty-items",
-    byVendor: "/stock/faulty-items/by-vendor",
-    units: (debitNoteId, lineIndex) => `/stock/faulty-items/${debitNoteId}/lines/${lineIndex}/units`,
+  debitNoteItems: {
+    list: "/stock/debit-note-items",
+    byVendor: "/stock/debit-note-items/by-vendor",
+    units: (debitNoteId, lineIndex) => `/stock/debit-note-items/${debitNoteId}/lines/${lineIndex}/units`,
   },
 
   notRequired: {

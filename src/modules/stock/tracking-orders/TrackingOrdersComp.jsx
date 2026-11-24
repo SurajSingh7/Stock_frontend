@@ -21,6 +21,7 @@ import { EntriesContent } from "./InvoiceEntries";
 import { usePermissions } from "@/context/PermissionContext";
 import { anchorRect } from "@/modules/stock/shared/anchorRect";
 import { MAIL_MODE_META } from "@/modules/stock/purchaseOrder/SendMailPopup";
+import StateChangeInfo from "@/modules/stock/purchaseOrder/StateChangeInfo";
 import { RotateCcw, Search, ChevronDown, X, PlusCircle, Ban, ClipboardList, Eye, MoreVertical, Info, ArrowLeft, Download, FileText, MailCheck, Truck, Trash2 } from "lucide-react";
 
 const money = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -776,7 +777,7 @@ const ItemsCell = ({ lines }) => {
 
 // The one thing to do next on an invoice, by its status.
 const NEXT_ACTION = {
-  UPLOADED: { label: "+ Add Items", cls: "bg-blue-600 text-white hover:bg-blue-500" },
+  UPLOADED: { label: "+ Add Serial / Qty", cls: "bg-blue-600 text-white hover:bg-blue-500" },
   DRAFT: { label: "Continue", cls: "bg-sky-600 text-white hover:bg-sky-500" },
   REJECTED: { label: "Fix items", cls: "border border-orange-200 bg-white text-orange-600 hover:bg-orange-50" },
 };
@@ -930,11 +931,6 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, canP
               <tr key={inv._id} className="transition hover:bg-slate-50/60">
                 <td className={`${invTd} font-semibold text-indigo-600`}>
                   {inv.invoiceNumber}
-                  {inv.companyUse && (
-                    <span className="mt-0.5 block w-fit rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 ring-1 ring-inset ring-indigo-200">
-                      Company Use
-                    </span>
-                  )}
                   {inv.partialSubmit && (
                     <button
                       type="button" onClick={() => onEntries(inv)} title="Show entries"
@@ -1335,6 +1331,32 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
           <span className="text-base font-bold text-slate-900">
             PO Number : <span className="font-semibold text-slate-900">{row.poNumber || "—"}</span>
           </span>
+          {/* The buyer entity picked at "+ Add Entity" — alias + state, since
+              the state decides CGST+SGST vs IGST. Full name / GST on hover. */}
+          {row.entityAlias ? (
+            <span
+              title={[row.buyerEntity?.name, row.buyerEntity?.gstNumber && `GST ${row.buyerEntity.gstNumber}`].filter(Boolean).join(" · ")}
+              className="inline-flex cursor-default items-center gap-1.5 rounded-lg bg-violet-50 px-2.5 py-1 text-sm ring-1 ring-inset ring-violet-100"
+            >
+              <span className="text-violet-500">Entity :</span>
+              <span className="font-bold text-violet-700">{row.entityAlias}</span>
+              {row.entityState && (
+                <span className="font-medium text-slate-700">
+                  {row.entityState}{row.buyerEntity?.stateCode ? ` (${row.buyerEntity.stateCode})` : ""}
+                </span>
+              )}
+              {row.stateChange && (
+                <span className="-my-1 -mr-1.5">
+                  <StateChangeInfo change={row.stateChange} entityAlias={row.entityAlias} />
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1 text-sm ring-1 ring-inset ring-slate-200">
+              <span className="text-slate-500">Entity :</span>
+              <span className="text-slate-400">Not added</span>
+            </span>
+          )}
           <span title={m.hint} className={`inline-flex cursor-default items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide shadow-sm ${m.pill || "bg-slate-400 text-white"}`}>
             <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
             {m.label || row.status}

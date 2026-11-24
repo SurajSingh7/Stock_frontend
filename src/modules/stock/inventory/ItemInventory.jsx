@@ -291,13 +291,13 @@ const MOVEMENT_LABEL = {
   REPORTED_FAULTY: "Reported faulty",
   SENT_FOR_REPAIR: "Sent for repair",
   REPAIRED: "Repaired",
-  REPAIR_FAILED: "Repair failed",
-  CLAIM_SENT: "Warranty claim sent",
-  CLAIM_RETURNED: "Back from vendor, repaired",
-  CLAIM_REJECTED: "Warranty claim refused",
-  VENDOR_REPLACED: "Replaced by vendor",
+  NOT_REPAIRED: "Not repaired",
+  REPLACED: "Replaced by vendor",
+  OLD_UNIT_RETURNED: "Old unit given back",
+  LOST: "Lost",
+  FOUND: "Found",
   MARKED_OK: "Checked — working",
-  SCRAPPED: "Scrapped",
+  SCRAPPED: "Dead / Scrapped",
   ASSIGNED: "Assigned",
 };
 const MOVEMENT_DOT = {
@@ -624,7 +624,7 @@ const ItemInventory = () => {
                     </div>
                     <div>
                       <p className="mb-1 text-xs font-semibold text-slate-600">Condition</p>
-                      <SearchableSelect value={condition} onChange={setAndReset(setCondition)} options={[{ value: "NEW", label: "New" }, { value: "USED", label: "Used" }]} placeholder="Any condition" />
+                      <SearchableSelect value={condition} onChange={setAndReset(setCondition)} options={[{ value: "NEW", label: "New" }, { value: "USED", label: "Used" }, { value: "REFURBISHED", label: "Refurbished" }]} placeholder="Any condition" />
                     </div>
                     <div>
                       <p className="mb-1 text-xs font-semibold text-slate-600">Vendor</p>

@@ -29,7 +29,7 @@ import { Modal, SearchableSelect, unitLabel } from "@/modules/stock/shared/Stock
 import { ProductHistory } from "./ProductInventory";
 import {
   RotateCcw, Search, Info, PackageCheck, PackageOpen, Layers, Receipt, Archive, ArrowLeftRight,
-  Undo2, Users, Wrench, AlertTriangle, ChevronRight, History,
+  Undo2, Users, Wrench, AlertTriangle, ChevronRight, History, Gift, SearchX, CircleAlert, Skull, Repeat,
 } from "lucide-react";
 
 const EP = API_ENDPOINTS.inventory.inventoryItems;
@@ -78,9 +78,14 @@ const ReceivedPopup = ({ row, single, onClose, onHistory }) => {
         <Line icon={Receipt} tone="bg-indigo-50 text-indigo-600 ring-indigo-100" label="Purchase (Invoice)" value={row.purchase} unit={unit} />
         <Line icon={Archive} tone="bg-sky-50 text-sky-600 ring-sky-100" label="Opening Stock" value={row.opening} unit={unit} />
         {single && <Line icon={ArrowLeftRight} tone="bg-violet-50 text-violet-600 ring-violet-100" label="From Branches" value={row.fromBranches} unit={unit} />}
+        {row.vendorFree > 0 && <Line icon={Gift} tone="bg-emerald-50 text-emerald-600 ring-emerald-100" label="From Vendor (free)" value={row.vendorFree} unit={unit} />}
         {row.other > 0 && <Line icon={Layers} tone="bg-slate-50 text-slate-500 ring-slate-200" label="Other (older records)" value={row.other} unit={unit} />}
       </div>
       <TotalLine label="Total Received" value={row.received} unit={unit} />
+      <p className="mt-3 flex items-start gap-1.5 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
+        Units replaced by a vendor are not counted again — the new unit takes the old one&apos;s place.
+      </p>
       <div className="mt-4 flex justify-center">
         <button
           type="button" onClick={onHistory}
@@ -93,24 +98,54 @@ const ReceivedPopup = ({ row, single, onClose, onHistory }) => {
   );
 };
 
+/*
+  Replaced — under the total, greyed: the vendor kept these units and sent
+  new ones, which are counted instead. ⓘ says so.
+*/
+const ReplacedLine = ({ value, unit, onOpen }) => {
+  const [info, setInfo] = useState(false);
+  return (
+    <div className="mt-2 rounded-lg border border-dashed border-slate-200 px-3 py-2">
+      <div className="flex items-center gap-2.5">
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-50 text-slate-400 ring-1 ring-inset ring-slate-200"><Repeat className="h-3.5 w-3.5" /></span>
+        <span className="text-sm text-slate-500">Replaced</span>
+        <button type="button" onClick={() => setInfo((v) => !v)} title="Why it is not counted" aria-label="Why it is not counted" className="text-slate-400 hover:text-indigo-600">
+          <Info className="h-3.5 w-3.5" />
+        </button>
+        <span className="ml-auto text-sm font-semibold tabular-nums text-slate-400">{qty(value)} <span className="text-xs font-normal">{unit}</span></span>
+        {onOpen && <button type="button" onClick={onOpen} aria-label="Open" className="text-slate-300 hover:text-slate-500"><ChevronRight className="h-4 w-4" /></button>}
+      </div>
+      {info && (
+        <p className="mt-2 text-xs text-slate-500">
+          Not counted in the total. The vendor kept these units and sent new ones in their place — the new units are counted instead, so the same item never shows twice.
+        </p>
+      )}
+    </div>
+  );
+};
+
 const OutPopup = ({ row, single, onClose, go }) => {
   const unit = unitLabel(row.unit);
   const inUse = row.subscribers + row.employees;
   return (
     <Modal title={`${row.productName} · Not Available`} onClose={onClose} maxWidth="max-w-md">
       <div className="space-y-0.5">
-        <Line icon={Undo2} tone="bg-rose-50 text-rose-600 ring-rose-100" label="Debited" value={row.returned} unit={unit} onOpen={row.returned > 0 ? () => go("/stock/purchase/faulty-items") : null} />
+        <Line icon={Undo2} tone="bg-rose-50 text-rose-600 ring-rose-100" label="Debited" value={row.returned} unit={unit} onOpen={row.returned > 0 ? () => go("/stock/reports/debit-note-items") : null} />
         {single && <Line icon={ArrowLeftRight} tone="bg-violet-50 text-violet-600 ring-violet-100" label="Sent to Branches" value={row.sent} unit={unit} onOpen={row.sent > 0 ? () => go("/stock/inventory/transfers/history") : null} />}
         {row.inTransit > 0 && <Line icon={ArrowLeftRight} tone="bg-indigo-50 text-indigo-600 ring-indigo-100" label="On the Way" value={row.inTransit} unit={unit} onOpen={() => go("/stock/inventory/transfers/requests-to-us")} />}
         <Line icon={Users} tone="bg-sky-50 text-sky-600 ring-sky-100" label="In Use" value={inUse} unit={unit}  />
         <Line sub label="Subscribers" value={row.subscribers} unit={unit} />
         <Line sub label="Employees" value={row.employees} unit={unit} />
-        <Line icon={Wrench} tone="bg-amber-50 text-amber-600 ring-amber-100" label="Repair & Warranty" value={row.repair} unit={unit} onOpen={row.repair > 0 ? () => go("/stock/repairs") : null} />
+        <Line icon={CircleAlert} tone="bg-amber-50 text-amber-600 ring-amber-100" label="Faulty" value={row.faulty} unit={unit} onOpen={row.faulty > 0 ? () => go("/stock/repairs?status=FAULTY") : null} />
+        <Line icon={Wrench} tone="bg-orange-50 text-orange-600 ring-orange-100" label="In Repair" value={row.inRepair} unit={unit} onOpen={row.inRepair > 0 ? () => go("/stock/repairs?status=IN_REPAIR") : null} />
+        <Line icon={Skull} tone="bg-slate-100 text-slate-600 ring-slate-200" label="Dead / Scrapped" value={row.scrapped} unit={unit} onOpen={row.scrapped > 0 ? () => go("/stock/repairs?status=SCRAPPED") : null} />
+        {row.lost > 0 && <Line icon={SearchX} tone="bg-red-50 text-red-600 ring-red-100" label="Lost" value={row.lost} unit={unit} />}
         {row.unrecorded > 0 && (
           <Line icon={AlertTriangle} tone="bg-amber-50 text-amber-600 ring-amber-200" label="Not recorded" value={row.unrecorded} unit={unit} warn />
         )}
       </div>
       <TotalLine label="Total Not Available" value={row.outOfStore} unit={unit} />
+      <ReplacedLine value={row.replaced} unit={unit} onOpen={row.replaced > 0 ? () => go("/stock/repairs?status=REPLACED") : null} />
       {row.unrecorded > 0 && (
         <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Received but not found anywhere — stock that left without an entry. Worth checking.
@@ -125,8 +160,12 @@ const NotAvailableInfo = ({ single, onClose }) => {
   const parts = [
     { icon: ArrowLeftRight, tone: "bg-indigo-50 text-indigo-600 ring-indigo-100", label: "On the Way", text: "Sent to another branch in a stock transfer, not received there yet." },
     { icon: Users, tone: "bg-sky-50 text-sky-600 ring-sky-100", label: "In Use", text: "Issued to subscribers, or given to our employees." },
-    { icon: Wrench, tone: "bg-amber-50 text-amber-600 ring-amber-100", label: "Repair & Warranty", text: "Faulty, in repair, or with the vendor on a warranty claim." },
-    { icon: Undo2, tone: "bg-rose-50 text-rose-600 ring-rose-100", label: "Debited", text: "Sent back on a debit note — the money was deducted from the vendor's bill. No longer ours (not a warranty claim — that is Repair & Warranty)." },
+    { icon: CircleAlert, tone: "bg-amber-50 text-amber-600 ring-amber-100", label: "Faulty", text: "Broken, in the store — not sent for repair yet." },
+    { icon: Wrench, tone: "bg-orange-50 text-orange-600 ring-orange-100", label: "In Repair", text: "Out for repair — with the vendor (warranty or paid) or our own technician." },
+    { icon: Skull, tone: "bg-slate-100 text-slate-600 ring-slate-200", label: "Dead / Scrapped", text: "Beyond repair, written off. Kept on record only." },
+    { icon: SearchX, tone: "bg-red-50 text-red-600 ring-red-100", label: "Lost", text: "Lost with a subscriber or an employee, or not found in the store." },
+    { icon: Undo2, tone: "bg-rose-50 text-rose-600 ring-rose-100", label: "Debited", text: "Sent back on a debit note — the money was deducted from the vendor's bill. No longer ours (not a repair)." },
+    { icon: Repeat, tone: "bg-slate-50 text-slate-400 ring-slate-200", label: "Replaced (not counted)", text: "The vendor kept the unit and sent a new one — the new unit is counted instead." },
     ...(single ? [{ icon: ArrowLeftRight, tone: "bg-violet-50 text-violet-600 ring-violet-100", label: "Sent to Branches", text: "Moved to another branch for good (shown when one branch is picked)." }] : []),
     { icon: AlertTriangle, tone: "bg-amber-50 text-amber-600 ring-amber-200", label: "Not recorded", text: "Received, but not found anywhere — left without an entry. Shown only when it happens." },
   ];
@@ -278,7 +317,7 @@ const StockSummary = () => {
           <Stat
             label="Not Available" value={t.outOfStore} icon={Users}
             className="border border-slate-200 bg-white text-slate-700"
-            title={`On the way ${qty(t.inTransit)} · In use ${qty((t.subscribers || 0) + (t.employees || 0))} · Repair ${qty(t.repair)} · Debited ${qty(t.returned)}${single ? ` · Sent ${qty(t.sent)}` : ""}`}
+            title={`On the way ${qty(t.inTransit)} · In use ${qty((t.subscribers || 0) + (t.employees || 0))} · Faulty ${qty(t.faulty)} · In repair ${qty(t.inRepair)} · Dead ${qty(t.scrapped)} · Debited ${qty(t.returned)}${single ? ` · Sent ${qty(t.sent)}` : ""}`}
           />
         </div>
       </div>

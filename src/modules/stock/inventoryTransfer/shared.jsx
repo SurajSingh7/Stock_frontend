@@ -356,6 +356,8 @@ const CHIP_TONE = {
   ON_THE_WAY: { active: "border-sky-600 bg-sky-600 text-white", inactive: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100", chipActive: "bg-sky-500 text-sky-50", chipInactive: "bg-sky-100 text-sky-700" },
   MISMATCH: { active: "border-rose-600 bg-rose-600 text-white", inactive: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100", chipActive: "bg-rose-500 text-rose-50", chipInactive: "bg-rose-100 text-rose-700" },
   RECEIVED: { active: "border-emerald-600 bg-emerald-600 text-white", inactive: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100", chipActive: "bg-emerald-500 text-emerald-50", chipInactive: "bg-emerald-100 text-emerald-700" },
+  APPROVED: { active: "border-emerald-600 bg-emerald-600 text-white", inactive: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100", chipActive: "bg-emerald-500 text-emerald-50", chipInactive: "bg-emerald-100 text-emerald-700" },
+  REJECTED: { active: "border-rose-600 bg-rose-600 text-white", inactive: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100", chipActive: "bg-rose-500 text-rose-50", chipInactive: "bg-rose-100 text-rose-700" },
   DECLINED: { active: "border-slate-600 bg-slate-600 text-white", inactive: "border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200", chipActive: "bg-slate-500 text-slate-50", chipInactive: "bg-slate-200 text-slate-700" },
 };
 export const StatusChips = ({ options, counts, value, onChange }) => (
