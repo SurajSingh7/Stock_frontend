@@ -1088,9 +1088,6 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
                 <div className="mb-3 flex items-center justify-between">
                   <span className="inline-flex items-center gap-2 text-sm font-bold text-slate-900">
                     {ap.categoryName}
-                    {/* <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                      LEAF
-                    </span> */}
                   </span>
                   <div className="flex items-center gap-3">
                     {list && list.length > 0 && (

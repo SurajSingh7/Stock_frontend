@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, Lock, Sun, Moon, LineChart, Users, Network, Store, Wifi, Briefcase } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { login } from '@/modules/core/auth/authApi';
-// import ForgotPasswordNotice from '@/component/common/modal/ForgotPasswordNotice';
 
 const LoginComponent = () => {
     const [loading, setLoading] = useState(false);
@@ -103,22 +102,6 @@ const LoginComponent = () => {
                         : 'from-[#000000] to-[#000000]'
                     }`}
             >
-
-                {/* Theme Toggle */}
-                {/* <button
-                    onClick={toggleTheme}
-                    className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-2 rounded-md border text-sm font-medium transition-colors ${theme === 'light'
-                        ? 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                        : 'bg-gray-800 border-gray-600 text-white hover:bg-gray-700'
-                        }`}
-                >
-                    {theme === 'light' ? (
-                        <Moon className="w-4 h-4" />
-                    ) : (
-                        <Sun className="w-4 h-4" />
-                    )}
-                    <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
-                </button> */}
 
                 {/* Main Container - Optimized for laptop screens */}
                 <div className="w-full max-w-5xl mx-auto">
@@ -260,12 +243,6 @@ const LoginComponent = () => {
                                                 Remember me
                                             </label>
                                         </div>
-                                        {/* <button
-                                            type="button"
-                                            className="text-sm font-semibold text-black hover:text-gray-700"
-                                        >
-                                            <ForgotPasswordNotice />
-                                        </button> */}
                                     </div>
 
                                     <button

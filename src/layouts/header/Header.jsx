@@ -36,7 +36,6 @@ const Header = () => {
                         </div>
                         <div
                             className="text-lg font-bold cursor-pointer hover:text-orange-300 transition" >
-                           {/* <ZoomButtons variant="inline" show={1} /> */}
                         </div>
                     </div>
 

@@ -30,7 +30,6 @@ export const Profile = () => {
   const handleLogout = async () => {
     try {
       await logout();
-      // clearAuthData();
       toast.success("Logged out successfully");
       window.location.href = "/";
     } catch (error) {
