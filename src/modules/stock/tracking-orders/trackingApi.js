@@ -28,9 +28,7 @@ export const resetTrackingOrder = (trackingOrderId, reason) =>
 export const fetchInvoicesForTracking = async (trackingOrderId) =>
   (await api.get(INV.board, { query: { trackingOrderId, limit: 200 }, fallback: "Failed to load invoices" })).data?.rows || [];
 
-// entryId: one entry of a partial-submit invoice.
-export const fetchInvoice = async (id, entryId) =>
-  (await api.get(INV.byId(id), { query: { entryId }, fallback: "Failed to load invoice" })).data;
+export const fetchInvoice = async (id) => (await api.get(INV.byId(id), { fallback: "Failed to load invoice" })).data;
 
 // Add Invoice / Edit invoice — FormData with `data` (JSON) and the file.
 export const saveInvoice = ({ trackingOrderId, invoiceId }, formData) =>
@@ -39,8 +37,6 @@ export const saveInvoice = ({ trackingOrderId, invoiceId }, formData) =>
     : api.post(T.invoices(trackingOrderId), formData, { fallback: "Failed to save invoice" });
 
 export const deleteInvoice = (id) => api.delete(INV.byId(id), { fallback: "Failed to delete invoice" });
-
-export const setInvoicePartial = (id, on) => api.patch(INV.partial(id), { on }, { fallback: "Failed to change partial submit" });
 
 export const saveInvoiceItems = (id, body) => api.put(INV.items(id), body, { fallback: "Failed to save" });
 
@@ -56,9 +52,9 @@ export const parseSerialUpload = async (invoiceId, productId, file) => {
   return (await api.post(INV.serialUpload(invoiceId, productId), form, { fallback: "Failed to read the file" })).data;
 };
 
-// Approve / reject the whole invoice, or one entry of a partial submit.
-export const decideInvoice = (id, entryId, action, body) =>
-  api.patch(entryId ? INV.decideEntry(id, entryId, action) : INV.decide(id, action), body, {
+// Approve / reject the invoice.
+export const decideInvoice = (id, action, body) =>
+  api.patch(INV.decide(id, action), body, {
     fallback: action === "approve" ? "Failed to approve" : "Failed to reject",
   });
 

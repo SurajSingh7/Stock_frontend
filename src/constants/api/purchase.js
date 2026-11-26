@@ -46,10 +46,8 @@ export const PURCHASE_API = {
     items: (id) => `/stock/invoices/${id}/items`,
     serialTemplate: (id, productId) => `/stock/invoices/${id}/serial-template/${productId}`,
     serialUpload: (id, productId) => `/stock/invoices/${id}/serial-upload/${productId}`,
-    partial: (id) => `/stock/invoices/${id}/partial`,
-    // approve | reject … — on the whole invoice, or one entry of a partial submit
+    // approve | reject
     decide: (id, action) => `/stock/invoices/${id}/${action}`,
-    decideEntry: (id, entryId, action) => `/stock/invoices/${id}/entries/${entryId}/${action}`,
   },
 
   invoiceList: {

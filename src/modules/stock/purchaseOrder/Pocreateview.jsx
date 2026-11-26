@@ -456,7 +456,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                 <th className="w-12 px-4 py-3 text-center">Sr.</th>
                 <th className="px-4 py-3">Description</th>
                 <th className="px-4 py-3">Product</th>
-                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Qty</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Quantity</th>
                 <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Unit Price</th>
                 <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Basic Price</th>
                 {taxType === "CGST_SGST" ? (

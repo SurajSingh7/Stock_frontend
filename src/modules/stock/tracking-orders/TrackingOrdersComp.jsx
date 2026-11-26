@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
-import { fetchTrackingBoard, assignTrackingEntity, trackingAction, fetchInvoicesForTracking, deleteInvoice as removeInvoice, setInvoicePartial } from "./trackingApi";
+import { fetchTrackingBoard, assignTrackingEntity, trackingAction, fetchInvoicesForTracking, deleteInvoice as removeInvoice } from "./trackingApi";
 import { poPdfUrl } from "@/modules/stock/purchaseOrder/purchaseOrderApi";
 import { invoiceFileUrl } from "@/modules/stock/shared/InvoiceInfoPopups";
 import Pagination from "@/shared/ui/pagination/Pagination";
@@ -17,7 +17,6 @@ import StatusTracker from "./StatusTracker";
 import { TRACKING_STATUS_META as STATUS_META, TRACKING_STATUS as TS } from "./trackingStatus";
 import InvoiceReceiveView from "./InvoiceReceiveView";
 import AddInvoicePopup from "./AddInvoicePopup";
-import { EntriesContent } from "./InvoiceEntries";
 import { usePermissions } from "@/context/PermissionContext";
 import { anchorRect } from "@/modules/stock/shared/anchorRect";
 import { MAIL_MODE_META } from "@/modules/stock/purchaseOrder/SendMailPopup";
@@ -535,7 +534,6 @@ const INVOICE_STATUS_META = {
   PENDING: { label: "Pending approval", badge: "bg-amber-50 text-amber-700 ring-amber-200", dot: "bg-amber-500" },
   APPROVED: { label: "Approved", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500" },
   REJECTED: { label: "Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500" },
-  IN_PROGRESS: { label: "In progress", badge: "bg-violet-50 text-violet-700 ring-violet-200", dot: "bg-violet-500" },
 };
 
 const InvoiceStatusBadge = ({ status }) => {
@@ -640,7 +638,7 @@ const InvoiceDetailPopup = ({ invoice, onClose }) => {
                 <span className="text-slate-400"> · {fmtTime(e.at)} · </span>
                 {(e.items || []).map((it) => `${it.productName} ${it.quantity >= 0 ? "+" : ""}${it.quantity}`).join(", ") || "—"}
                 <span className={`ml-1 text-xs font-semibold ${e.action === "SUBMIT" ? "text-indigo-600" : "text-slate-400"}`}>
-                  · {e.entryNumber ? `Entry ${e.entryNumber} ` : ""}{e.action === "SUBMIT" ? "submitted" : "draft saved"}
+                  · {e.action === "SUBMIT" ? "submitted" : "draft saved"}
                 </span>
               </li>
             ))}
@@ -726,34 +724,6 @@ const PriceBreakupPopup = ({ invoice, onClose }) => {
   );
 };
 
-/*
-  "Partial · N entries" → every entry of a partial-submit invoice: who
-  entered what, how much, and where it stands. Draft / rejected entries can
-  be continued or fixed from here.
-*/
-const EntriesPopup = ({ invoice, onClose, onAddItems }) => (
-  <Modal onClose={onClose} title={`${invoice.invoiceNumber} · Entries`} maxWidth="max-w-3xl">
-    <p className="mb-3 text-xs text-slate-500">
-      Invoice qty {invoice.qtyInvoiced || 0} · approved {invoice.qtyApproved || 0} · awaiting approval {invoice.qtyPendingApproval || 0}
-      {invoice.qtyDraft ? ` · in draft ${invoice.qtyDraft}` : ""} · left to enter {invoice.qtyLeftToEnter ?? 0}
-    </p>
-    <EntriesContent
-      invoice={invoice}
-      renderAction={(card) =>
-        card.status === "DRAFT" ? (
-          <button type="button" onClick={() => onAddItems(invoice)} className="rounded-md bg-sky-600 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-sky-500">
-            Continue
-          </button>
-        ) : card.status === "REJECTED" ? (
-          <button type="button" onClick={() => onAddItems(invoice, card.entryId)} className="rounded-md border border-orange-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-orange-600 hover:bg-orange-50">
-            Fix entry
-          </button>
-        ) : null
-      }
-    />
-  </Modal>
-);
-
 /* Embedded (non-modal) invoice table — rendered directly inside the         */
 /* Tracking Order card so each invoice's state is visible without a click.   */
 const invTh = "px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-600";
@@ -787,7 +757,7 @@ const NEXT_ACTION = {
   for Edit invoice / Delete — shown only to whoever holds EDIT_INVOICE, and
   each refused by the server outside its rules too.
 */
-const RowActionMenu = ({ invoice, canEditInvoice, canPartial, onView, onAddItems, onEditInvoice, onDelete, onTogglePartial }) => {
+const RowActionMenu = ({ invoice, canEditInvoice, onView, onAddItems, onEditInvoice, onDelete }) => {
   // The menu is drawn in a portal at the button's screen position: inside the
   // table it was clipped by the table's horizontal scroll container.
   const [menuPos, setMenuPos] = useState(null); // { top, right } when open
@@ -816,26 +786,10 @@ const RowActionMenu = ({ invoice, canEditInvoice, canPartial, onView, onAddItems
     };
   }, [open]);
 
-  const next = invoice.partialSubmit
-    ? invoice.status === "APPROVED"
-      ? null
-      : invoice.hasDraftEntry
-        ? NEXT_ACTION.DRAFT
-        : (invoice.qtyLeftToEnter || 0) > 0
-          ? NEXT_ACTION.UPLOADED
-          : null
-    : NEXT_ACTION[invoice.status];
+  const next = NEXT_ACTION[invoice.status];
   const menu = [
     ...(canEditInvoice ? [{ label: "Edit invoice", tone: "text-indigo-600 hover:bg-indigo-50", onClick: () => onEditInvoice(invoice) }] : []),
-    // Shown while it can still be switched — the server checks the same.
-    ...(canPartial && invoice.status !== "APPROVED"
-      ? [{
-          label: `Partial submit: ${invoice.partialSubmit ? "ON → OFF" : "OFF → ON"}`,
-          tone: "text-violet-700 hover:bg-violet-50",
-          onClick: () => onTogglePartial(invoice),
-        }]
-      : []),
-    ...(canEditInvoice && invoice.status !== "APPROVED" && !invoice.inLedger
+    ...(canEditInvoice && invoice.status !== "APPROVED"
       ? [{ label: "Delete", tone: "text-rose-600 hover:bg-rose-50", onClick: () => onDelete(invoice) }]
       : []),
   ];
@@ -887,7 +841,7 @@ const RowActionMenu = ({ invoice, canEditInvoice, canPartial, onView, onAddItems
   );
 };
 
-const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, canPartial, onView, onAddItems, onEditInvoice, onDelete, onPriceInfo, onTogglePartial, onEntries }) => {
+const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, onView, onAddItems, onEditInvoice, onDelete, onPriceInfo }) => {
   if (loading) {
     return <div className="h-16 animate-pulse rounded-xl bg-slate-100" />;
   }
@@ -926,27 +880,13 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, canP
         <tbody className="divide-y divide-slate-100">
           {invoices.map((inv) => {
             const complete = (inv.qtyReceived || 0) === (inv.qtyInvoiced || 0);
-            const entries = inv.partialSubmit ? inv.entries || [] : [];
             return (
               <tr key={inv._id} className="transition hover:bg-slate-50/60">
-                <td className={`${invTd} font-semibold text-indigo-600`}>
-                  {inv.invoiceNumber}
-                  {inv.partialSubmit && (
-                    <button
-                      type="button" onClick={() => onEntries(inv)} title="Show entries"
-                      className="mt-0.5 block w-fit rounded-full bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200 transition hover:bg-violet-100"
-                    >
-                      Partial · {entries.length} entr{entries.length === 1 ? "y" : "ies"} ›
-                    </button>
-                  )}
-                </td>
+                <td className={`${invTd} font-semibold text-indigo-600`}>{inv.invoiceNumber}</td>
                 <td className={invTd}>{fmt(inv.invoiceDate)}</td>
                 <td className={invTd}><ItemsCell lines={inv.lines} /></td>
                 <td className={`${invTdRight} ${complete ? "text-emerald-700" : "text-amber-700"}`}>
                   {inv.qtyReceived || 0} / {inv.qtyInvoiced || 0}
-                  {inv.partialSubmit && (
-                    <span className="block text-[11px] font-normal text-slate-500">{inv.qtyApproved || 0} approved</span>
-                  )}
                 </td>
                 <td className={invTdRight}>{inv.focQtyReceived || 0}</td>
                 <td className={invTdRight}>{money(inv.invoiceAmount)}</td>
@@ -964,9 +904,8 @@ const InvoiceTableBlock = ({ invoices, loading, orderedQty, canEditInvoice, canP
                 <td className={invTd}><InvoiceStatusBadge status={inv.status} /></td>
                 <td className={invTdRight}>
                   <RowActionMenu
-                    invoice={inv} canEditInvoice={canEditInvoice} canPartial={canPartial}
+                    invoice={inv} canEditInvoice={canEditInvoice}
                     onView={onView} onAddItems={onAddItems} onEditInvoice={onEditInvoice} onDelete={onDelete}
-                    onTogglePartial={onTogglePartial}
                   />
                 </td>
               </tr>
@@ -1220,7 +1159,7 @@ const ClosureDecisionPopup = ({ row, mode, onClose, onDone }) => {
   );
 };
 
-const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onHistory, onAddItems, onInvoiceForm, onChanged, onViewPoDoc, onHoverStage, onShortClose, onReopen, canShortClose, canReopen, canEditInvoice, canPartial }) => {
+const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, onNotRequired, onHistory, onAddItems, onInvoiceForm, onChanged, onViewPoDoc, onHoverStage, onShortClose, onReopen, canShortClose, canReopen, canEditInvoice }) => {
   const m = STATUS_META[row.status] || {};
   const isReceivingFlow = RECEIVING_FLOW_STATUSES.has(row.status);
   const hasPo = !!row.poNumber;
@@ -1232,7 +1171,7 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
   // approving it afterwards would change a total that was already declared
   // final. The server refuses it too; this only puts the reason on screen.
   // Added / Draft count too: those goods have arrived, just not been entered.
-  const pendingInvoices = invoices.filter((inv) => ["UPLOADED", "DRAFT", "PENDING", "IN_PROGRESS"].includes(inv.status)).length;
+  const pendingInvoices = invoices.filter((inv) => ["UPLOADED", "DRAFT", "PENDING"].includes(inv.status)).length;
 
   // How many approved products were dropped, and how many there were to begin
   // with. items[] already excludes them, so the original total is the two added
@@ -1253,30 +1192,6 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
   const tab = pickedTab ?? (hasInvoices ? "invoice" : "products");
   const setTab = setPickedTab;
   const [popup, setPopup] = useState(null); // { type: "overallSummary" | "viewInvoice" | "mailInfo" | "priceInfo", ... }
-
-  // ⋮ → Partial submit ON/OFF. The server refuses it once entries are submitted.
-  const togglePartial = (inv) => {
-    const turnOn = !inv.partialSubmit;
-    setPopup({
-      type: "confirm",
-      title: `Turn ${turnOn ? "ON" : "OFF"} partial submit?`,
-      message: turnOn
-        ? `${inv.invoiceNumber} — items can then be submitted a part at a time, each part approved on its own.`
-        : `${inv.invoiceNumber} — the whole invoice will then be submitted once, complete.`,
-      confirmLabel: turnOn ? "Turn ON" : "Turn OFF",
-      tone: "primary",
-      onConfirm: async () => {
-        try {
-          await setInvoicePartial(inv._id, turnOn);
-          toast.success(`Partial submit turned ${turnOn ? "ON" : "OFF"} for ${inv.invoiceNumber}`);
-          setPopup(null);
-          onChanged();
-        } catch (e) {
-          toast.error(e.message);
-        }
-      },
-    });
-  };
 
   // An invoice added by mistake — the server refuses an approved one.
   const deleteInvoice = (inv) => {
@@ -1600,14 +1515,11 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
               loading={invLoading}
               orderedQty={row.totalQuantity}
               canEditInvoice={canEditInvoice}
-              canPartial={canPartial}
-              onTogglePartial={togglePartial}
               onView={(inv) => setPopup({ type: "viewInvoice", invoice: inv })}
-              onAddItems={(inv, entryId) => onAddItems(row, inv, entryId)}
+              onAddItems={(inv) => onAddItems(row, inv)}
               onEditInvoice={(inv) => onInvoiceForm(row, inv)}
               onDelete={deleteInvoice}
               onPriceInfo={(inv) => setPopup({ type: "priceInfo", invoice: inv })}
-              onEntries={(inv) => setPopup({ type: "entries", invoice: inv })}
             />
           </>
         ) : (
@@ -1617,13 +1529,6 @@ const TrackingOrderCard = ({ quotationNumber, row, refreshSignal, onAddEntity, o
       {popup?.type === "overallSummary" && <OverallSummaryPopup row={row} invoices={invoices} onClose={() => setPopup(null)} />}
       {popup?.type === "viewInvoice" && <InvoiceDetailPopup invoice={popup.invoice} onClose={() => setPopup(null)} />}
       {popup?.type === "priceInfo" && <PriceBreakupPopup invoice={popup.invoice} onClose={() => setPopup(null)} />}
-      {popup?.type === "entries" && (
-        <EntriesPopup
-          invoice={popup.invoice}
-          onClose={() => setPopup(null)}
-          onAddItems={(inv, entryId) => { setPopup(null); onAddItems(row, inv, entryId); }}
-        />
-      )}
       {popup?.type === "mailInfo" && <MailInfoPopup row={row} onClose={() => setPopup(null)} />}
       {popup?.type === "confirm" && <ConfirmDialog {...popup} onCancel={() => setPopup(null)} />}
     </div>
@@ -1640,7 +1545,6 @@ const TrackingOrdersComp = () => {
   const canShortClose = canDo(permissions, isAdmin, "SHORT_CLOSE");
   const canReopen = canDo(permissions, isAdmin, "REOPEN");
   const canEditInvoice = canDo(permissions, isAdmin, "EDIT_INVOICE", "invoices");
-  const canPartial = canDo(permissions, isAdmin, "PARTIAL_SUBMIT", "invoices");
 
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
@@ -1735,7 +1639,6 @@ const TrackingOrdersComp = () => {
       <InvoiceReceiveView
         trackingOrderId={view.row.trackingOrderId}
         invoiceId={view.invoice._id}
-        entryId={view.entryId}
         onBack={backToBoard}
         onDone={backToBoard}
       />
@@ -1850,11 +1753,10 @@ const TrackingOrdersComp = () => {
                 canShortClose={canShortClose}
                 canReopen={canReopen}
                 onHistory={(r) => setPopup({ type: "resetHistory", row: r })}
-                onAddItems={(r, invoice, entryId) => setView({ mode: "addItems", row: r, invoice, entryId })}
+                onAddItems={(r, invoice) => setView({ mode: "addItems", row: r, invoice })}
                 onInvoiceForm={(r, invoice) => setView({ mode: "invoiceForm", row: r, invoice })}
                 onChanged={refresh}
                 canEditInvoice={canEditInvoice}
-                canPartial={canPartial}
                 onViewPoDoc={(r) => setView({ mode: "viewPoDoc", poId: r.poId, poNumber: r.poNumber })}
                 onHoverStage={setHoveredStage}
               />

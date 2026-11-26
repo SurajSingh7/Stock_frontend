@@ -42,10 +42,6 @@ import MiscPopup from "@/modules/stock/shared/MiscPopup";
 */
 // Why a payment request is not offered yet (server decides; this only names it).
 const LOCK_REASON = {
-  ITEMS_PENDING: {
-    label: "Items pending",
-    hint: () => "Partial invoice — every entry must be approved before payment can be asked for",
-  },
   DN_IN_PROGRESS: {
     label: "DN in progress",
     hint: (r) => `DN-${r.debitNote?.latest?.dnNumber} is still in review or approval`,

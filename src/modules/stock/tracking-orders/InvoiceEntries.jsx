@@ -3,12 +3,12 @@
 import React, { useState } from "react";
 
 /*
-  An invoice's entries as cards (newest first), a Σ total per product, and
-  the line-by-line log folded away below — shared by the Add Items screen and
-  the Tracking Order card's "Partial · N entries" popup, so both look alike.
+  What has been entered on an invoice as a card, a Σ total per product, and
+  the line-by-line log folded away below — the Add Items screen's "Entry"
+  popup.
 
   Works off an invoice as GET /invoices/:id returns it, or a row of the
-  invoice board: \`lines\`, \`entries[].lines\`, \`entryLog\`, \`partialSubmit\`.
+  invoice board: `lines`, `entryLog`.
 */
 
 export const fmtDate = (d) =>
@@ -20,7 +20,6 @@ const STATUS_META = {
   UPLOADED: { label: "Invoice Uploaded", cls: "bg-slate-100 text-slate-700" },
   DRAFT: { label: "Draft", cls: "bg-sky-100 text-sky-700" },
   PENDING: { label: "Pending approval", cls: "bg-amber-100 text-amber-800" },
-  IN_PROGRESS: { label: "In progress", cls: "bg-violet-100 text-violet-700" },
   APPROVED: { label: "Approved", cls: "bg-emerald-100 text-emerald-700" },
   REJECTED: { label: "Rejected", cls: "bg-rose-100 text-rose-700" },
 };
@@ -68,7 +67,6 @@ const EntryHistory = ({ log }) => (
               <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-500">{fmtDateTime(e.at)}</td>
               <td className="whitespace-nowrap px-3 py-2 font-semibold text-slate-900">{e.byName || "—"}</td>
               <td className="whitespace-nowrap px-3 py-2">
-                {e.entryNumber && <span className="mr-1.5 font-semibold text-slate-700">Entry {e.entryNumber}</span>}
                 <span className={`rounded-full border border-slate-200 px-2 py-0.5 text-[10px] font-medium ${submitted ? "text-slate-900" : "text-slate-500"}`}>
                   {submitted ? "Submitted" : "Draft saved"}
                 </span>
@@ -89,12 +87,12 @@ const EntryHistory = ({ log }) => (
 );
 
 /*
-  One entry as a card, styled like the Current Invoice box: header (entry,
-  status, who, when, total, FOC — and an optional action) and its products
-  below. A rejected entry is faded and carries its reason.
+  The entry as a card, styled like the Current Invoice box: header (status,
+  when, total, FOC) and its products below. A rejected invoice is faded and
+  carries its reason.
 */
-const EntryCard = ({ card, action }) => {
-  const { title, status, by, at, lines, contributors, rejectedReason, reviewedByName } = card;
+const EntryCard = ({ card }) => {
+  const { title, status, at, lines, contributors, rejectedReason, reviewedByName } = card;
   const total = lines.reduce((t, l) => t + (l.qty || 0), 0);
   const foc = lines.reduce((t, l) => t + (l.foc || 0), 0);
   return (
@@ -102,14 +100,12 @@ const EntryCard = ({ card, action }) => {
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-b border-indigo-100 bg-indigo-50/70 px-3 py-1.5 text-[11px]">
         <span className="font-bold uppercase tracking-wider text-indigo-800">{title}</span>
         <StatusChip status={status} />
-        {by && <span className="text-slate-600">{by}</span>}
         {at && <span className="text-slate-500">{fmtDateTime(at)}</span>}
         <span className="ml-auto whitespace-nowrap text-slate-600">
           Total <span className="font-semibold text-slate-900">{total}</span>
           <span className="mx-1.5 text-slate-300">·</span>
           FOC <span className={`font-semibold ${foc ? "text-amber-700" : "text-slate-900"}`}>{foc}</span>
         </span>
-        {action}
       </div>
       {contributors?.length > 0 && (
         <p className="border-b border-slate-100 px-3 py-1 text-[10px] text-slate-500">
@@ -149,132 +145,67 @@ const EntryCard = ({ card, action }) => {
   );
 };
 
-// Cards + per-product totals, worked out once from the invoice.
+// The card + per-product totals, worked out once from the invoice.
 export function entryView(invoice) {
-  const partial = !!invoice.partialSubmit;
-  const lineOf = (id) => (invoice.lines || []).find((l) => String(l.quotationItemId) === String(id));
-  const nameOf = (id) => lineOf(id)?.productName || "—";
-  const categoryOf = (id) => {
-    const l = lineOf(id);
-    return l?.categoryPath || l?.categoryName || "";
+  // One entry — the invoice itself. Everyone who saved a part of it is named.
+  const seen = new Map();
+  (invoice.entryLog || []).forEach((x) => { if (x.byName && !seen.has(x.byName)) seen.set(x.byName, x.at); });
+  const last = (invoice.entryLog || [])[(invoice.entryLog || []).length - 1];
+  const card = {
+    title: "Invoice entry",
+    status: invoice.status,
+    at: last?.at || null,
+    contributors: [...seen].map(([name, at]) => ({ name, at })),
+    rejectedReason: invoice.rejectedReason,
+    reviewedByName: invoice.reviewedByName,
+    lines: (invoice.lines || [])
+      .filter((l) => (l.receivedQuantity || 0) > 0 || (l.focQuantity || 0) > 0)
+      .map((l) => ({ category: l.categoryPath || l.categoryName || "", productName: l.productName, qty: l.receivedQuantity || 0, foc: l.focQuantity || 0 })),
   };
 
-  let cards;
-  if (partial) {
-    cards = (invoice.entries || [])
-      .slice()
-      .sort((a, b) => (b.entryNumber || 0) - (a.entryNumber || 0))
-      .map((e) => {
-        const own = (invoice.entryLog || []).filter((x) => x.entryNumber === e.entryNumber);
-        const last = own[own.length - 1];
-        return {
-          key: String(e._id),
-          entryId: e._id,
-          title: `Entry ${e.entryNumber}`,
-          status: e.status,
-          by: e.submittedByName || last?.byName || "",
-          at: e.submittedAt || last?.at || e.updatedAt,
-          rejectedReason: e.rejectedReason,
-          reviewedByName: e.reviewedByName,
-          lines: (e.lines || []).map((l) => ({
-            category: categoryOf(l.quotationItemId),
-            productName: l.productName || nameOf(l.quotationItemId),
-            qty: l.receivedQuantity || 0,
-            foc: l.focQuantity || 0,
-          })),
-        };
-      });
-  } else {
-    // One entry — the invoice itself. Everyone who saved a part of it is named.
-    const seen = new Map();
-    (invoice.entryLog || []).forEach((x) => { if (x.byName && !seen.has(x.byName)) seen.set(x.byName, x.at); });
-    const last = (invoice.entryLog || [])[(invoice.entryLog || []).length - 1];
-    cards = [{
-      key: "invoice",
-      entryId: null,
-      title: "Invoice entry",
-      status: invoice.status,
-      by: "",
-      at: last?.at || null,
-      contributors: [...seen].map(([name, at]) => ({ name, at })),
-      rejectedReason: invoice.rejectedReason,
-      reviewedByName: invoice.reviewedByName,
-      lines: (invoice.lines || [])
-        .filter((l) => (l.receivedQuantity || 0) > 0 || (l.focQuantity || 0) > 0)
-        .map((l) => ({ category: l.categoryPath || l.categoryName || "", productName: l.productName, qty: l.receivedQuantity || 0, foc: l.focQuantity || 0 })),
-    }];
-  }
-
-  // Σ total per product. Rejected entries are left out — they come back.
   const totals = (invoice.lines || []).map((l) => {
-    const k = String(l.quotationItemId);
-    const row = { productName: l.productName, invoiceQty: l.invoiceQuantity || 0, approved: 0, pending: 0, draft: 0, entered: 0, foc: 0 };
-    if (partial) {
-      (invoice.entries || []).filter((e) => e.status !== "REJECTED").forEach((e) =>
-        (e.lines || []).filter((el) => String(el.quotationItemId) === k).forEach((el) => {
-          const q = el.receivedQuantity || 0;
-          if (e.status === "APPROVED") row.approved += q;
-          else if (e.status === "PENDING") row.pending += q;
-          else row.draft += q;
-          row.foc += el.focQuantity || 0;
-        })
-      );
-      row.left = Math.max(0, row.invoiceQty - row.approved - row.pending - row.draft);
-    } else {
-      row.entered = l.receivedQuantity || 0;
-      row.foc = l.focQuantity || 0;
-      row.left = Math.max(0, row.invoiceQty - row.entered);
-    }
-    return row;
+    const invoiceQty = l.invoiceQuantity || 0;
+    const entered = l.receivedQuantity || 0;
+    return { productName: l.productName, invoiceQty, entered, foc: l.focQuantity || 0, left: Math.max(0, invoiceQty - entered) };
   });
   const sum = (f) => totals.reduce((t, r) => t + (r[f] || 0), 0);
-  return { partial, cards, totals, sum };
+  return { card, totals, sum };
 }
 
 const TONE = {
-  approved: "font-semibold text-emerald-700",
-  pending: "font-semibold text-amber-700",
-  draft: "font-semibold text-sky-700",
   entered: "font-semibold text-indigo-700",
   foc: "font-semibold text-amber-700",
   left: "font-semibold text-amber-700",
 };
+const COLS = [["invoiceQty", "Invoice qty"], ["entered", "Entered"], ["foc", "FOC"], ["left", "Left"]];
 
-// The popup body: cards, Σ total, detailed log. `renderAction(card)` may put
-// a button (Continue / Fix entry) in a card's header.
-export const EntriesContent = ({ invoice, renderAction }) => {
+// The popup body: the card, Σ total, detailed log.
+export const EntriesContent = ({ invoice }) => {
   const [showLog, setShowLog] = useState(false);
-  const { partial, cards, totals, sum } = entryView(invoice);
+  const { card, totals, sum } = entryView(invoice);
   const log = (invoice.entryLog || []).slice().reverse();
-  const cols = partial
-    ? [["invoiceQty", "Invoice qty"], ["approved", "Approved"], ["pending", "Pending"], ["draft", "Draft"], ["foc", "FOC"], ["left", "Left"]]
-    : [["invoiceQty", "Invoice qty"], ["entered", "Entered"], ["foc", "FOC"], ["left", "Left"]];
 
   return (
     <div className="space-y-3">
-      {cards.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-center text-xs text-slate-400">No entry yet.</p>
-      ) : (
-        cards.map((c) => <EntryCard key={c.key} card={c} action={renderAction ? renderAction(c) : null} />)
-      )}
+      <EntryCard card={card} />
 
       <div className="overflow-hidden rounded-xl border-2 border-indigo-300 bg-white shadow-sm">
         <p className="border-b border-indigo-100 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-indigo-800">
-          Σ Total — {partial ? "all entries" : "this invoice"}
+          Σ Total — this invoice
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-slate-600">
                 <th className="px-3 py-1">Product</th>
-                {cols.map(([k, label]) => <th key={k} className="whitespace-nowrap px-3 py-1 text-right">{label}</th>)}
+                {COLS.map(([k, label]) => <th key={k} className="whitespace-nowrap px-3 py-1 text-right">{label}</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-slate-800">
               {totals.map((r, i) => (
                 <tr key={i}>
                   <td className="px-3 py-1 font-medium">{r.productName}</td>
-                  {cols.map(([k]) => (
+                  {COLS.map(([k]) => (
                     <td key={k} className={`px-3 py-1 text-right tabular-nums ${r[k] ? TONE[k] || "" : "text-slate-500"}`}>{r[k] || 0}</td>
                   ))}
                 </tr>
@@ -283,7 +214,7 @@ export const EntriesContent = ({ invoice, renderAction }) => {
             <tfoot>
               <tr className="border-t border-indigo-100 bg-indigo-50/60 font-semibold text-slate-900">
                 <td className="px-3 py-1.5">Total</td>
-                {cols.map(([k]) => <td key={k} className="px-3 py-1.5 text-right tabular-nums">{sum(k)}</td>)}
+                {COLS.map(([k]) => <td key={k} className="px-3 py-1.5 text-right tabular-nums">{sum(k)}</td>)}
               </tr>
             </tfoot>
           </table>

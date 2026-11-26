@@ -368,16 +368,15 @@ const SerialTemplatePreview = ({ productName, fields, left, busy, onClose, onDow
 
 const isBlankRow = (r) => !Object.values(r.fieldValues || {}).some((v) => String(v ?? "").trim());
 
-const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alreadyReceived, onOpenRating, invoiceId }) => {
+const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, onOpenRating, invoiceId }) => {
   const isIndividual = productDef?.trackingMethod === "individual";
   const unit = unitLabel(productDef?.unit);
   const orderedQty = poLine.quantity;
-  const usedByOthers = alreadyReceived || 0;
   const paidRows = lineState.rows.filter((r) => !r.isFoc);
   const focRows = lineState.rows.filter((r) => r.isFoc);
   const receivedNow = isIndividual ? paidRows.length : Number(lineState.quantity || 0);
-  const remaining = Math.max(0, orderedQty - usedByOthers - receivedNow);
-  const overLimit = usedByOthers + receivedNow > orderedQty;
+  const remaining = Math.max(0, orderedQty - receivedNow);
+  const overLimit = receivedNow > orderedQty;
   // Serial products: the FOC count IS the number of FOC rows, so deleting a
   // row from the table brings the count down with it.
   const focQtyNum = isIndividual ? focRows.length : Math.max(0, Number(lineState.focQuantity) || 0);
@@ -405,7 +404,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
   const toggleRowType = (idx) => {
     const row = lineState.rows[idx];
     if (!row) return;
-    if (row.isFoc && usedByOthers + paidRows.length + 1 > orderedQty) {
+    if (row.isFoc && paidRows.length + 1 > orderedQty) {
       toast.error(`Can't make it Paid — the invoice has only ${orderedQty} ${unit}, all already entered as Paid`);
       return;
     }
@@ -466,7 +465,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
   };
   // Blank paid rows are filled first; the rest go on top as new paid rows.
   const blankPaidCount = paidRows.filter(isBlankRow).length;
-  const uploadCapacity = blankPaidCount + Math.max(0, orderedQty - usedByOthers - paidRows.length);
+  const uploadCapacity = blankPaidCount + Math.max(0, orderedQty - paidRows.length);
   const applyUpload = (valuesList) => {
     const queue = [...valuesList];
     const filled = lineState.rows.map((r) => (!r.isFoc && isBlankRow(r) && queue.length ? { ...r, fieldValues: { ...queue.shift() } } : r));
@@ -494,7 +493,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
           {isIndividual ? "Received units" : "Received quantity"} ({unit})
         </p>
         <p className={`text-xs font-semibold tabular-nums ${overLimit ? "text-rose-600" : "text-slate-500"}`}>
-          Invoice qty {orderedQty} {unit}{usedByOthers > 0 ? ` · On other entries ${usedByOthers}` : ""} · Entering {receivedNow} · Left {remaining}
+          Invoice qty {orderedQty} {unit} · Entering {receivedNow} · Left {remaining}
         </p>
       </div>
 
@@ -588,7 +587,7 @@ const ProductTab = ({ poLine, productDef, taxType, lineState, onLineChange, alre
         <SerialTemplatePreview
           productName={productDef?.name || poLine.productName || ""}
           fields={fields}
-          left={Math.max(0, orderedQty - usedByOthers - paidRows.filter((r) => !isBlankRow(r)).length)}
+          left={Math.max(0, orderedQty - paidRows.filter((r) => !isBlankRow(r)).length)}
           busy={excelBusy === "template"}
           onClose={() => setTemplateOpen(false)}
           onDownload={getTemplate}
@@ -743,7 +742,6 @@ const INVOICE_STATUS_META = {
   UPLOADED: { label: "Invoice Uploaded", cls: "bg-slate-100 text-slate-700" },
   DRAFT: { label: "Draft", cls: "bg-sky-100 text-sky-700" },
   PENDING: { label: "Pending approval", cls: "bg-amber-100 text-amber-800" },
-  IN_PROGRESS: { label: "In progress", cls: "bg-violet-100 text-violet-700" },
   APPROVED: { label: "Approved", cls: "bg-emerald-100 text-emerald-700" },
   REJECTED: { label: "Rejected", cls: "bg-rose-100 text-rose-700" },
 };
@@ -823,12 +821,12 @@ const UnitPricePopup = ({ invoiceNumber, lines, taxType, onClose }) => {
 };
 
 /*
-  The "Entries" line under the current invoice: a one-line total, and the
-  cards / Σ total / detailed log (shared with the Tracking card) in a popup.
+  The "Entry" line under the current invoice: a one-line total, and the
+  card / Σ total / detailed log in a popup.
 */
 const EntryCards = ({ invoice }) => {
   const [open, setOpen] = useState(false);
-  const { partial, cards, sum } = entryView(invoice);
+  const { sum } = entryView(invoice);
   return (
     <div>
       <button
@@ -836,14 +834,13 @@ const EntryCards = ({ invoice }) => {
         className="flex w-full items-center gap-1.5 text-left text-[11px] font-bold uppercase tracking-wider text-slate-600 hover:text-slate-900"
       >
         <span className="text-slate-400">▸</span>
-        {partial ? "Entries" : "Entry"}
-        <span className="rounded-full bg-slate-200 px-1.5 text-[10px] font-semibold normal-case text-slate-700">{cards.length}</span>
+        Entry
         <span className="ml-auto text-[11px] font-medium normal-case tracking-normal text-slate-500">
-          Total {partial ? sum("approved") + sum("pending") + sum("draft") : sum("entered")} / {sum("invoiceQty")} · FOC {sum("foc")}
+          Total {sum("entered")} / {sum("invoiceQty")} · FOC {sum("foc")}
         </span>
       </button>
       {open && (
-        <Modal onClose={() => setOpen(false)} title={`${partial ? "Entries" : "Entry"} · ${invoice.invoiceNumber}`} maxWidth="max-w-3xl">
+        <Modal onClose={() => setOpen(false)} title={`Entry · ${invoice.invoiceNumber}`} maxWidth="max-w-3xl">
           <EntriesContent invoice={invoice} />
         </Modal>
       )}
@@ -861,12 +858,7 @@ const fmtDateTime = (d) =>
   quantity. The invoice's own details are read-only here — they are changed
   from the invoice row's ⋮ → Edit invoice, by whoever holds that permission.
 */
-/*
-  Partial submit (turned on per invoice): the screen fills ONE entry — the
-  open draft, or a rejected entry being corrected (`entryId`). It may hold
-  any part of what is still free on the invoice and is submitted on its own.
-*/
-const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDone }) => {
+const InvoiceReceiveView = ({ trackingOrderId, invoiceId, onBack, onDone }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // "draft" | "submit" | null
 
@@ -908,16 +900,10 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         setProductDefs(defs);
 
         // Whatever was entered earlier (a draft, or a rejected submission)
-        // opens filled in. With partial submit that is the entry being filled.
-        const target = inv.partialSubmit
-          ? (inv.entries || []).find((e) => (entryId ? String(e._id) === String(entryId) : e.status === "DRAFT"))
-          : null;
-        const sourceByKey = new Map(
-          (inv.partialSubmit ? target?.lines || [] : inv.lines || []).map((l) => [String(l.quotationItemId), l])
-        );
+        // opens filled in.
         const initial = {};
         (inv.lines || []).forEach((l) => {
-          const src = sourceByKey.get(String(l.quotationItemId)) || {};
+          const src = l;
           const isIndividual = defs[l.productDefinitionId]?.trackingMethod === "individual";
           initial[String(l.quotationItemId)] = {
             rows: (src.rows || []).map((r) => ({ fieldValues: r.fieldValues || {}, isFoc: !!r.isFoc })),
@@ -936,26 +922,9 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         setLoading(false);
       }
     })();
-  }, [trackingOrderId, invoiceId, entryId]);
+  }, [trackingOrderId, invoiceId]);
 
   const invoiceLines = useMemo(() => invoice?.lines || [], [invoice]);
-  const partial = !!invoice?.partialSubmit;
-  const targetEntry = partial
-    ? (invoice.entries || []).find((e) => (entryId ? String(e._id) === String(entryId) : e.status === "DRAFT"))
-    : null;
-  // Partial submit: what OTHER entries already hold per product (submitted,
-  // approved, or another open draft) — this entry can take only the rest.
-  const othersByKey = useMemo(() => {
-    const m = {};
-    if (!partial) return m;
-    (invoice.entries || [])
-      .filter((e) => e.status !== "REJECTED" && String(e._id) !== String(targetEntry?._id))
-      .forEach((e) => (e.lines || []).forEach((l) => {
-        const k = String(l.quotationItemId);
-        m[k] = (m[k] || 0) + (l.receivedQuantity || 0);
-      }));
-    return m;
-  }, [partial, invoice, targetEntry]);
   // The product tab works off a PO line; its "ordered" quantity here is what
   // the INVOICE says, so every cap and count on the tab is against the invoice.
   const tabLineFor = (l) => {
@@ -987,33 +956,28 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         quotationItemId: l.quotationItemId,
         productName: l.productName,
         invoiceQuantity: l.invoiceQuantity,
-        cap: (l.invoiceQuantity || 0) - (othersByKey[key] || 0),
         receivedQuantity,
         focQuantity,
         rows,
         rating: ls.rating?.rating ? ls.rating : null,
       };
     });
-  }, [invoiceLines, lines, productDefs, othersByKey]);
+  }, [invoiceLines, lines, productDefs]);
 
   const enteredTotal = builtLines.reduce((s, l) => s + l.receivedQuantity, 0);
   const invoiceTotal = builtLines.reduce((s, l) => s + (l.invoiceQuantity || 0), 0);
+  // Submit only once every product has exactly what the invoice says.
   const allEntered = builtLines.length > 0 && builtLines.every((l) => l.receivedQuantity === l.invoiceQuantity);
-  // Partial: anything within what is still free; otherwise everything.
-  const canSubmit = partial
-    ? builtLines.some((l) => l.receivedQuantity > 0 || l.focQuantity > 0) && builtLines.every((l) => l.receivedQuantity <= l.cap)
-    : allEntered;
+  const canSubmit = allEntered;
 
   const validate = (submit) => {
     for (const l of builtLines) {
-      if (l.receivedQuantity > l.cap) {
-        return partial
-          ? `${l.productName}: only ${Math.max(0, l.cap)} left to enter on this invoice`
-          : `${l.productName}: ${l.receivedQuantity} entered but the invoice says ${l.invoiceQuantity}`;
+      if (l.receivedQuantity > (l.invoiceQuantity || 0)) {
+        return `${l.productName}: ${l.receivedQuantity} entered but the invoice says ${l.invoiceQuantity}`;
       }
     }
     if (!submit) return null;
-    if (!canSubmit) return partial ? "Enter at least one item on this entry" : "Enter every item on the invoice before submitting";
+    if (!canSubmit) return "Enter every item on the invoice before submitting";
 
     for (const l of invoiceLines) {
       const key = String(l.quotationItemId);
@@ -1051,7 +1015,6 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
     try {
       await saveInvoiceItems(invoiceId, {
         submit,
-        ...(partial && entryId ? { entryId } : {}),
         lines: builtLines.map(({ quotationItemId, receivedQuantity, focQuantity, rows, rating }) => ({
           quotationItemId, receivedQuantity, focQuantity, rows, rating,
         })),
@@ -1084,37 +1047,29 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
       >
         Cancel
       </button>
-      {!(partial && targetEntry?.status === "REJECTED") && (
-        <button
-          type="button" onClick={() => save(false)} disabled={!!saving}
-          className="rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {saving === "draft" ? "Saving…" : "Save as Draft"}
-        </button>
-      )}
+      <button
+        type="button" onClick={() => save(false)} disabled={!!saving}
+        className="rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {saving === "draft" ? "Saving…" : "Save as Draft"}
+      </button>
       <button
         type="button" onClick={() => save(true)} disabled={!!saving || !canSubmit}
-        title={canSubmit ? "" : partial ? "Enter at least one item" : "Enter every item on the invoice first"}
+        title={canSubmit ? "" : "Enter every item on the invoice first"}
         className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {saving === "submit" ? "Submitting…" : partial ? "Submit this entry" : "Submit for approval"}
+        {saving === "submit" ? "Submitting…" : "Submit for approval"}
       </button>
     </div>
   );
 
-  const pill = partial
-    ? {
-        label: `Partial submit · Entry ${targetEntry?.entryNumber || (invoice.entries || []).length + 1}${targetEntry?.status === "REJECTED" ? " · rejected" : ""}`,
-        cls: "border-violet-200 bg-violet-50 text-violet-700",
-      }
-    : STATUS_PILL[invoice?.status];
+  const pill = STATUS_PILL[invoice?.status];
   const fileUrl = invoiceFileUrl(invoice?.invoiceFile);
 
-  // PO: received = approved, across every invoice of the order (a partial
-  // invoice's lines carry its approved total).
+  // PO: received = approved, across every invoice of the order.
   const receivedByKey = {};
   orderInvoices.forEach((inv) => {
-    if (inv.status !== "APPROVED" && !inv.partialSubmit) return;
+    if (inv.status !== "APPROVED") return;
     (inv.lines || []).forEach((l) => {
       const k = String(l.quotationItemId);
       receivedByKey[k] = (receivedByKey[k] || 0) + (l.receivedQuantity || 0);
@@ -1154,12 +1109,7 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
         )}
       </div>
 
-      {partial && targetEntry?.status === "REJECTED" && targetEntry.rejectedReason && (
-        <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          <span className="font-semibold">Entry {targetEntry.entryNumber} rejected{targetEntry.reviewedByName ? ` by ${targetEntry.reviewedByName}` : ""}:</span> {targetEntry.rejectedReason}
-        </div>
-      )}
-      {!partial && invoice?.status === "REJECTED" && invoice?.rejectedReason && (
+      {invoice?.status === "REJECTED" && invoice?.rejectedReason && (
         <div className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
           <span className="font-semibold">Rejected{invoice.reviewedByName ? ` by ${invoice.reviewedByName}` : ""}:</span> {invoice.rejectedReason}
         </div>
@@ -1267,7 +1217,6 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
                   <th className="px-4 py-2">Category</th>
                   <th className="px-2 py-2">Product</th>
                   <th className="px-2 py-2 text-right">Invoice qty</th>
-                  {partial && <th className="px-2 py-2 text-right">Earlier entries</th>}
                   <th className="px-2 py-2 text-right">FOC</th>
                   <th className="px-2 py-2 text-right">Entered now</th>
                   <th className="px-4 py-2 text-right">Left</th>
@@ -1284,14 +1233,12 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
                   const foc = productDefs[l.productDefinitionId]?.trackingMethod === "individual"
                     ? ls.rows.filter((r) => r.isFoc).length
                     : Math.max(0, Number(ls.focQuantity) || 0);
-                  const earlier = othersByKey[k] || 0;
-                  const left = Math.max(0, (l.invoiceQuantity || 0) - earlier - now);
+                  const left = Math.max(0, (l.invoiceQuantity || 0) - now);
                   return (
                     <tr key={k}>
                       <td className="px-4 py-1.5 text-slate-500">{l.categoryPath || l.categoryName || "—"}</td>
                       <td className="px-2 py-1.5 font-medium text-slate-800">{l.productName}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums">{l.invoiceQuantity}</td>
-                      {partial && <td className="px-2 py-1.5 text-right tabular-nums text-slate-500">{earlier}</td>}
                       <td className={`px-2 py-1.5 text-right tabular-nums ${foc ? "font-semibold text-amber-700" : "text-slate-400"}`}>{foc}</td>
                       <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-indigo-700">{now}</td>
                       <td className={`px-4 py-1.5 text-right tabular-nums font-semibold ${left ? "text-amber-700" : "text-emerald-700"}`}>{left}</td>
@@ -1329,8 +1276,7 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
           const key = String(l.quotationItemId);
           const isActive = activeTabId === key;
           const built = builtLines.find((b) => String(b.quotationItemId) === key);
-          const others = othersByKey[key] || 0;
-          const done = partial ? others + (built?.receivedQuantity || 0) >= l.invoiceQuantity : built?.receivedQuantity === l.invoiceQuantity;
+          const done = built?.receivedQuantity === l.invoiceQuantity;
           return (
             <button
               key={key} type="button" onClick={() => setActiveTabId(key)}
@@ -1340,9 +1286,7 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
             >
               <span className={`block text-sm font-semibold ${isActive ? "text-indigo-700" : "text-slate-900"}`}>{l.productName}</span>
               <span className={`block text-xs font-semibold tabular-nums ${done ? "text-emerald-600" : "text-amber-600"}`}>
-                {partial
-                  ? `${others} done + ${built?.receivedQuantity || 0} now / ${l.invoiceQuantity}`
-                  : `${built?.receivedQuantity || 0} / ${l.invoiceQuantity} entered`}
+                {`${built?.receivedQuantity || 0} / ${l.invoiceQuantity} entered`}
                 {done ? " ✓" : ""}
               </span>
             </button>
@@ -1358,7 +1302,6 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
             taxType={po?.taxType}
             lineState={activeLineState}
             onLineChange={(next) => setLineState(activeTabId, next)}
-            alreadyReceived={othersByKey[activeTabId] || 0}
             onOpenRating={() => setRatingPopupFor(activeTabId)}
             invoiceId={invoiceId}
           />
@@ -1368,14 +1311,9 @@ const InvoiceReceiveView = ({ trackingOrderId, invoiceId, entryId, onBack, onDon
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-200 pt-5">
-        {!partial && !allEntered && (
+        {!allEntered && (
           <span className="mr-auto text-xs font-medium text-amber-700">
             {enteredTotal} / {invoiceTotal} entered — enter everything on the invoice to submit
-          </span>
-        )}
-        {partial && (
-          <span className="mr-auto text-xs font-medium text-violet-700">
-            Partial submit is on — this entry goes for approval with what it holds ({enteredTotal}).
           </span>
         )}
         {actionButtons}

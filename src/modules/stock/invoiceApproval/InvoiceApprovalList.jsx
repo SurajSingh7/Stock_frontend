@@ -17,8 +17,6 @@ const STATUS = { PENDING: "PENDING", APPROVED: "APPROVED", REJECTED: "REJECTED" 
 
 const fmtDate = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
-const fmtDateTime = (d) =>
-  d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
 const STATUS_META = {
   PENDING: { label: "Pending", dot: "bg-amber-500" },
@@ -62,36 +60,13 @@ const ApprovalDot = ({ status }) => {
   );
 };
 
-/* How much of a partial invoice is approved, as a ring with the % inside. */
-const ProgressRing = ({ pct = 0, size = 26, stroke = 2.5 }) => {
-  const p = Math.max(0, Math.min(100, Number(pct) || 0));
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  return (
-    <span className="relative inline-flex shrink-0 items-center justify-center" style={{ width: size, height: size }} title={`${p}% approved`}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} className="stroke-violet-100" />
-        <circle
-          cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={c * (1 - p / 100)}
-          className="stroke-violet-500 transition-all duration-500"
-        />
-      </svg>
-      <span className="absolute text-[7.5px] font-bold tabular-nums text-violet-700">{p}%</span>
-    </span>
-  );
-};
-
 /*
-  The Qty column's mark, same size on every row: a green tick once all of it
-  is approved, a violet ring with the % while part of it is, an empty grey
-  ring while none of it is.
+  The Qty column's mark, same size on every row: a green tick once the
+  invoice is approved, an empty grey ring until then.
 */
-const ApprovedMark = ({ pct }) => {
-  const p = Math.round(Math.max(0, Math.min(100, Number(pct) || 0)));
-  if (p >= 100) {
+const ApprovedMark = ({ approved }) => {
+  if (approved) {
     return (
-      // Same ring as the violet one, full and green — one shape, the colour says done.
       <span className="relative flex h-[26px] w-[26px] shrink-0 items-center justify-center" title="Fully approved">
         <svg width="26" height="26" className="absolute inset-0">
           <circle cx="13" cy="13" r="11.75" fill="none" strokeWidth="2.5" className="stroke-emerald-500" />
@@ -100,14 +75,11 @@ const ApprovedMark = ({ pct }) => {
       </span>
     );
   }
-  if (p <= 0) {
-    return (
-      <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center" title="Nothing approved yet">
-        <span className="h-5 w-5 rounded-full border-2 border-slate-200" />
-      </span>
-    );
-  }
-  return <ProgressRing pct={p} />;
+  return (
+    <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center" title="Not approved yet">
+      <span className="h-5 w-5 rounded-full border-2 border-slate-200" />
+    </span>
+  );
 };
 
 /* Items: just the count; the products behind it open in a popup. */
@@ -228,8 +200,6 @@ const InvoiceApprovalList = () => {
   const [limit, setLimit] = useState(10);
   const [total, setTotal] = useState(0);
 
-  const [expanded, setExpanded] = useState({}); // invoiceId -> entries open
-
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
 
   useEffect(() => {
@@ -253,8 +223,8 @@ const InvoiceApprovalList = () => {
   const loadList = useCallback(async () => {
     setLoading(true);
     try {
-      // view=approval: whole invoices, plus each submitted entry of a
-      // partial-submit invoice as its own row.
+      // view=approval: only invoices submitted for a decision (Pending /
+      // Approved / Rejected).
       const params = new URLSearchParams({ page: String(page), limit: String(limit), view: "approval" });
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (status) params.set("status", status);
@@ -303,14 +273,13 @@ const InvoiceApprovalList = () => {
       <InvoiceReceiveView
         trackingOrderId={view.invoice.trackingOrderId}
         invoiceId={view.invoice._id}
-        entryId={view.invoice.entryId}
         onBack={backToList}
         onDone={backToList}
       />
     );
   }
   if (view.mode === "review") {
-    return <InvoiceReviewView invoiceId={view.invoiceId} entryId={view.entryId} onBack={backToList} onDone={backToList} />;
+    return <InvoiceReviewView invoiceId={view.invoiceId} onBack={backToList} onDone={backToList} />;
   }
 
   return (
@@ -419,168 +388,65 @@ const InvoiceApprovalList = () => {
                   <p className="mt-1 text-sm text-slate-400">{hasActiveFilters ? "Try changing or resetting the filters." : "Submitted invoices appear here."}</p>
                 </td></tr>
               ) : (
-                rows.map((inv) => {
-                  const partial = !!inv.partialSubmit;
-                  const entries = (inv.entries || []).filter((e) => e.status !== "DRAFT").slice().sort((x, y) => y.entryNumber - x.entryNumber);
-                  const open = !!expanded[inv._id];
-                  const tab = inv.approvalTab || inv.status;
-                  const reviewEntry = partial ? inv.pendingEntry : null;
-                  return (
-                    <React.Fragment key={inv._id}>
-                    <tr className="transition hover:bg-slate-50/60">
-                      {/* invoice no, its date below */}
-                      <td className="px-4 py-3.5 align-top">
-                        <p className="flex items-center gap-1.5 whitespace-nowrap">
-                          <span className="text-sm font-semibold text-indigo-600">{inv.invoiceNumber}</span>
-                          {/* partial submit: its entries open below the row */}
-                          {partial && (
+                rows.map((inv) => (
+                  <tr key={inv._id} className="transition hover:bg-slate-50/60">
+                    {/* invoice no, its date below */}
+                    <td className="px-4 py-3.5 align-top">
+                      <p className="whitespace-nowrap text-sm font-semibold text-indigo-600">{inv.invoiceNumber}</p>
+                      <p className="mt-0.5 text-xs text-slate-500 tabular-nums">{fmtDate(inv.invoiceDate)}</p>
+                    </td>
+                    {/* vendor, its PO below */}
+                    <td className="px-4 py-3.5 align-top">
+                      <p className="text-sm font-semibold text-slate-900">{inv.vendorName || "—"}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">{inv.poNumber || "—"}</p>
+                    </td>
+                    <td className="px-4 py-3.5 align-top"><ItemsCell inv={inv} /></td>
+                    {/* approved out of the invoice, then a fixed slot that says whether it
+                        is approved — the slot is on every row so the numbers line up */}
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm tabular-nums">
+                      <span className="inline-flex items-center justify-end gap-2.5">
+                        <span>
+                          <span className="font-semibold text-slate-900">{inv.qtyApproved || 0}</span>
+                          <span className="text-slate-400"> / {inv.qtyInvoiced || 0}</span>
+                        </span>
+                        <ApprovedMark approved={inv.status === STATUS.APPROVED} />
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm text-slate-700 tabular-nums">{money(inv.basicAmount)}</td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm text-slate-700 tabular-nums"><GstCell inv={inv} /></td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm text-slate-700 tabular-nums">{money(inv.miscTotal ?? inv.extraChargesTotal)}</td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm font-bold text-slate-900 tabular-nums">{money(inv.invoiceTotal ?? inv.grandTotal)}</td>
+                    <td className="px-4 py-3.5 align-top"><ApprovalDot status={inv.status} /></td>
+                    <td className="px-4 py-3.5 text-right align-top">
+                      {inv.status === STATUS.PENDING ? (
+                        <button
+                          type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id })}
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100 hover:text-amber-800"
+                        >
+                          <ClipboardCheck className="h-4 w-4" /> Review
+                        </button>
+                      ) : (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id })} title="View" aria-label="View"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100 transition hover:bg-indigo-100 hover:text-indigo-700"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          {inv.status === STATUS.REJECTED && (
                             <button
-                              type="button" onClick={() => setExpanded((p) => ({ ...p, [inv._id]: !p[inv._id] }))}
-                              title={`Partial submit — ${open ? "hide" : "show"} ${entries.length} entr${entries.length === 1 ? "y" : "ies"}`}
-                              className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold ring-1 ring-inset transition ${
-                                open ? "bg-violet-600 text-white ring-violet-600" : "bg-violet-50 text-violet-700 ring-violet-200 hover:bg-violet-100"
-                              }`}
+                              type="button" onClick={() => setView({ mode: "editInvoice", invoice: inv })}
+                              title="Fix" aria-label="Fix"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-orange-50 text-orange-600 ring-1 ring-inset ring-orange-100 transition hover:bg-orange-100 hover:text-orange-700"
                             >
-                              P·{entries.length} {open ? "▾" : "▸"}
+                              <Edit3 className="h-4 w-4" />
                             </button>
                           )}
-                        </p>
-                        <p className="mt-0.5 text-xs text-slate-500 tabular-nums">{fmtDate(inv.invoiceDate)}</p>
-                      </td>
-                      {/* vendor, its PO below */}
-                      <td className="px-4 py-3.5 align-top">
-                        <p className="text-sm font-semibold text-slate-900">{inv.vendorName || "—"}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">{inv.poNumber || "—"}</p>
-                      </td>
-                      <td className="px-4 py-3.5 align-top"><ItemsCell inv={inv} /></td>
-                      {/* approved so far out of the invoice */}
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm tabular-nums">
-                        {/* quantity, then a fixed slot that says how much of it is approved —
-                            the slot is on every row so the numbers line up */}
-                        <span className="inline-flex items-center justify-end gap-2.5">
-                          <span>
-                            <span className="font-semibold text-slate-900">{inv.qtyApproved || 0}</span>
-                            <span className="text-slate-400"> / {inv.qtyInvoiced || 0}</span>
-                          </span>
-                          <ApprovedMark
-                            pct={partial ? inv.progressPct : (inv.qtyInvoiced ? ((inv.qtyApproved || 0) / inv.qtyInvoiced) * 100 : 0)}
-                          />
-                        </span>
-                        {partial && inv.pendingEntryCount > 0 && (
-                          <span className="block text-[11px] text-amber-700">{inv.pendingEntryCount} entr{inv.pendingEntryCount > 1 ? "ies" : "y"} pending</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm text-slate-700 tabular-nums">{money(inv.basicAmount)}</td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm text-slate-700 tabular-nums"><GstCell inv={inv} /></td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm text-slate-700 tabular-nums">{money(inv.miscTotal ?? inv.extraChargesTotal)}</td>
-                      <td className="whitespace-nowrap px-4 py-3.5 text-right align-top text-sm font-bold text-slate-900 tabular-nums">{money(inv.invoiceTotal ?? inv.grandTotal)}</td>
-                      <td className="px-4 py-3.5 align-top">
-                        {partial && tab === STATUS.APPROVED && inv.status !== "APPROVED" ? (
-                          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700">
-                            <span className="h-2 w-2 rounded-full bg-violet-500" />
-                            In progress
-                          </span>
-                        ) : (
-                          <ApprovalDot status={tab} />
-                        )}
-                        {partial && tab === STATUS.PENDING && reviewEntry && (
-                          <span className="block text-[11px] text-slate-500">Entry {reviewEntry.entryNumber} waiting</span>
-                        )}
-                        {partial && tab === STATUS.REJECTED && inv.rejectedEntry && (
-                          <span className="block text-[11px] text-slate-500">Entry {inv.rejectedEntry.entryNumber}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5 text-right align-top">
-                        {tab === STATUS.PENDING ? (
-                          <button
-                            type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: reviewEntry?._id })}
-                            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100 hover:text-amber-800"
-                          >
-                            <ClipboardCheck className="h-4 w-4" /> {reviewEntry ? `Review Entry ${reviewEntry.entryNumber}` : "Review"}
-                          </button>
-                        ) : (
-                          <div className="flex items-center justify-end gap-1.5">
-                            <button
-                              type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id })} title="View" aria-label="View"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100 transition hover:bg-indigo-100 hover:text-indigo-700"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            {tab === STATUS.REJECTED && (
-                              <button
-                                type="button" onClick={() => setView({ mode: "editInvoice", invoice: { ...inv, entryId: inv.rejectedEntry?._id } })}
-                                title={inv.rejectedEntry ? `Fix Entry ${inv.rejectedEntry.entryNumber}` : "Fix"}
-                                aria-label="Fix"
-                                className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-orange-50 text-orange-600 ring-1 ring-inset ring-orange-100 transition hover:bg-orange-100 hover:text-orange-700"
-                              >
-                                <Edit3 className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                    {/* A partial invoice's entries — each its own share of the one bill */}
-                    {partial && open && (
-                      <tr className="bg-violet-50/30">
-                        <td colSpan={COLUMNS + 1} className="px-6 pb-4 pt-1">
-                          <div className="overflow-hidden rounded-xl border border-violet-100 bg-white">
-                            <table className="w-full text-sm">
-                              <thead className="bg-violet-50/60">
-                                <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-violet-800">
-                                  <th className="px-3 py-2">Entry</th>
-                                  <th className="px-3 py-2">Date</th>
-                                  <th className="px-3 py-2">Entered by</th>
-                                  <th className="px-3 py-2">Items</th>
-                                  <th className="px-3 py-2 text-right">Qty</th>
-                                  <th className="px-3 py-2 text-right">FOC</th>
-                                  <th className="px-3 py-2 text-right">Value</th>
-                                  <th className="px-3 py-2">Status</th>
-                                  <th className="px-3 py-2 text-right">Action</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                {entries.map((e) => (
-                                  <tr key={e._id}>
-                                    <td className="px-3 py-2 font-semibold text-slate-900">Entry {e.entryNumber}</td>
-                                    <td className="px-3 py-2 tabular-nums text-slate-500">{fmtDateTime(e.submittedAt || e.updatedAt)}</td>
-                                    <td className="px-3 py-2 text-slate-700">{e.submittedByName || "—"}</td>
-                                    <td className="px-3 py-2 text-slate-600">{e.items || "—"}</td>
-                                    <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-900">{e.qty || 0}</td>
-                                    <td className={`px-3 py-2 text-right tabular-nums ${e.focQty ? "text-amber-700" : "text-slate-400"}`}>{e.focQty || 0}</td>
-                                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">{money(e.value)}</td>
-                                    <td className="px-3 py-2"><ApprovalDot status={e.status} /></td>
-                                    <td className="px-3 py-2 text-right">
-                                      {e.status === STATUS.PENDING ? (
-                                        <button
-                                          type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: e._id })}
-                                          className="rounded-lg bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 hover:bg-amber-100"
-                                        >
-                                          Review
-                                        </button>
-                                      ) : (
-                                        <button
-                                          type="button" onClick={() => setView({ mode: "review", invoiceId: inv._id, entryId: e._id })} title="View entry"
-                                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100 hover:bg-indigo-100"
-                                        >
-                                          <Eye className="h-3.5 w-3.5" />
-                                        </button>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                            <p className="border-t border-violet-100 px-3 py-1.5 text-[11px] text-slate-500">
-                              One bill of {money(inv.grandTotal)} — entries are parts of it, not separate bills.
-                            </p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                    </React.Fragment>
-                  );
-                })
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
