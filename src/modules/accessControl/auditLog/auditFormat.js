@@ -222,6 +222,13 @@ export const entityLabel = (type = '') =>
 export const actionLabel = (action = '') => action.replace(/_/g, ' ');
 
 /**
+ * No signed-in user behind the event: a release script, a seeder or the alert
+ * worker. Older rows stored an empty actor; newer ones store name "System".
+ */
+export const isSystemActor = (actor) => !actor?.userId && (!actor?.name || actor.name === 'System');
+export const SYSTEM_ACTOR_NOTE = 'Done automatically (release script or background job), not by a user.';
+
+/**
  * A user agent, shortened to the two things worth reading in an audit trail:
  * which browser, on which OS. The full string stays in the raw JSON below it.
  */
