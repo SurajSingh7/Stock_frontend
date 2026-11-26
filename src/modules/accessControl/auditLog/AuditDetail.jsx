@@ -12,6 +12,8 @@ import {
   fmtDateTime,
   fmtRelative,
   formatValue,
+  isSystemActor,
+  SYSTEM_ACTOR_NOTE,
 } from './auditFormat';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -143,8 +145,10 @@ const AuditDetail = ({ event, onBack, onViewRecordHistory }) => {
 
   const tone = actionTone(event.action);
   const actor = event.actor || {};
+  const isSystem = isSystemActor(actor);
+  const actorName = isSystem ? 'System' : actor.name;
   const client = describeClient(actor.userAgent);
-  const initial = (actor.name || '?').trim().charAt(0).toUpperCase();
+  const initial = (actorName || '?').trim().charAt(0).toUpperCase();
   const heading =
     diff.kind === 'created' ? 'Created with these values'
       : diff.kind === 'removed' ? 'Values on the record when this happened'
@@ -184,7 +188,7 @@ const AuditDetail = ({ event, onBack, onViewRecordHistory }) => {
               <span className="text-slate-300"> · </span>
               <span className="text-slate-400">{fmtRelative(event.createdAt)}</span>
               <span className="text-slate-300"> · by </span>
-              <span className="font-medium text-slate-700">{actor.name || 'unknown'}</span>
+              <span className="font-medium text-slate-700">{actorName || 'unknown'}</span>
               {actor.employeeCode && (
                 <span className="ml-1.5 rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[0.7rem] text-slate-500">
                   {actor.employeeCode}
@@ -312,11 +316,15 @@ const AuditDetail = ({ event, onBack, onViewRecordHistory }) => {
               </span>
               <div className="min-w-0">
                 <p className="truncate text-[0.95rem] font-semibold text-slate-900">
-                  {actor.name || <span className="text-slate-300">Unknown</span>}
+                  {actorName || <span className="text-slate-300">Unknown</span>}
                 </p>
-                <p className="font-mono text-[0.75rem] text-slate-500">
-                  {actor.employeeCode || <span className="not-italic text-slate-300">no employee code</span>}
-                </p>
+                {isSystem ? (
+                  <p className="text-[0.75rem] text-slate-500">automatic — no user</p>
+                ) : (
+                  <p className="font-mono text-[0.75rem] text-slate-500">
+                    {actor.employeeCode || <span className="not-italic text-slate-300">no employee code</span>}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -335,7 +343,11 @@ const AuditDetail = ({ event, onBack, onViewRecordHistory }) => {
               </span>
             </Line>
 
-            {!actor.employeeCode && (
+            {isSystem ? (
+              <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
+                {SYSTEM_ACTOR_NOTE}
+              </p>
+            ) : !actor.employeeCode && (
               <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500">
                 Employee code started being recorded on new events only. Older events kept whatever HRMS
                 returned at the time, which did not include it.

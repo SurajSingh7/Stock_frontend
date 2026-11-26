@@ -18,6 +18,8 @@ import {
   fmtDateTime,
   fmtRelative,
   meaningfulFields,
+  isSystemActor,
+  SYSTEM_ACTOR_NOTE,
 } from './auditFormat';
 
 const ENTITY_TYPES = [
@@ -93,14 +95,18 @@ const EventRow = ({ event, onOpen }) => {
       </td>
       <td className="px-4 py-3 align-top">
         <p className="text-sm text-slate-800">
-          {event.actor?.name || <span className="text-slate-300">—</span>}
+          {isSystemActor(event.actor)
+            ? <span className="text-slate-600" title={SYSTEM_ACTOR_NOTE}>System</span>
+            : event.actor?.name || <span className="text-slate-300">—</span>}
           {event.actor?.employeeCode && (
             <span className="ml-1.5 rounded border border-slate-200 bg-slate-50 px-1 py-0.5 font-mono text-[0.65rem] text-slate-500">
               {event.actor.employeeCode}
             </span>
           )}
         </p>
-        {event.actor?.roleName && <p className="text-[0.7rem] text-slate-400">{event.actor.roleName}</p>}
+        {isSystemActor(event.actor)
+          ? <p className="text-[0.7rem] text-slate-400">automatic</p>
+          : event.actor?.roleName && <p className="text-[0.7rem] text-slate-400">{event.actor.roleName}</p>}
       </td>
       <td className="px-4 py-3 align-top"><FieldChips event={event} /></td>
       <td className="px-4 py-3 text-right align-top">
