@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import toast from 'react-hot-toast';
-import { API_PORTAL_BACKEND_URL } from '@/config/getEnvVariables';
+import { logout } from '@/modules/core/auth/authApi';
 
 /**
  * Shown when the signed-in account has no branch assigned.
@@ -27,17 +27,9 @@ const BranchRequired = () => {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      const response = await fetch(`${API_PORTAL_BACKEND_URL || ''}/hrms/logout`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      });
-      if (response.ok) {
-        toast.success('Logged out successfully');
-        window.location.href = '/';
-        return;
-      }
-      throw new Error('Logout failed');
+      await logout();
+      toast.success('Logged out successfully');
+      window.location.href = '/';
     } catch {
       // Left on this screen rather than half-signed-out with no explanation.
       toast.error('Could not sign you out. Please try again.');

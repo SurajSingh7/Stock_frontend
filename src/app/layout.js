@@ -17,10 +17,13 @@ export default function RootLayout({ children }) {
       <body className={inter.className}>
           <PermissionProvider>
             <ZoomProvider>
-              <div className="relative">
+              {/* Exactly one screen tall at any zoom (see ZoomProvider), the
+                  page filling whatever the header and footer leave — so the
+                  footer sits at the bottom, never mid-screen. */}
+              <div className="relative flex min-h-[calc(100dvh/var(--app-zoom,1))] flex-col">
                 <Toaster />
                 <Header />
-                <div className="min-h-screen bg-white text-gray-700">
+                <div className="flex flex-1 flex-col bg-white text-gray-700 *:flex-1">
                   <PermissionGuard>{children}</PermissionGuard>
                 </div>
                 <Footer />

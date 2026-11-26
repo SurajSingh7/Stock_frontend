@@ -9,6 +9,10 @@ const ERP_API_BASE = process.env.ERP_API_BASE || "https://erpbcken.gtel.in/api/v
 const nextConfig = {
   /* config options here */
   reactCompiler: true,
+  // Build workers. The default (one per CPU core) runs out of memory on an
+  // 8 GB machine that is also running the other apps, and the build dies with
+  // exit code 3221226505. Two is slower but always finishes.
+  experimental: { cpus: 2 },
 
   async rewrites() {
     return [

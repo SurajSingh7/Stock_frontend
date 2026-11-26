@@ -1,5 +1,6 @@
 'use client'
-import { API_BACKEND_URL } from '@/config/getEnvVariables';
+import { api } from '@/lib/apiClient';
+import { API_ENDPOINTS } from '@/constants/api';
 import Pagination from '@/shared/ui/pagination/Pagination';
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -7,7 +8,7 @@ import toast from 'react-hot-toast';
 
 /* ======================== CONSTANTS ======================== */
 
-const GST_RATES_API = `${API_BACKEND_URL}/stock/gst-rates`;
+const EP = API_ENDPOINTS.master.gstRates;
 
 const STATUS_FILTERS = [
   { value: 'active', label: 'Active' },
@@ -43,64 +44,19 @@ const thRight = `${th} text-right`;
 // The backend exposes a single `showInactive` boolean (false => active only,
 // true => everything). There is no "inactive only" query, so that case is
 // narrowed client-side below — same as the other master screens.
-const getGstRates = async ({ page, limit, search, showInactive }) => {
-  const params = new URLSearchParams();
-  params.set('page', page);
-  params.set('limit', limit);
-  if (search) params.set('search', search);
-  if (showInactive) params.set('showInactive', 'true');
-
-  const response = await fetch(`${GST_RATES_API}?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'include',
+const getGstRates = ({ page, limit, search, showInactive }) =>
+  api.get(EP.list, {
+    query: { page, limit, search, showInactive: showInactive ? 'true' : undefined },
+    fallback: 'Failed to fetch GST rates',
   });
-  if (!response.ok) throw new Error('Failed to fetch GST rates');
-  return response.json();
-};
 
-const createGstRate = async (payload) => {
-  const response = await fetch(GST_RATES_API, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to create GST rate');
-  return data;
-};
+const createGstRate = (payload) => api.post(EP.list, payload, { fallback: 'Failed to create GST rate' });
 
-const updateGstRate = async (id, payload) => {
-  const response = await fetch(`${GST_RATES_API}/${id}`, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to update GST rate');
-  return data;
-};
+const updateGstRate = (id, payload) => api.put(EP.byId(id), payload, { fallback: 'Failed to update GST rate' });
 
-const deleteGstRate = async (id) => {
-  const response = await fetch(`${GST_RATES_API}/${id}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to delete GST rate');
-  return data;
-};
+const deleteGstRate = (id) => api.delete(EP.byId(id), { fallback: 'Failed to delete GST rate' });
 
-const restoreGstRate = async (id) => {
-  const response = await fetch(`${GST_RATES_API}/${id}/restore`, {
-    method: 'PATCH',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to restore GST rate');
-  return data;
-};
+const restoreGstRate = (id) => api.patch(EP.restore(id), undefined, { fallback: 'Failed to restore GST rate' });
 
 /* ======================== UTILITY FUNCTIONS ======================== */
 
@@ -180,10 +136,10 @@ const Icon = {
 const StatusBadge = ({ isActive }) => (
   <span
     className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
-      isActive ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-slate-100 text-slate-500 ring-slate-200'
+      isActive ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-rose-50 text-rose-700 ring-rose-200'
     }`}
   >
-    <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+    <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
     {isActive ? 'Active' : 'Inactive'}
   </span>
 );
@@ -195,15 +151,16 @@ const RatePill = ({ rate }) => (
 );
 
 const IconBtn = ({ onClick, title, tone = 'slate', children }) => {
+  // Coloured at rest, so each action is told apart at a glance; deeper on hover.
   const tones = {
-    slate: 'text-slate-400 hover:bg-slate-100 hover:text-slate-700',
-    indigo: 'text-slate-400 hover:bg-indigo-50 hover:text-indigo-600',
-    orange: 'text-slate-400 hover:bg-amber-50 hover:text-amber-600',
-    red: 'text-slate-400 hover:bg-rose-50 hover:text-rose-600',
-    emerald: 'text-slate-400 hover:bg-emerald-50 hover:text-emerald-600',
+    slate: 'bg-slate-50 text-slate-500 ring-slate-200 hover:bg-slate-100 hover:text-slate-700',
+    indigo: 'bg-indigo-50 text-indigo-600 ring-indigo-100 hover:bg-indigo-100 hover:text-indigo-700',
+    orange: 'bg-amber-50 text-amber-600 ring-amber-100 hover:bg-amber-100 hover:text-amber-700',
+    red: 'bg-rose-50 text-rose-600 ring-rose-100 hover:bg-rose-100 hover:text-rose-700',
+    emerald: 'bg-emerald-50 text-emerald-600 ring-emerald-100 hover:bg-emerald-100 hover:text-emerald-700',
   };
   return (
-    <button type="button" onClick={onClick} title={title} className={`rounded-lg p-1.5 transition ${tones[tone]}`}>
+    <button type="button" onClick={onClick} title={title} className={`rounded-lg p-1.5 ring-1 ring-inset transition ${tones[tone]}`}>
       {children}
     </button>
   );
@@ -285,36 +242,46 @@ const Header = ({ totalItems, onCreateClick }) => (
   </div>
 );
 
-const FilterBar = ({ search, onSearchChange, statusFilter, onStatusFilterChange }) => (
-  <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <div className="relative sm:col-span-2">
-        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
-          {Icon.search}
-        </span>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search by rate, label or description"
-          className={`${inputCls} pl-9`}
-        />
-      </div>
+// The status dropdown wears the colour of its badge in the table.
+const STATUS_TONE = {
+  active: { box: 'border-emerald-200 bg-emerald-50 text-emerald-700 focus:border-emerald-400 focus:ring-emerald-100', dot: 'bg-emerald-500' },
+  inactive: { box: 'border-rose-200 bg-rose-50 text-rose-700 focus:border-rose-400 focus:ring-rose-100', dot: 'bg-rose-500' },
+};
 
-      <div className="relative">
-        <select
-          value={statusFilter}
-          onChange={(e) => onStatusFilterChange(e.target.value)}
-          className={`${inputCls} appearance-none pr-8`}
-        >
-          {STATUS_FILTERS.map((s) => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-        <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center text-slate-400">
-          {Icon.chevronDown}
-        </span>
-      </div>
+const FilterBar = ({ search, onSearchChange, statusFilter, onStatusFilterChange }) => (
+  <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <div className="relative w-full sm:max-w-md">
+      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+        {Icon.search}
+      </span>
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => onSearchChange(e.target.value)}
+        placeholder="Search by rate, label or description"
+        className={`${inputCls} pl-9`}
+      />
+    </div>
+
+    <div className="relative w-full shrink-0 sm:w-44">
+      <span className={`pointer-events-none absolute inset-y-0 left-3 flex items-center`}>
+        <span className={`h-2 w-2 rounded-full ${STATUS_TONE[statusFilter]?.dot || 'bg-slate-400'}`} />
+      </span>
+      <select
+        value={statusFilter}
+        onChange={(e) => onStatusFilterChange(e.target.value)}
+        aria-label="Status"
+        className={`w-full appearance-none rounded-lg border py-2 pl-8 pr-8 text-sm font-semibold shadow-sm transition focus:outline-none focus:ring-2 ${
+          STATUS_TONE[statusFilter]?.box || ''
+        }`}
+      >
+        {STATUS_FILTERS.map((s) => (
+          <option key={s.value} value={s.value} className="bg-white font-medium text-slate-800">{s.label}</option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute inset-y-0 right-2.5 flex items-center opacity-70">
+        {Icon.chevronDown}
+      </span>
     </div>
   </div>
 );
@@ -325,13 +292,15 @@ const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
   <tr className="transition hover:bg-slate-50/60">
     <td className="px-4 py-3.5 font-mono text-sm text-slate-500">{item.order}</td>
     <td className="px-4 py-3.5"><RatePill rate={item.rate} /></td>
-    <td className="px-4 py-3.5 text-sm font-medium text-slate-900">{item.label}</td>
-    <td className="px-4 py-3.5 text-sm text-slate-500">
-      {item.description || <span className="text-slate-300">—</span>}
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm font-medium text-slate-900">
+      <LongText label="Label" title={`${item.rate}%`} text={item.label} />
+    </td>
+    <td className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-500">
+      <LongText label="Description" title={item.label} text={item.description} />
     </td>
     <td className="px-4 py-3.5"><StatusBadge isActive={item.isActive} /></td>
     <td className="px-4 py-3.5">
-      <div className="flex items-center justify-end gap-1">
+      <div className="flex items-center justify-end gap-1.5">
         <IconBtn onClick={() => onView(item)} title="View" tone="indigo">{Icon.eye}</IconBtn>
         <IconBtn onClick={() => onEdit(item)} title="Edit" tone="orange">{Icon.edit}</IconBtn>
         {item.isActive ? (
@@ -344,8 +313,9 @@ const TableRow = ({ item, onView, onEdit, onDelete, onRestore }) => (
   </tr>
 );
 
-const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore }) => (
-  <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, onDelete, onRestore, footer }) => (
+  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="overflow-x-auto">
     <table className="min-w-full divide-y divide-slate-200">
       <thead className="bg-slate-50/60">
         <tr>
@@ -371,6 +341,8 @@ const Table = ({ items, loading, error, onRetry, onCreateClick, onView, onEdit, 
         )}
       </tbody>
     </table>
+    </div>
+    {footer && <div className="border-t border-slate-100 px-4 py-3">{footer}</div>}
   </div>
 );
 
@@ -418,15 +390,24 @@ const Modal = ({ title, description, onClose, children, maxWidth = 'max-w-lg' })
   );
 };
 
-const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 'Retire', onCancel, onConfirm, loading }) => {
+const CONFIRM_TONE = {
+  danger: { icon: 'bg-rose-50 text-rose-500 ring-8 ring-rose-50/50', btn: 'bg-rose-600 hover:bg-rose-500', glyph: Icon.alert },
+  success: { icon: 'bg-emerald-50 text-emerald-600 ring-8 ring-emerald-50/50', btn: 'bg-emerald-600 hover:bg-emerald-500', glyph: Icon.restore },
+};
+
+const ConfirmModal = ({
+  open, title = 'Confirm action', message, confirmLabel = 'Retire', loadingLabel = 'Retiring…',
+  tone = 'danger', onCancel, onConfirm, loading,
+}) => {
   if (!open) return null;
+  const t = CONFIRM_TONE[tone] || CONFIRM_TONE.danger;
   return (
     <Modal title={title} onClose={onCancel} maxWidth="max-w-sm">
-      <div className="flex flex-col items-center gap-3 py-1 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-500">
-          {Icon.alert}
+      <div className="flex flex-col items-center gap-4 py-2 text-center">
+        <div className={`flex h-12 w-12 items-center justify-center rounded-full ${t.icon}`}>
+          {t.glyph}
         </div>
-        <p className="text-sm text-slate-600">{message}</p>
+        <p className="text-sm leading-relaxed text-slate-600">{message}</p>
       </div>
       <div className="mt-5 flex justify-center gap-2.5">
         <button
@@ -438,9 +419,104 @@ const ConfirmModal = ({ open, title = 'Confirm action', message, confirmLabel = 
         <button
           onClick={onConfirm}
           disabled={loading}
-          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${t.btn}`}
         >
-          {loading ? 'Retiring…' : confirmLabel}
+          {loading ? loadingLabel : confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+/* ======================== VIEW ======================== */
+
+// Long values wrap inside their box — even one unbroken string breaks rather
+// than pushing the dialog wider.
+const wrapCls = 'whitespace-pre-line break-words [overflow-wrap:anywhere]';
+
+const Detail = ({ label, children }) => (
+  <div className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+    <div className={`mt-1 text-sm font-medium text-slate-900 ${wrapCls}`}>{children}</div>
+  </div>
+);
+
+/*
+  A table cell that stays one short line: over LONG_TEXT characters it shows
+  the start, "… more", and the whole text in a small popup on click.
+*/
+const LONG_TEXT = 30;
+
+const LongText = ({ text, label, title }) => {
+  const [open, setOpen] = useState(false);
+  if (!text) return <span className="text-slate-300">—</span>;
+  if (text.length <= LONG_TEXT) return <span>{text}</span>;
+  return (
+    <>
+      <span>{text.slice(0, LONG_TEXT).trimEnd()}…</span>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="ml-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+      >
+        more
+      </button>
+      {open && (
+        <Modal title={label} description={title} onClose={() => setOpen(false)} maxWidth="max-w-md">
+          <p className={`text-sm leading-relaxed text-slate-700 ${wrapCls}`}>{text}</p>
+          <div className="-mx-5 mt-5 flex justify-end border-t border-slate-100 px-5 pt-4">
+            <button
+              type="button" onClick={() => setOpen(false)}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+            >
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+};
+
+const ViewModal = ({ item, onClose }) => {
+  if (!item) return null;
+  return (
+    <Modal title="GST rate" onClose={onClose} maxWidth="max-w-md">
+      <div className="flex items-center gap-4">
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-lg font-bold tabular-nums text-white shadow-lg shadow-indigo-500/25">
+          {item.rate}%
+        </div>
+        <div className="min-w-0">
+          <p className={`text-lg font-semibold tracking-tight text-slate-900 ${wrapCls}`}>{item.label}</p>
+          <div className="mt-1"><StatusBadge isActive={item.isActive} /></div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <Detail label="Rate"><span className="tabular-nums">{item.rate}%</span></Detail>
+        <Detail label="Order in dropdowns"><span className="tabular-nums">{item.order}</span></Detail>
+      </div>
+
+      <div className="mt-3">
+        <Detail label="Description">
+          {item.description ? (
+            <span className="font-normal leading-relaxed text-slate-600">{item.description}</span>
+          ) : (
+            <span className="font-normal text-slate-400">No description</span>
+          )}
+        </Detail>
+      </div>
+
+      <p className="mt-4 text-xs leading-relaxed text-slate-400">
+        Products and orders store the number, not a link to this slab — editing or retiring it never changes an existing document.
+      </p>
+
+      <div className="-mx-5 mt-5 flex justify-end gap-2.5 border-t border-slate-100 px-5 pt-4">
+        <button
+          type="button" onClick={onClose}
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          Close
         </button>
       </div>
     </Modal>
@@ -617,6 +693,9 @@ const GstRate = () => {
 
   const [confirmTarget, setConfirmTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restoring, setRestoring] = useState(false);
+  const [viewItem, setViewItem] = useState(null);
 
   const loadGstRates = useCallback(async () => {
     setLoading(true);
@@ -749,15 +828,22 @@ const GstRate = () => {
     }
   };
 
-  const handleRestore = async (item) => {
+  const handleConfirmRestore = async () => {
+    if (!restoreTarget) return;
+    setRestoring(true);
     try {
-      await restoreGstRate(item.id);
+      await restoreGstRate(restoreTarget.id);
       toast.success('GST rate restored successfully.');
+      setRestoreTarget(null);
       await loadGstRates();
     } catch (err) {
       toast.error(err.message || 'Failed to restore GST rate.');
+    } finally {
+      setRestoring(false);
     }
   };
+
+
 
   if (formMode) {
     return (
@@ -790,26 +876,44 @@ const GstRate = () => {
         error={error}
         onRetry={loadGstRates}
         onCreateClick={openCreateForm}
-        onView={openForm('view')}
+        onView={setViewItem}
         onEdit={openForm('edit')}
         onDelete={handleDeleteClick}
-        onRestore={handleRestore}
+        onRestore={setRestoreTarget}
+        // Pagination has nothing to show for one short page — no empty footer then.
+        footer={
+          !error && totalItems > DEFAULT_ITEMS_PER_PAGE ? (
+            <Pagination
+              currentPage={currentPage}
+              totalItems={totalItems}
+              itemsPerPage={itemsPerPage}
+              onPageChange={setCurrentPage}
+              onItemsPerPageChange={(value) => {
+                setItemsPerPage(value);
+                setCurrentPage(1);
+              }}
+            />
+          ) : null
+        }
       />
 
-      {!error && totalItems > 0 && (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <Pagination
-            currentPage={currentPage}
-            totalItems={totalItems}
-            itemsPerPage={itemsPerPage}
-            onPageChange={setCurrentPage}
-            onItemsPerPageChange={(value) => {
-              setItemsPerPage(value);
-              setCurrentPage(1);
-            }}
-          />
-        </div>
-      )}
+      <ViewModal item={viewItem} onClose={() => setViewItem(null)} />
+
+      <ConfirmModal
+        open={!!restoreTarget}
+        tone="success"
+        title="Restore this GST rate?"
+        message={
+          restoreTarget
+            ? `${restoreTarget.label} will show up again in every GST dropdown, at position ${restoreTarget.order}.`
+            : ''
+        }
+        confirmLabel="Restore"
+        loadingLabel="Restoring…"
+        onCancel={() => setRestoreTarget(null)}
+        onConfirm={handleConfirmRestore}
+        loading={restoring}
+      />
 
       {/* "Retire", not "Delete" — the row goes inactive and drops out of every
           picker, while everything already priced at it is untouched. */}

@@ -1,8 +1,14 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
-import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
+import toast from "react-hot-toast";
+import {
+  ArrowLeft, Lock, Building2, FileText, Package, ScrollText, User, MapPin, CalendarDays, Truck, StickyNote, Info,
+} from "lucide-react";
+import { fetchPurchaseOrder, createPurchaseOrder, updatePurchaseOrder, resolveVendorTerms, fetchActiveTerms } from "./purchaseOrderApi";
+import { unitLabel, Modal } from "@/modules/stock/shared/StockSharedUI";
+import { usePermissions } from "@/context/PermissionContext";
+import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 
 const SHIPMENT_PREFERENCE_OPTIONS = [
   "Self Pickup", "Vendor Delivery", "Courier", "Transport", "Third-Party Logistics", "Hand Delivery",
@@ -30,7 +36,7 @@ const sanitizeForPreview = (html) =>
 const LOCK_CHECKBOX = true;
 
 const money = (n) =>
-  `\u20B9${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const todayStr = () => {
   const d = new Date();
   const p = (x) => String(x).padStart(2, "0");
@@ -39,26 +45,68 @@ const todayStr = () => {
 
 /* ---------- shared class tokens ---------- */
 const inputCls =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition duration-200 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400";
-const labelCls = "mb-1.5 block text-xs font-semibold text-slate-700";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition duration-200 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500";
+const labelCls = "mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500";
+// A read-only value: bold, on a soft tinted box.
+const valueCls = "flex min-h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900";
 
-/* ---------- inline icons ---------- */
-const IconArrowLeft = () => (
-  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
-    <path d="M12.5 15 7.5 10l5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
+const fmtDate = (v) =>
+  v ? new Date(v).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "\u2014";
+
+/* A white card with a tinted header: coloured icon tile, bold title, optional right side. */
+/*
+  A tax amount with a small ⓘ — the rate and how it was worked out open in a
+  popup only when asked for, so the column stays a column of amounts.
+*/
+const TaxCell = ({ amount, rate, base, label, product }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="relative inline-block">
+      {/* The amount is centred under its heading; the ⓘ hangs just outside it
+          (absolute), so it never pulls the amount off centre. */}
+      {money(amount)}
+      <button
+        type="button" onClick={() => setOpen(true)}
+        title={`${label} ${rate}% — how it was worked out`} aria-label={`${label} rate`}
+        className="absolute left-full top-1/2 ml-0.5 -translate-y-1/2 rounded-full p-0.5 text-slate-300 transition hover:bg-indigo-50 hover:text-indigo-600"
+      >
+        <Info className="h-3 w-3" />
+      </button>
+      {open && (
+        <Modal onClose={() => setOpen(false)} title={`${label} · ${product}`} maxWidth="max-w-sm">
+          <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 px-4 text-sm tabular-nums">
+            <div className="flex justify-between py-2.5"><span className="text-slate-500">Basic price</span><span className="font-semibold text-slate-900">{money(base)}</span></div>
+            <div className="flex justify-between py-2.5"><span className="text-slate-500">{label} rate</span><span className="font-semibold text-slate-900">{rate}%</span></div>
+            <div className="flex justify-between py-2.5"><span className="font-semibold text-slate-700">{label} amount</span><span className="font-bold text-indigo-700">{money(amount)}</span></div>
+          </div>
+          <p className="mt-3 rounded-lg bg-indigo-50 px-3 py-2 text-center text-sm font-medium text-indigo-800 tabular-nums">
+            {money(base)} × {rate}% = {money(amount)}
+          </p>
+        </Modal>
+      )}
+    </span>
+  );
+};
+
+const Section = ({ icon: Icon, tone, title, right, children, className = "", flush = false }) => (
+  <section className={`overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}>
+    <div className="flex items-center gap-2.5 border-b border-slate-100 bg-linear-to-r from-slate-50 to-white px-5 py-3.5">
+      <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-white shadow-sm ${tone}`}>
+        <Icon className="h-4 w-4" />
+      </span>
+      <p className="flex items-center text-sm font-extrabold uppercase tracking-wider text-slate-800">{title}</p>
+      {right && <span className="ml-auto">{right}</span>}
+    </div>
+    {flush ? children : <div className="p-5">{children}</div>}
+  </section>
 );
-const IconLock = () => (
-  <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
-    <rect x="4.5" y="9" width="11" height="8" rx="1.8" stroke="currentColor" strokeWidth="1.5" />
-    <path d="M7 9V6.5a3 3 0 0 1 6 0V9" stroke="currentColor" strokeWidth="1.5" />
-  </svg>
-);
-const IconX = () => (
-  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
-    <path d="m5 5 10 10M15 5 5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-  </svg>
-);
+
+const TERMS_SOURCE_META = {
+  VENDOR: { label: "Vendor-specific term", cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
+  DEFAULT: { label: "Default term", cls: "bg-amber-50 text-amber-700 ring-amber-200" },
+  MANUAL: { label: "Manually selected", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  NONE: { label: "No term configured", cls: "bg-slate-100 text-slate-500 ring-slate-200" },
+};
 
 const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   const isEdit = mode === "edit";
@@ -68,8 +116,31 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   // Tracking Orders page and consumed here read-only (see Backend
   // createPurchaseOrder, which derives it server-side from the tracking
   // order rather than trusting anything sent from this form).
-  const selectedEntity = contextBuyerEntity || null;
-  const [requester, setRequester] = useState("Suraj");
+  const assignedEntity = contextBuyerEntity?.alias ? contextBuyerEntity : null;
+
+  // The STATE may still be switched here, to another state record of the same
+  // entity (own GST + address) — with a mandatory reason, because it decides
+  // CGST+SGST vs IGST. The backend re-resolves the id and refuses another alias.
+  const { entities } = useInternalEntities();
+  const [pickedEntityId, setPickedEntityId] = useState("");
+  const [stateReason, setStateReason] = useState("");
+  const statesForAlias = assignedEntity ? entities.filter((e) => e.alias === assignedEntity.alias) : [];
+  const assignedId = String(assignedEntity?.entityId || "");
+  const canChangeState = !isEdit && statesForAlias.length > 1 && statesForAlias.some((e) => String(e._id) === assignedId);
+  const picked = pickedEntityId && pickedEntityId !== assignedId
+    ? statesForAlias.find((e) => String(e._id) === pickedEntityId) || null
+    : null;
+  const stateChanged = !!picked;
+  const selectedEntity = picked
+    ? { entityId: picked._id, alias: picked.alias, name: picked.name, state: picked.state, stateCode: picked.stateCode }
+    : assignedEntity;
+
+  // Requester is whoever is signed in — displayed here, but stamped by the
+  // backend from the session, which is why nothing below ever sends it.
+  // On an edit it shows the person who originally raised the PO instead.
+  const { userData } = usePermissions();
+  const signedInName = [userData?.firstName, userData?.lastName].filter(Boolean).join(" ");
+  const [requester, setRequester] = useState("");
   const [poDate, setPoDate] = useState(todayStr());
   const [shipment, setShipment] = useState(SHIPMENT_PREFERENCE_OPTIONS[1]);
   // Read-only — resolved from the Terms & Conditions master API, never
@@ -85,7 +156,6 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
 
   const sameState = selectedEntity && String(selectedEntity.stateCode) === String(vendorStateCode);
 
@@ -116,9 +186,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
       setLoading(true);
       try {
         if (isEdit) {
-          const poRes = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, { credentials: "include" });
-          const poJson = await poRes.json();
-          const po = poJson.data;
+          const po = await fetchPurchaseOrder(poId);
           setRows(
             (po.items || []).map((it) => ({
               quotationItemId: it.quotationItemId, categoryName: it.categoryName, productName: it.productName,
@@ -126,7 +194,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
               checked: true, reason: "",
             }))
           );
-          setRequester(po.requester || "Suraj");
+          setRequester(po.requester || "");
           if (po.poDate) setPoDate(new Date(po.poDate).toISOString().slice(0, 10));
           setShipment(po.shipmentPreference || SHIPMENT_PREFERENCE_OPTIONS[1]);
           // Already-resolved snapshot from when this PO was created — never re-resolved on edit.
@@ -138,15 +206,10 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           // single Default term. Read-only — see resolveForVendor on the backend.
           let resolvedSource = "NONE";
           try {
-            const termsRes = await fetch(`${API_BACKEND_URL}/stock/terms-conditions/resolve/${vendorId}`, {
-              credentials: "include",
-            });
-            const termsJson = await termsRes.json();
-            if (termsRes.ok && termsJson.success) {
-              setTermsContent(termsJson.data?.term?.termsContent || "");
-              resolvedSource = termsJson.data?.source || "NONE";
-              setTermsSource(resolvedSource);
-            }
+            const resolved = await resolveVendorTerms(vendorId);
+            setTermsContent(resolved?.term?.termsContent || "");
+            resolvedSource = resolved?.source || "NONE";
+            setTermsSource(resolvedSource);
           } catch {
             // non-fatal — PO creation still works with empty terms
           }
@@ -156,18 +219,14 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
           // pick one by hand from the active templates.
           if (resolvedSource === "NONE") {
             try {
-              const listRes = await fetch(`${API_BACKEND_URL}/stock/terms-conditions?status=ACTIVE&limit=100`, {
-                credentials: "include",
-              });
-              const listJson = await listRes.json();
-              if (listRes.ok && listJson.success) setActiveTerms(listJson.data?.data || []);
+              setActiveTerms(await fetchActiveTerms());
             } catch {
               // non-fatal — the dropdown just stays empty; submit remains blocked
             }
           }
         }
       } catch (err) {
-        setError(err.message);
+        toast.error(err.message);
       } finally {
         setLoading(false);
       }
@@ -195,41 +254,34 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
   );
 
   const submit = async () => {
-    if (!selectedEntity) return setError("No entity assigned yet — add one in Tracking Orders first");
+    if (!selectedEntity) return toast.error("No entity assigned yet — add one in Tracking Orders first");
     if (!isEdit) {
-      if (checked.length === 0) return setError("Select at least one item for the PO");
-      if (unchecked.some((r) => !r.reason.trim())) return setError("Give a reason for every unchecked (skipped) item");
-      if (termsSource === "NONE" && !selectedTermsId) return setError("Terms & Conditions is required.");
+      if (stateChanged && !stateReason.trim()) return toast.error("Give a reason for changing the state");
+      if (checked.length === 0) return toast.error("Select at least one item for the PO");
+      if (unchecked.some((r) => !r.reason.trim())) return toast.error("Give a reason for every unchecked (skipped) item");
+      if (termsSource === "NONE" && !selectedTermsId) return toast.error("Terms & Conditions is required.");
     }
     setSaving(true);
-    setError(null);
     try {
       if (isEdit) {
-        const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${poId}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include",
-          // terms/buyerEntity are immutable after create — never sent from here.
-          body: JSON.stringify({ requester, poDate, shipmentPreference: shipment, notes }),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to update PO");
+        // terms/buyerEntity/requester are immutable after create — never sent from here.
+        await updatePurchaseOrder(poId, { poDate, shipmentPreference: shipment, notes });
+        toast.success("PO saved and regenerated");
       } else {
-        const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
-          body: JSON.stringify({
-            sourceQuotationId, vendorId,
-            quotationItemIds: checked.map((r) => r.quotationItemId),
-            skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
-            requester, poDate, shipmentPreference: shipment, notes,
-            termsConditionId: selectedTermsId || undefined,
-          }),
+        await createPurchaseOrder({
+          sourceQuotationId, vendorId,
+          quotationItemIds: checked.map((r) => r.quotationItemId),
+          skippedItems: unchecked.map((r) => ({ itemId: r.quotationItemId, reason: r.reason.trim() })),
+          // requester is stamped server-side from the session, not sent.
+          poDate, shipmentPreference: shipment, notes,
+          termsConditionId: selectedTermsId || undefined,
+          ...(stateChanged ? { buyerEntityId: String(picked._id), stateChangeReason: stateReason.trim() } : {}),
         });
-        const json = await res.json();
-        if (!res.ok || !json.success) throw new Error(json.message || "Failed to create PO");
+        toast.success(`PO generated for ${vendorName || "the vendor"}`);
       }
       onDone();
     } catch (err) {
-      setError(err.message);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast.error(err.message);
     } finally {
       setSaving(false);
     }
@@ -237,7 +289,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4 p-6">
+      <div className="mx-auto max-w-7xl space-y-4 p-6">
         <div className="h-10 w-64 animate-pulse rounded-lg bg-slate-100" />
         <div className="h-40 animate-pulse rounded-2xl bg-slate-100" />
         <div className="h-64 animate-pulse rounded-2xl bg-slate-100" />
@@ -245,129 +297,177 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
     );
   }
 
+  const termsMeta = TERMS_SOURCE_META[termsSource] || TERMS_SOURCE_META.NONE;
+
   return (
-    <div className="mx-auto max-w-3xl p-6 pb-12">
+    <div className="mx-auto max-w-7xl p-6 pb-12">
       {/* header */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
+      {/* Back on the left, title centred, status on the right */}
+      <div className="mb-6 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
         <button
           type="button" onClick={onBack}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition duration-200 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200"
+          className="inline-flex w-fit items-center gap-1.5 justify-self-start rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition duration-200 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200"
         >
-          <IconArrowLeft /> Back
+          <ArrowLeft className="h-4 w-4" /> Back
         </button>
-        <div className="min-w-0">
-          <h1 className="text-lg font-bold tracking-tight text-slate-900">
+        <div className="flex min-w-0 flex-col items-center text-center">
+          <h1 className="flex items-center gap-2.5 text-xl font-extrabold tracking-tight text-slate-900">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-200">
+              <FileText className="h-4 w-4" />
+            </span>
             {isEdit ? "Edit purchase order" : "Create purchase order"}
           </h1>
-          <p className="truncate text-sm text-slate-500">Supplier · {vendorName || "\u2014"}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-slate-500">
+            Supplier
+            <span className="rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-bold text-violet-700 ring-1 ring-inset ring-violet-200">
+              {vendorName || "—"}
+            </span>
+          </p>
         </div>
-        <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold ${isEdit ? "border-red-200 bg-red-50 text-red-700" : "border-orange-200 bg-orange-50 text-orange-700"
-          }`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${isEdit ? "bg-red-500" : "bg-orange-500"}`} />
+        <span className={`inline-flex w-fit items-center gap-1.5 justify-self-end rounded-full px-3 py-1 text-xs font-bold ring-1 ring-inset ${
+          isEdit ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200"
+        }`}>
+          <span className={`h-1.5 w-1.5 animate-pulse rounded-full ${isEdit ? "bg-rose-500" : "bg-amber-500"}`} />
           {isEdit ? "Rejected · editing" : "PO creation pending"}
         </span>
       </div>
 
-      {error && (
-        <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span>{error}</span>
-          <button type="button" onClick={() => setError(null)} className="shrink-0 rounded p-0.5 text-red-400 transition duration-200 hover:text-red-700">
-            <IconX />
-          </button>
-        </div>
-      )}
-
       {/* buyer entity — read-only: assigned once on Tracking Orders */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Buyer entity</p>
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-500">Set in Tracking Orders</span>
-        </div>
-        {selectedEntity ? (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className={labelCls}>Entity</label>
-              <p className={`${inputCls} bg-slate-50 text-slate-700`}>{selectedEntity.alias}</p>
-            </div>
-            <div>
-              <label className={labelCls}>State</label>
-              <p className={`${inputCls} bg-slate-50 text-slate-700`}>{selectedEntity.state} - {selectedEntity.stateCode}</p>
-              <p className="mt-1.5 text-xs text-slate-400">
-                GST {selectedEntity.gstNumber} ·{" "}
-                <span className={sameState ? "text-green-600" : "text-indigo-600"}>
-                  {sameState ? "Same state → CGST + SGST" : "Different state → IGST"}
-                </span>
-              </p>
-            </div>
-          </div>
-        ) : (
-          <p className="rounded-lg border border-dashed border-amber-200 bg-amber-50/60 px-3 py-2.5 text-sm text-amber-700">
-            No entity assigned yet — add one on the Tracking Orders page before creating this PO.
-          </p>
-        )}
-
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <Section
+        icon={Building2} tone="bg-emerald-500" title="Buyer entity"
+        right={<span className="rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-inset ring-slate-200">{canChangeState ? "Entity set in Tracking Orders · state can be changed" : "Set in Tracking Orders"}</span>}
+      >
+        {/* row 1 — who: requester, entity, state */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <label className={labelCls}>Requester</label>
-            <input value={requester} onChange={(e) => setRequester(e.target.value)} className={inputCls} />
+            <label className={labelCls}><User className="h-3.5 w-3.5 text-emerald-500" /> Requester</label>
+            <p className={valueCls}>{(isEdit ? requester : signedInName) || "—"}</p>
           </div>
-          <div>
-            <label className={labelCls}>PO date</label>
-            <input
-              type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)}
-              disabled={!isEdit} className={inputCls}
-            />
-            {!isEdit && <p className="mt-1 text-xs text-slate-400">Always today&rsquo;s date &mdash; not editable.</p>}
-          </div>
-          <div>
-            <label className={labelCls}>Shipment preference</label>
-            <select value={shipment} onChange={(e) => setShipment(e.target.value)} className={inputCls}>
-              {SHIPMENT_PREFERENCE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-        </div>
-      </section>
-
-      {/* items */}
-      <section className="mt-5 rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-700">Items</p>
-          {LOCK_CHECKBOX ? (
-            <p className="inline-flex items-center gap-1.5 text-xs text-slate-500">
-              <span className="text-slate-400"><IconLock /></span>
-              All items locked on this PO
-            </p>
+          {selectedEntity ? (
+            <>
+              <div>
+                <label className={labelCls}><Building2 className="h-3.5 w-3.5 text-emerald-500" /> Entity</label>
+                <p className={valueCls}>{selectedEntity.alias}</p>
+              </div>
+              <div>
+                <label className={`${labelCls} justify-between`}>
+                  <span className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-emerald-500" /> State</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal ring-1 ring-inset ${
+                    sameState ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-indigo-50 text-indigo-700 ring-indigo-200"
+                  }`}>
+                    {sameState ? "CGST + SGST" : "IGST"}
+                  </span>
+                </label>
+                {canChangeState ? (
+                  <select
+                    value={picked ? String(picked._id) : assignedId}
+                    onChange={(e) => setPickedEntityId(e.target.value)}
+                    className={`${inputCls} font-semibold ${stateChanged ? "border-amber-300 bg-amber-50/40" : ""}`}
+                  >
+                    {statesForAlias.map((e) => (
+                      <option key={e._id} value={String(e._id)}>
+                        {e.state} - {e.stateCode}{String(e._id) === assignedId ? "  (assigned)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className={valueCls}>{selectedEntity.state} - {selectedEntity.stateCode}</p>
+                )}
+              </div>
+            </>
           ) : (
-            !isEdit && (
-              <p className="text-xs text-slate-500">
-                <span className="font-semibold text-slate-700 tabular-nums">{checked.length}</span> selected · unchecked = skipped
-              </p>
-            )
+            <p className="rounded-xl border border-dashed border-amber-200 bg-amber-50/60 px-3 py-2.5 text-sm font-medium text-amber-700 sm:col-span-2">
+              No entity assigned yet — add one on the Tracking Orders page before creating this PO.
+            </p>
           )}
         </div>
 
+        {stateChanged && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3.5">
+            <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-amber-800">
+              State changed:
+              <span className="rounded-md bg-white px-2 py-0.5 text-xs font-bold text-slate-600 line-through ring-1 ring-inset ring-amber-200">
+                {assignedEntity.state} ({assignedEntity.stateCode})
+              </span>
+              →
+              <span className="rounded-md bg-white px-2 py-0.5 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
+                {picked.state} ({picked.stateCode})
+              </span>
+              <button type="button" onClick={() => { setPickedEntityId(""); setStateReason(""); }} className="ml-auto text-xs font-semibold text-amber-700 underline hover:text-amber-900">
+                Undo
+              </button>
+            </p>
+            <label className={`${labelCls} mt-3`}>Reason for state change <span className="text-rose-500">*</span></label>
+            <textarea
+              value={stateReason} onChange={(e) => setStateReason(e.target.value)} rows={2} maxLength={500}
+              placeholder="Why is this PO raised in a different state?"
+              className={`${inputCls} resize-none`}
+            />
+          </div>
+        )}
+
+        {/* row 2 — when and how: PO date, shipment, notes */}
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div>
+            <label className={labelCls}><CalendarDays className="h-3.5 w-3.5 text-sky-500" /> PO date</label>
+            {isEdit ? (
+              <input type="date" value={poDate} onChange={(e) => setPoDate(e.target.value)} className={inputCls} />
+            ) : (
+              <p className={valueCls}>{fmtDate(poDate)}</p>
+            )}
+          </div>
+          <div>
+            <label className={labelCls}><Truck className="h-3.5 w-3.5 text-sky-500" /> Shipment preference</label>
+            <select value={shipment} onChange={(e) => setShipment(e.target.value)} className={`${inputCls} font-semibold`}>
+              {SHIPMENT_PREFERENCE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}><StickyNote className="h-3.5 w-3.5 text-sky-500" /> Notes <span className="font-medium normal-case tracking-normal text-slate-400">(optional)</span></label>
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} placeholder="Optional" />
+          </div>
+        </div>
+      </Section>
+
+      {/* items */}
+      <Section
+        className="mt-5" flush
+        icon={Package} tone="bg-indigo-500"
+        title={<>Items <span className="ml-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-bold text-indigo-700">{rows.length}</span></>}
+        right={
+          LOCK_CHECKBOX ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-inset ring-slate-200">
+              <Lock className="h-3 w-3" /> All items locked on this PO
+            </span>
+          ) : (
+            !isEdit && (
+              <span className="text-xs text-slate-500">
+                <span className="font-semibold text-slate-700 tabular-nums">{checked.length}</span> selected · unchecked = skipped
+              </span>
+            )
+          )
+        }
+      >
         <div className="overflow-x-auto">
           <table className="w-full min-w-full border-collapse text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50/60 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {!isEdit && <th className="px-3 py-2.5 w-8"></th>}
-                <th className="px-3 py-2.5 w-10">Sr.</th>
-                <th className="px-3 py-2.5">Description</th>
-                <th className="px-3 py-2.5">Product</th>
-                <th className="px-3 py-2.5 text-right">Qty</th>
-                <th className="px-3 py-2.5 text-right">Unit Price</th>
-                <th className="px-3 py-2.5 text-right">Basic Price</th>
+              <tr className="border-b border-indigo-100 bg-indigo-50/50 text-left text-xs font-bold uppercase tracking-wide text-indigo-900/70">
+                {!isEdit && <th className="w-10 px-4 py-3"></th>}
+                <th className="w-12 px-4 py-3 text-center">Sr.</th>
+                <th className="px-4 py-3">Description</th>
+                <th className="px-4 py-3">Product</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Quantity</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Unit Price</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Basic Price</th>
                 {taxType === "CGST_SGST" ? (
                   <>
-                    <th className="px-3 py-2.5 text-right">CGST</th>
-                    <th className="px-3 py-2.5 text-right">SGST</th>
+                    <th className="w-28 whitespace-nowrap px-4 py-3 text-center">CGST</th>
+                    <th className="w-28 whitespace-nowrap px-4 py-3 text-center">SGST</th>
                   </>
-                ) : taxType === "IGST" ? (
-                  <th className="px-3 py-2.5 text-right">IGST</th>
                 ) : (
-                  <th className="px-3 py-2.5 text-right">GST</th>
+                  <th className="w-28 whitespace-nowrap px-4 py-3 text-center">{taxType === "IGST" ? "IGST" : "GST"}</th>
                 )}
-                <th className="px-3 py-2.5 text-right">Amount</th>
+                <th className="w-28 whitespace-nowrap px-4 py-3 text-center">Amount</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -376,44 +476,53 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
                 const skipped = !isEdit && !r.checked;
                 return (
                   <React.Fragment key={String(r.quotationItemId)}>
-                    <tr className={`transition duration-200 ${skipped ? "bg-slate-50/60" : ""}`}>
+                    <tr className={`transition duration-200 hover:bg-indigo-50/30 ${skipped ? "bg-slate-50/60" : ""}`}>
                       {!isEdit && (
-                        <td className="px-3 py-2.5 align-top">
+                        <td className="px-4 py-3.5 align-top">
                           <span className="inline-flex items-center gap-1">
                             <input
                               type="checkbox" checked={r.checked} onChange={() => toggle(r.quotationItemId)}
                               disabled={LOCK_CHECKBOX}
                               className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-70"
                             />
-                            {LOCK_CHECKBOX && <span className="text-slate-400" title="Locked — this item cannot be removed"><IconLock /></span>}
+                            {LOCK_CHECKBOX && <span className="text-slate-400" title="Locked — this item cannot be removed"><Lock className="h-3.5 w-3.5" /></span>}
                           </span>
                         </td>
                       )}
-                      <td className="px-3 py-2.5 align-top tabular-nums text-slate-500">{idx + 1}</td>
-                      <td className={`px-3 py-2.5 align-top ${skipped ? "text-slate-400 line-through" : "text-slate-700"}`}>{r.categoryName}</td>
-                      <td className={`px-3 py-2.5 align-top font-medium ${skipped ? "text-slate-400 line-through" : "text-slate-900"}`}>{r.productName}</td>
-                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{r.quantity} {unitLabel(r.unit)}</td>
-                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(r.unitPrice)}</td>
-                      <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.base)}</td>
+                      <td className="px-4 py-3.5 align-top">
+                        <span className="mx-auto flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 tabular-nums">{idx + 1}</span>
+                      </td>
+                      <td className={`px-4 py-3.5 align-top font-medium ${skipped ? "text-slate-400 line-through" : "text-slate-600"}`}>{r.categoryName}</td>
+                      <td className={`px-4 py-3.5 align-top font-bold ${skipped ? "text-slate-400 line-through" : "text-slate-900"}`}>{r.productName}</td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top font-semibold tabular-nums text-slate-800">
+                        {/* "10 Meter" on one line, centred under a centred QTY heading */}
+                        {r.quantity} <span className="text-xs font-medium text-slate-400">{unitLabel(r.unit)}</span>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">{money(r.unitPrice)}</td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">{money(c.base)}</td>
                       {taxType === "CGST_SGST" ? (
                         <>
-                          <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.cgst)}</td>
-                          <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.sgst)}</td>
+                          <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">
+                            <TaxCell amount={c.cgst} rate={Number(r.gstRate || 0) / 2} base={c.base} label="CGST" product={r.productName} />
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">
+                            <TaxCell amount={c.sgst} rate={Number(r.gstRate || 0) / 2} base={c.base} label="SGST" product={r.productName} />
+                          </td>
                         </>
-                      ) : taxType === "IGST" ? (
-                        <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.igst)}</td>
                       ) : (
-                        <td className="px-3 py-2.5 align-top text-right tabular-nums text-slate-700">{money(c.gst)}</td>
+                        <td className="whitespace-nowrap px-4 py-3.5 text-center align-top tabular-nums text-slate-700">
+                          <TaxCell amount={taxType === "IGST" ? c.igst : c.gst} rate={Number(r.gstRate || 0)} base={c.base} label={taxType === "IGST" ? "IGST" : "GST"} product={r.productName} />
+                        </td>
                       )}
-                      <td className="px-3 py-2.5 align-top text-right tabular-nums font-semibold text-slate-900">{money(c.total)}</td>
+                      <td className="whitespace-nowrap px-4 py-3.5 text-center align-top font-extrabold tabular-nums text-slate-900">{money(c.total)}</td>
                     </tr>
                     {!LOCK_CHECKBOX && !isEdit && !r.checked && (
                       <tr>
-                        <td colSpan={10} className="px-3 pb-2.5">
+                        <td colSpan={10} className="px-4 pb-3">
                           <input
                             value={r.reason} onChange={(e) => setReason(r.quotationItemId, e.target.value)}
                             placeholder="Reason for skipping (required)"
-                            className="w-full rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-red-300 transition duration-200 focus:border-red-300 focus:outline-none focus:ring-2 focus:ring-red-100"
+                            className="w-full rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-rose-300 transition duration-200 focus:border-rose-300 focus:outline-none focus:ring-2 focus:ring-rose-100"
                           />
                         </td>
                       </tr>
@@ -426,62 +535,48 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
         </div>
 
         {/* order summary — checked items only (display-only preview) */}
-        <div className="rounded-b-2xl border-t-2 border-slate-200 bg-slate-50/70 px-5 py-4">
-          <div className="ml-auto w-full max-w-xs space-y-1.5 text-sm tabular-nums">
-            <div className="flex items-center justify-between text-slate-600">
-              <span>Basic Price</span><span className="font-medium text-slate-800">{money(summary.base)}</span>
+        <div className="border-t border-slate-200 px-5 py-4">
+          <dl className="ml-auto w-full max-w-xs text-sm tabular-nums">
+            <div className="flex justify-between py-1">
+              <dt className="text-slate-500">Basic Price</dt>
+              <dd className="font-semibold text-slate-800">{money(summary.base)}</dd>
             </div>
             {taxType === "CGST_SGST" ? (
               <>
-                <div className="flex items-center justify-between text-slate-600">
-                  <span>CGST</span><span className="font-medium text-slate-800">{money(summary.cgst)}</span>
+                <div className="flex justify-between py-1">
+                  <dt className="text-slate-500">CGST</dt>
+                  <dd className="font-semibold text-slate-800">{money(summary.cgst)}</dd>
                 </div>
-                <div className="flex items-center justify-between text-slate-600">
-                  <span>SGST</span><span className="font-medium text-slate-800">{money(summary.sgst)}</span>
+                <div className="flex justify-between py-1">
+                  <dt className="text-slate-500">SGST</dt>
+                  <dd className="font-semibold text-slate-800">{money(summary.sgst)}</dd>
                 </div>
               </>
             ) : (
-              <div className="flex items-center justify-between text-slate-600">
-                <span>IGST</span><span className="font-medium text-slate-800">{money(summary.igst)}</span>
+              <div className="flex justify-between py-1">
+                <dt className="text-slate-500">IGST</dt>
+                <dd className="font-semibold text-slate-800">{money(summary.igst)}</dd>
               </div>
             )}
-            <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-base font-bold text-slate-900">
-              <span>Grand total</span><span>{money(summary.total)}</span>
+            <div className="mt-2 flex items-baseline justify-between border-t border-slate-200 pt-3">
+              <dt className="font-bold text-slate-900">Grand total</dt>
+              <dd className="text-xl font-extrabold text-indigo-700">{money(summary.total)}</dd>
             </div>
-          </div>
+          </dl>
         </div>
-      </section>
+      </Section>
 
-      {/* terms & notes */}
-      <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p className="mb-4 text-xs font-bold uppercase tracking-wider text-slate-700">Terms &amp; notes</p>
-
-        <div className="mb-1.5 flex items-center justify-between">
-          <label className={labelCls}>
-            Terms and conditions
-            {!isEdit && termsSource === "NONE" && <span className="ml-0.5 text-red-500">*</span>}
-          </label>
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-              termsSource === "VENDOR"
-                ? "bg-indigo-50 text-indigo-700"
-                : termsSource === "DEFAULT"
-                ? "bg-amber-50 text-amber-700"
-                : termsSource === "MANUAL"
-                ? "bg-emerald-50 text-emerald-700"
-                : "bg-slate-100 text-slate-500"
-            }`}
-          >
-            {termsSource === "VENDOR"
-              ? "Vendor-specific term"
-              : termsSource === "DEFAULT"
-              ? "Default term"
-              : termsSource === "MANUAL"
-              ? "Manually selected"
-              : "No term configured"}
+      {/* terms */}
+      <Section
+        className="mt-5"
+        icon={ScrollText} tone="bg-violet-500" title="Terms & conditions"
+        right={
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold ring-1 ring-inset ${termsMeta.cls}`}>
+            {termsMeta.label}
+            {!isEdit && termsSource === "NONE" && <span className="ml-0.5 text-rose-500">*</span>}
           </span>
-        </div>
-
+        }
+      >
         {!isEdit && termsSource === "NONE" ? (
           <>
             {/* No vendor-specific or Default term exists — Terms & Conditions
@@ -503,7 +598,7 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
               ))}
             </select>
             {activeTerms.length === 0 && (
-              <p className="mt-1.5 text-xs text-red-500">
+              <p className="mt-1.5 text-xs font-medium text-rose-500">
                 No active Terms &amp; Conditions templates exist. Configure one in Master &rarr; Terms &amp; Conditions before generating this PO.
               </p>
             )}
@@ -514,32 +609,30 @@ const POCreateView = ({ mode = "create", context = {}, onBack, onDone }) => {
             manually selected template above) — never typed here. */}
         {termsContent ? (
           <div
-            className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm leading-relaxed text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:list-disc [&_ul]:pl-5"
+            className="mt-2 max-h-60 overflow-y-auto rounded-xl border border-violet-100 bg-violet-50/30 px-4 py-3 text-sm leading-relaxed text-slate-700 [&_a]:text-indigo-600 [&_a]:underline [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5"
             dangerouslySetInnerHTML={{ __html: sanitizeForPreview(termsContent) }}
           />
         ) : (isEdit || termsSource !== "NONE") ? (
-          <p className="mt-2 rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm text-slate-400">
+          <p className="mt-2 rounded-xl border border-dashed border-slate-200 bg-slate-50/60 px-4 py-3 text-sm text-slate-400">
             No applicable or default Terms &amp; Conditions found. Configure one in Master &rarr; Terms &amp; Conditions.
           </p>
         ) : null}
-
-        <label className={`${labelCls} mt-4`}>Notes (optional)</label>
-        <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />
-      </section>
+      </Section>
 
       {/* footer actions */}
       <div className="mt-6 flex items-center justify-end gap-2.5 border-t border-slate-200 pt-5">
         <button
           type="button" onClick={onBack}
-          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition duration-200 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition duration-200 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200"
         >
           Cancel
         </button>
         <button
           type="button" onClick={submit} disabled={saving}
-          className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition duration-200 hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-indigo-600 to-violet-600 px-6 py-2 text-sm font-bold text-white shadow-md shadow-indigo-200 transition duration-200 hover:from-indigo-500 hover:to-violet-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? "Working\u2026" : isEdit ? "Save & regenerate" : "Generate PO"}
+          <FileText className="h-4 w-4" />
+          {saving ? "Working…" : isEdit ? "Save & regenerate" : "Generate PO"}
         </button>
       </div>
     </div>

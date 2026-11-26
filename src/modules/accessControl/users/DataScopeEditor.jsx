@@ -1,7 +1,8 @@
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { API_BACKEND_URL } from '@/config/getEnvVariables';
+import { api } from '@/lib/apiClient';
+import { API_ENDPOINTS } from '@/constants/api';
 import { getDataScopes, setDataScope, clearModuleDataScope, getModules } from '../api';
 import { searchHrmsUsers } from '../hrmsDirectory';
 import useInternalEntities from '@/modules/stock/shared/useInternalEntities';
@@ -25,12 +26,8 @@ const EMPTY = {
   recordOwnership: { configured: false, scope: 'OWN', allowedUserIds: [] },
 };
 
-const getActiveBranches = async () => {
-  const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { method: 'GET', credentials: 'include' });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.message || 'Failed to load branches');
-  return data.data || [];
-};
+const getActiveBranches = async () =>
+  (await api.get(API_ENDPOINTS.master.branches.active, { fallback: 'Failed to load branches' })).data || [];
 
 const Chip = ({ active, onClick, children }) => (
   <button

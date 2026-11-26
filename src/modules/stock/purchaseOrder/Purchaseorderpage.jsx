@@ -2,7 +2,12 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import toast from "react-hot-toast";
+import { poAction, fetchPoBoard, poPdfUrl } from "./purchaseOrderApi";
+import { resetTrackingOrder } from "@/modules/stock/tracking-orders/trackingApi";
+import { fetchVendors, fetchLeafCategories, fetchProductOptions, fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
+import DateRangeButton from "@/modules/stock/shared/DateRangeButton";
+import { usePermissions } from "@/context/PermissionContext";
 import POCreateView from "./Pocreateview";
 import PODetailsView from "./Podetailsview";
 import Pagination from "@/shared/ui/pagination/Pagination";
@@ -15,9 +20,19 @@ import {
   Download,
   Mail,
   CheckCircle2,
+  History,
+  ClipboardCheck,
+  Info,
 } from "lucide-react";
-import SendMailPopup, { useSendMailForm, submitSendMail, SendMailFields } from "./SendMailPopup";
+import MailInfoPopup from "@/modules/stock/shared/MailInfoPopup";
+import SendMailPopup, {
+  useSendMailForm, submitSendMail, SendMailFields, hasNoRecipient, needsSkipChoice, mailReachedVendor, MAIL_MODE_META,
+} from "./SendMailPopup";
 import { unitLabel } from "@/modules/stock/shared/StockSharedUI";
+// Shared with the Tracking Orders page on purpose: both boards show the same
+// reset history, and two copies of it would drift.
+import OrderHistoryPopup, { historyCount } from "@/modules/stock/shared/OrderHistoryPopup";
+import StateChangeInfo from "./StateChangeInfo";
 import useInternalEntities from "@/modules/stock/shared/useInternalEntities";
 
 /* ============================================================= */
@@ -29,7 +44,7 @@ const fmt = (d) =>
   d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
 const inputCls =
-  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-800 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100";
 const microLabel = "mb-1.5 block text-xs font-medium uppercase tracking-wider text-slate-800";
 
 const TRUNCATE_LEN = 25;
@@ -41,11 +56,15 @@ const STATUS_META = {
   REJECTED: { label: "PO Rejected", badge: "bg-rose-50 text-rose-700 ring-rose-200", dot: "bg-rose-500", border: "border-l-rose-400" },
 };
 
-const SHORT_STATUS_LABEL = {
-  PO_PENDING: "Pending",
-  GENERATED: "Generated",
-  APPROVED: "Approved",
-  REJECTED: "Rejected",
+/*
+  Whether this user holds one action on a module. Reset Order has its own
+  permission, so it is checked before the menu is drawn rather than left to
+  the server's 403. Admins bypass every permission server-side, so here too.
+*/
+const canDo = (permissions, isAdmin, action, moduleKey) => {
+  if (isAdmin) return true;
+  const mod = (permissions || []).find((m) => m.moduleKey === moduleKey);
+  return (mod?.actions || []).map((a) => String(a).toUpperCase()).includes(action);
 };
 
 const TAB_STYLES = {
@@ -215,18 +234,18 @@ const SearchableSelect = ({ value, onChange, options, placeholder = "All", rende
         type="button" onClick={() => setOpen((o) => !o)}
         className={`${inputCls} flex items-center justify-between text-left`}
       >
-        <span className={`truncate ${selected ? "text-slate-900" : "text-slate-800"}`}>
+        <span className={`truncate ${selected ? "text-slate-900" : "text-slate-400"}`}>
           {selected ? selected.label : placeholder}
         </span>
-        <span className="ml-2 shrink-0 text-slate-800"><IconChevron open={open} /></span>
+        <span className="ml-2 shrink-0 text-slate-400"><IconChevron open={open} /></span>
       </button>
       {open && (
         <div className="absolute z-40 mt-1.5 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg ring-1 ring-slate-900/5">
           <div className="flex items-center gap-2 border-b border-slate-100 px-3">
-            <span className="text-slate-800"><IconSearch /></span>
+            <span className="text-slate-400"><IconSearch /></span>
             <input
               autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search..."
-              className="w-full py-2.5 text-sm placeholder:text-slate-800 focus:outline-none"
+              className="w-full py-2.5 text-sm placeholder:text-slate-400 focus:outline-none"
             />
           </div>
           <div className="max-h-56 overflow-y-auto py-1">
@@ -247,29 +266,13 @@ const SearchableSelect = ({ value, onChange, options, placeholder = "All", rende
                 {renderExtra && renderExtra(o)}
               </div>
             ))}
-            {filtered.length === 0 && <p className="px-3 py-2.5 text-sm text-slate-800">No match</p>}
+            {filtered.length === 0 && <p className="px-3 py-2.5 text-sm text-slate-400">No match</p>}
           </div>
         </div>
       )}
     </div>
   );
 };
-
-/* ============================================================= */
-/* Date field — pill style: label + date input in one box         */
-/* ============================================================= */
-
-const DateField = ({ label, value, onChange }) => (
-  <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-    <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{label}</span>
-    <input
-      type="date"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-[150px] rounded-lg border border-slate-200 bg-white py-1.5 px-3 text-sm text-slate-900 shadow-sm transition focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
-    />
-  </div>
-);
 
 /* ============================================================= */
 /* Popups (all via portal Modal)                                  */
@@ -318,7 +321,7 @@ const ProductsPopup = ({ row, onClose }) => {
 const InfoPopup = ({ row, onClose }) => (
   <Modal onClose={onClose} title="Skipped products">
     <div className="space-y-2.5">
-      {row.skipped.map((s, i) => (
+      {row.excludedItems.map((s, i) => (
         <div key={i} className="rounded-xl bg-amber-50 px-4 py-3 text-sm ring-1 ring-inset ring-amber-100">
           <p className="font-medium text-slate-900">
             {s.productName}{" "}
@@ -337,44 +340,122 @@ const InfoPopup = ({ row, onClose }) => (
  * both land from a single "Approve & Send PO" click. The mail fields are the
  * exact ones from SendMailPopup, reused rather than re-implemented.
  */
+/*
+  Send a vendor order back to the very start.
+
+  This is the accounts team's ONLY way to change an order once it has left the
+  Tracking Orders page — they cannot edit its lines, because that decision
+  belongs to whoever holds the Not Required permission. A reset deletes the PO,
+  clears the entity and returns the row to ENTITY_PENDING, where those people
+  can change it and send it forward again.
+
+  Deliberately destructive, so it asks first and requires a reason: the PO
+  number it deletes is not reused, and the entity has to be chosen again.
+*/
+const ResetOrderPopup = ({ row, onClose, onDone }) => {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await resetTrackingOrder(row.trackingOrderId, reason.trim());
+      toast.success(`Order reset — ${row.vendorName} is back on Tracking Orders`);
+      onDone();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={`Reset order — ${row.vendorName}`}>
+
+      <p className="text-sm text-slate-700">Are you sure? This will:</p>
+      <ul className="mt-2 space-y-1.5 text-sm text-slate-600">
+        {row.poNumber ? (
+          <li className="flex gap-2">
+            <span className="text-rose-500">•</span>
+            delete <span className="font-medium text-slate-800">{row.poNumber}</span> — the number is not reused
+          </li>
+        ) : null}
+        {row.entityAlias ? (
+          <li className="flex gap-2">
+            <span className="text-rose-500">•</span>
+            clear the entity <span className="font-medium text-slate-800">{row.entityAlias}</span>, so it can be chosen again
+          </li>
+        ) : null}
+        <li className="flex gap-2">
+          <span className="text-rose-500">•</span>
+          send the order back to the Tracking Orders page
+        </li>
+      </ul>
+      <p className="mt-3 text-xs text-slate-500">
+        Lines already skipped stay out — the tracking team can change them there.
+      </p>
+
+      <textarea
+        rows={3}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="Reason (required) — this is what the tracking team will see"
+        className={`${inputCls} mb-4 mt-4`}
+      />
+
+      <div className="flex justify-end gap-2.5">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50">
+          Cancel
+        </button>
+        <button
+          type="button" disabled={busy || !reason.trim()} onClick={submit}
+          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? "Resetting…" : "Reset Order"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
 const ReviewPopup = ({ row, onClose, onDone }) => {
   const mail = useSendMailForm(row);
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
-  const [error, setError] = useState(null);
   const [approved, setApproved] = useState(false); // approve landed — only the send is left
-  const [result, setResult] = useState(null);      // "SENT" | "MANUAL"
+  const [result, setResult] = useState(null);      // "SENT" | "MANUAL" | "SKIPPED"
 
-  const patch = async (path, body) => {
-    const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/${row.poId}/${path}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const json = await res.json();
-    if (!res.ok || !json.success) throw new Error(json.message || "Failed");
-    return json;
-  };
+  const patch = (action, body) => poAction(row.poId, action, body);
 
   // Once the approve has gone through the board is stale, so closing has to
   // refresh it — otherwise the row would still offer "Review PO".
   const close = () => (approved ? onDone() : onClose());
 
   const reject = async () => {
-    setBusy(true); setError(null);
-    try { await patch("reject", { rejectedReason: reason }); onDone(); }
-    catch (e) { setError(e.message); setBusy(false); }
+    setBusy(true);
+    try { await patch("reject", { rejectedReason: reason }); toast.success(`${row.poNumber} rejected`); onDone(); }
+    catch (e) { toast.error(e.message); setBusy(false); }
   };
 
   const approveAndSend = async () => {
-    if (mail.sendEmail && !mail.to.trim()) return setError("A To email is required");
-    setBusy(true); setError(null);
+    // mail.to is the vendor's own "To" contacts (an array), not a typed field
+    // — there is no free-text To input in SendMailFields. Same check as
+    // SendMailPopup's own submit(), so the message reads the same everywhere.
+    if (mail.sendEmail && hasNoRecipient(row)) {
+      return toast.error(
+        "This vendor has no contact marked To. Open Master → Vendors, edit " +
+          (row.vendorName || "the vendor") +
+          ", and set at least one contact's Recipient Type to To."
+      );
+    }
+    setBusy(true);
     try {
       // Skipped on a retry: the PO is already APPROVED, only the send failed.
       if (!approved) { await patch("approve"); setApproved(true); }
       setResult(await submitSendMail(row.poId, mail));
       setTimeout(() => onDone(), 900);
-    } catch (e) { setError(e.message); setBusy(false); }
+    } catch (e) { toast.error(e.message); setBusy(false); }
   };
 
   if (result) {
@@ -384,11 +465,9 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
             <CheckCircle2 className="h-6 w-6" />
           </span>
-          <p className="text-base font-semibold text-slate-900">Approved &amp; {result === "SENT" ? "Mail Sent" : "Marked Manual"}</p>
+          <p className="text-base font-semibold text-slate-900">Approved &amp; {(MAIL_MODE_META[result] || MAIL_MODE_META.SENT).label}</p>
           <p className="text-sm text-slate-500">
-            {result === "SENT"
-              ? "The PO was approved and emailed to the vendor."
-              : "The PO was approved and marked as manually handled — no email was sent."}
+            The PO was approved. {(MAIL_MODE_META[result] || MAIL_MODE_META.SENT).done}
           </p>
         </div>
       </Modal>
@@ -396,20 +475,12 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
   }
 
   return (
-    <Modal onClose={close} title={`Review ${row.poNumber}`} maxWidth="max-w-3xl">
-      {error && (
-        <div className="mb-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">
-          {error}
-          {approved && <span className="mt-1 block text-xs">The PO is already approved — only the send needs retrying.</span>}
+    <Modal onClose={close} title={`Review ${row.poNumber}`} maxWidth="max-w-5xl">
+      {approved && (
+        <div className="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-200">
+          The PO is already approved — only the send needs retrying.
         </div>
       )}
-
-      <div className="mb-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-slate-50 p-4 text-sm">
-        <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Vendor</p><p className="mt-0.5 truncate text-slate-900">{row.vendorName}</p></div>
-        <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Amount</p><p className="mt-0.5 font-semibold text-slate-900 tabular-nums">{money(row.totalAmount)}</p></div>
-        <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Items</p><p className="mt-0.5 text-slate-900 tabular-nums">{row.items.length}</p></div>
-        <div><p className="text-xs font-medium uppercase tracking-wider text-slate-800">Entity</p><p className="mt-0.5 text-slate-900">{row.entityAlias || "—"}</p></div>
-      </div>
 
       {rejecting ? (
         <>
@@ -421,12 +492,27 @@ const ReviewPopup = ({ row, onClose, onDone }) => {
         </>
       ) : (
         <>
+          {mail.sendEmail && hasNoRecipient(row) && (
+            <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-900 ring-1 ring-inset ring-amber-200">
+              <span className="mt-0.5 shrink-0">⚠</span>
+              <span>
+                <strong>{row.vendorName || "This vendor"}</strong> has no contact marked <strong>To</strong>.
+                Edit the vendor and set one, or switch off Send Email Notification to record it as Sent Manually or Skip Mail.
+              </span>
+            </div>
+          )}
+
           <SendMailFields row={row} form={mail} />
 
           <div className="mt-6 flex justify-end gap-2.5 border-t border-slate-200 pt-5">
             <button type="button" onClick={() => setRejecting(true)} className="rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 shadow-sm transition hover:bg-rose-50">Reject</button>
-            <button type="button" disabled={busy} onClick={approveAndSend} className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60">
-              {busy ? "Working…" : approved ? "Retry send" : "Approve & Send PO"}
+            <button
+              type="button"
+              disabled={busy || (mail.sendEmail && hasNoRecipient(row)) || needsSkipChoice(mail)}
+              onClick={approveAndSend}
+              className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {busy ? "Working…" : !mail.sendEmail ? (approved ? "Retry save" : "Approve & Save") : approved ? "Retry send" : "Approve & Send PO"}
             </button>
           </div>
         </>
@@ -524,8 +610,9 @@ const ActionMenu = ({ items, onSelect }) => {
       {open && (
         <div className="absolute right-0 z-40 mt-1.5 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg ring-1 ring-slate-900/5">
           {items.map((a) => (
+            <React.Fragment key={a.key}>
+            {a.divider && <div className="my-1 border-t border-slate-100" />}
             <button
-              key={a.key}
               type="button"
               onClick={() => { setOpen(false); onSelect(a.key); }}
               className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium transition hover:bg-slate-50 ${
@@ -535,6 +622,7 @@ const ActionMenu = ({ items, onSelect }) => {
               {a.icon && <a.icon className="h-3.5 w-3.5" />}
               {a.label}
             </button>
+            </React.Fragment>
           ))}
         </div>
       )}
@@ -546,15 +634,10 @@ const ActionMenu = ({ items, onSelect }) => {
  * Builds inline + overflow action lists for a row based on its status/flags.
  * Kept separate from rendering so it's easy to extend with new actions.
  */
-const buildRowActions = (row) => {
+const buildRowActions = (row, { canReset }) => {
   const s = row.status;
   const inline = [];
   const menu = [];
-
-  if (row.disabled) {
-    inline.push({ type: "text", key: "enable", label: "Enable", tone: "gray" });
-    return { inline, menu };
-  }
 
   if (s === "PO_PENDING" && row.items.length > 0) {
     inline.push({ type: "text", key: "create", label: "Create PO", tone: "indigo" });
@@ -565,13 +648,13 @@ const buildRowActions = (row) => {
   }
 
   // APPROVED is terminal — there is no SENT status. Whether the PO already
-  // reached the vendor is told by mailResult: once it exists the action is a
-  // resend, and it stays available indefinitely. Without it the PO was
-  // approved but the send that follows never landed, so offer the first send.
+  // reached the vendor is told by mailResult (Mail Sent / Sent Manually):
+  // then the action is a resend, and it stays available indefinitely. With no
+  // mailResult, or a skipped mail, the vendor doesn't have it — first send.
   if (s === "APPROVED") {
     inline.push({
       type: "icon", key: "sendMail", icon: Mail, tone: "green",
-      label: row.mailResult?.mode ? "Resend Mail" : "Send Mail",
+      label: mailReachedVendor(row.mailResult) ? "Resend Mail" : "Send Mail",
     });
   }
 
@@ -585,15 +668,28 @@ const buildRowActions = (row) => {
 
   menu.push({ key: "details", label: "Details", tone: "gray", icon: FileText });
 
-  if (row.skipped?.length > 0) {
+  if (historyCount(row) > 0) {
+    menu.push({ key: "history", label: `History (${historyCount(row)})`, tone: "gray", icon: History });
+  }
+
+  // The accounts team cannot edit an order's lines — that decision belongs to
+  // the Tracking Orders page. What they can do is send the whole thing back
+  // there: Reset Order deletes the PO, clears the entity and returns the row to
+  // ENTITY_PENDING. Not offered once the PO is approved, because by then it has
+  // been mailed to the vendor. Last in the menu and red: it undoes work.
+  if (canReset && (s === "PO_PENDING" || s === "GENERATED" || s === "REJECTED")) {
+    menu.push({ key: "reset", label: "Reset Order", tone: "red", icon: RotateCcw, divider: true });
+  }
+
+  if (row.excludedItems?.length > 0) {
     inline.push({ type: "text", key: "info", label: "Info", tone: "gray" });
   }
 
   return { inline, menu };
 };
 
-const ActionBar = ({ row, on }) => {
-  const { inline, menu } = buildRowActions(row);
+const ActionBar = ({ row, on, canReset }) => {
+  const { inline, menu } = buildRowActions(row, { canReset });
 
   const renderInline = (a) => {
     switch (a.type) {
@@ -619,13 +715,14 @@ const ActionBar = ({ row, on }) => {
 /* ============================================================= */
 
 const PurchaseOrderPage = () => {
+  const { permissions, isAdmin } = usePermissions();
+  const canReset = canDo(permissions, isAdmin, "RESET_ORDER", "purchase-orders");
   const [view, setView] = useState({ mode: "board" });
   const [board, setBoard] = useState([]);
   const [counts, setCounts] = useState({ ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
   const [vendors, setVendors] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [popup, setPopup] = useState(null);
 
   const [search, setSearch] = useState("");
@@ -634,6 +731,8 @@ const PurchaseOrderPage = () => {
   const [categoryF, setCategoryF] = useState("");
   const [productF, setProductF] = useState("");
   const [entityF, setEntityF] = useState("");
+  const [branchF, setBranchF] = useState("");
+  const [branchOptions, setBranchOptions] = useState([]);
   const [status, setStatus] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -648,7 +747,7 @@ const PurchaseOrderPage = () => {
   }, [search]);
 
   const loadBoard = useCallback(async () => {
-    setLoading(true); setError(null);
+    setLoading(true);
     try {
       const params = new URLSearchParams();
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
@@ -656,37 +755,38 @@ const PurchaseOrderPage = () => {
       if (categoryF) params.set("categoryId", categoryF);
       if (productF) params.set("productId", productF);
       if (entityF) params.set("entityAlias", entityF);
+      if (branchF) params.set("branchId", branchF);
       if (status) params.set("status", status);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
       params.set("page", String(page));
       params.set("limit", String(limit));
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/purchase-orders/board?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load board");
+      const json = await fetchPoBoard(params);
 
       setBoard(json.data?.board || []);
       setCounts(json.data?.counts || { ALL: 0, PO_PENDING: 0, GENERATED: 0, APPROVED: 0, REJECTED: 0 });
       setPagination(json.pagination || { total: 0, totalPages: 1 });
     } catch (e) {
-      setError(e.message); setBoard([]);
+      toast.error(e.message || "Failed to load purchase orders"); setBoard([]);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, vendorF, categoryF, productF, entityF, status, dateFrom, dateTo, page, limit]);
+  }, [debouncedSearch, vendorF, categoryF, productF, entityF, branchF, status, dateFrom, dateTo, page, limit]);
 
   useEffect(() => { loadBoard(); }, [loadBoard]);
 
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/vendors?limit=1000`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setVendors(j.data || []);
+        setVendors(await fetchVendors(1000));
       } catch { }
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json(); if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
+      } catch { }
+      // The vendor's branch (vendor master) — the Branch filter.
+      try {
+        setBranchOptions((await fetchScopedBranches("purchase-orders")).map((b) => ({ value: String(b._id), label: b.name })));
       } catch { }
     })();
   }, []);
@@ -701,12 +801,7 @@ const PurchaseOrderPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const url = categoryF
-          ? `${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryF}&limit=1000`
-          : `${API_BACKEND_URL}/stock/product-definitions?limit=1000`;
-        const r = await fetch(url, { credentials: "include" });
-        const j = await r.json();
-        setProductOptions(j.success ? (j.data || []).map((p) => ({ value: p._id, label: p.name })) : []);
+        setProductOptions(await fetchProductOptions(categoryF || undefined));
       } catch {
         setProductOptions([]);
       }
@@ -718,7 +813,7 @@ const PurchaseOrderPage = () => {
   const shown = board;
 
   const hasActiveFilters =
-    !!search || !!vendorF || !!categoryF || !!productF || !!entityF ||
+    !!search || !!vendorF || !!categoryF || !!productF || !!entityF || !!branchF ||
     !!status || !!dateFrom || !!dateTo;
 
   const refresh = () => { loadBoard(); setPopup(null); setView({ mode: "board" }); };
@@ -729,6 +824,7 @@ const PurchaseOrderPage = () => {
     setCategoryF("");
     setProductF("");
     setEntityF("");
+    setBranchF("");
     setDateFrom("");
     setDateTo("");
     setStatus("");
@@ -736,13 +832,8 @@ const PurchaseOrderPage = () => {
   };
 
   const onAction = (type, row, q) => {
-    if (type === "enable") {
-      fetch(`${API_BACKEND_URL}/stock/quotations/${q.sourceQuotationId}/enable-vendor`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, credentials: "include",
-        body: JSON.stringify({ vendorId: row.vendorId }),
-      }).then(loadBoard);
-      return;
-    }
+    if (type === "reset") return setPopup({ type: "reset", row });
+    if (type === "history") return setPopup({ type: "history", row });
     if (type === "create") {
       return setView({
         mode: "create",
@@ -777,7 +868,7 @@ const PurchaseOrderPage = () => {
     return <PODetailsView context={view} onBack={() => setView({ mode: "board" })} />;
 
   if (view.mode === "view") {
-    const pdfUrl = `${API_BACKEND_URL}/stock/purchase-orders/${view.poId}/pdf`;
+    const pdfUrl = poPdfUrl(view.poId);
     return (
       <div className="mx-auto max-w-4xl p-6">
         <div className="mb-5 flex items-center gap-3">
@@ -818,15 +909,16 @@ const PurchaseOrderPage = () => {
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
+      {/* Title, filters and status tabs — they scroll away with the page. */}
       <div className="mb-5">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Purchase orders Approval</h1>
-        <p className="mt-0.5 text-sm">Create, review, and track purchase orders built from approved quotations.</p>
-      </div>
+      <h1 className="mb-2.5 flex items-center gap-2 text-lg font-semibold tracking-tight text-slate-900">
+        <ClipboardCheck className="h-5 w-5 text-indigo-600" /> Purchase Order Approval
+      </h1>
 
-      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-6">
-          <div className="relative lg:col-span-2">
-            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-800"><IconSearch /></span>
+      <div className="mb-2.5 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="relative sm:col-span-2">
+            <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400"><IconSearch /></span>
             <input
               value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               placeholder="Search quotation no, PO no, vendor, product..."
@@ -838,11 +930,12 @@ const PurchaseOrderPage = () => {
             value={categoryF} onChange={(v) => { setCategoryF(v); setProductF(""); setPage(1); }} options={categoryOptions} placeholder="All Categories"
           />
           <SearchableSelect value={productF} onChange={(v) => { setProductF(v); setPage(1); }} options={productOptions} placeholder="All Products" />
-          <SearchableSelect value={entityF} onChange={(v) => { setEntityF(v); setPage(1); }} options={entityOptions} placeholder="All Entities" />
+          {/* Branch = the vendor's branch (vendor master); an order has none of its own. */}
+          <SearchableSelect value={branchF} onChange={(v) => { setBranchF(v); setPage(1); }} options={branchOptions} placeholder="All Branches" />
         </div>
       </div>
 
-      <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap gap-2">
           {tabs.map((t) => {
             const st = TAB_STYLES[t.key] || TAB_STYLES[""];
@@ -861,23 +954,29 @@ const PurchaseOrderPage = () => {
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <DateField label="From:" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} />
-          <DateField label="To:" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="w-full sm:w-40">
+            <SearchableSelect value={entityF} onChange={(v) => { setEntityF(v); setPage(1); }} options={entityOptions} placeholder="All Entities" />
+          </div>
+          <DateRangeButton
+            from={dateFrom} to={dateTo}
+            onFrom={(v) => { setDateFrom(v); setPage(1); }}
+            onTo={(v) => { setDateTo(v); setPage(1); }}
+            hint="PO Pending: quotation approval date · Generated: PO date · Approved / Rejected: decision date."
+          />
           {hasActiveFilters && (
             <button
               type="button"
               onClick={clearFilters}
-              className="inline-flex items-center gap-1 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-600 shadow-sm transition hover:border-rose-400 hover:bg-rose-100"
+              className="inline-flex h-[38px] items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-100"
             >
-              <RotateCcw className="h-4 w-4" />
+              <RotateCcw className="h-3.5 w-3.5" />
               <span>Reset</span>
             </button>
           )}
         </div>
       </div>
-
-      {error && <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+      </div>
 
       {loading ? (
         <div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-40 animate-pulse rounded-2xl bg-slate-100" />)}</div>
@@ -905,13 +1004,13 @@ const PurchaseOrderPage = () => {
 
               <div className="hidden grid-cols-12 gap-2 px-5 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-700 lg:grid">
                 <span className="col-span-2">Vendor</span>
-                <span className="col-span-2">PO No</span>
+                <span className="col-span-1">PO No</span>
                 <span className="col-span-1">Products</span>
                 <span className="col-span-1 text-right">Total</span>
                 <span className="col-span-1 text-right">Qty</span>
-                <span className="col-span-1">Status</span>
-                <span className="col-span-1">Entity</span>
-                <span className="col-span-3 text-right">Actions</span>
+                <span className="col-span-2">Status</span>
+                <span className="col-span-2">Entity Details</span>
+                <span className="col-span-2 text-right">Actions</span>
               </div>
 
               {q.rows.map((row) => {
@@ -929,7 +1028,7 @@ const PurchaseOrderPage = () => {
                         <IconPhone /> {row.phone || "—"}
                       </p>
                     </div>
-                    <div className="col-span-2 text-sm font-medium text-indigo-600">
+                    <div className="col-span-1 min-w-0 text-sm font-medium text-indigo-600">
                       <TruncateText text={row.poNumber} title="PO Number" />
                     </div>
                     <div className="col-span-1">
@@ -942,23 +1041,47 @@ const PurchaseOrderPage = () => {
                     </div>
                     <div className="col-span-1 text-sm font-semibold text-slate-900 tabular-nums lg:text-right">{money(row.totalAmount)}</div>
                     <div className="col-span-1 text-sm text-slate-700 tabular-nums lg:text-right">{row.totalQuantity}</div>
-                    <div className="col-span-1">
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
+                    <div className="col-span-2 flex min-w-0 items-center gap-1">
+                      <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${m.badge || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
                         <span className={`h-1.5 w-1.5 rounded-full ${m.dot || "bg-slate-400"}`} />
-                        {SHORT_STATUS_LABEL[row.status] || row.status}
+                        {m.label || row.status}
                       </span>
-                    </div>
-                    <div className="col-span-1 text-sm font-medium text-slate-700">
-                      <TruncateText text={row.entityAlias} title="Entity" />
-                    </div>
-                    <div className="col-span-3 flex flex-wrap items-center justify-end gap-1.5">
-                      {row.mailResult?.mode && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                          <CheckCircle2 className="h-3 w-3" />
-                          {row.mailResult.mode === "SENT" ? "Mail Sent" : "Manual"}
-                        </span>
+                      {/* An approved PO: how it reached the vendor — system mail, sent manually, skipped, or not yet */}
+                      {row.status === "APPROVED" && (
+                        <button
+                          type="button" onClick={() => setPopup({ type: "mailInfo", row })}
+                          title={MAIL_MODE_META[row.mailResult?.mode]?.label || "Not sent yet"}
+                          aria-label="How the PO was sent"
+                          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition ${
+                            MAIL_MODE_META[row.mailResult?.mode]
+                              ? "text-emerald-600 hover:bg-emerald-50"
+                              : "text-amber-500 hover:bg-amber-50"
+                          }`}
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
                       )}
-                      <ActionBar row={row} on={(type, r) => onAction(type, r, q)} />
+                    </div>
+                    <div className="col-span-2 flex min-w-0 items-center gap-1 text-sm text-slate-700">
+                      {row.entityAlias ? (
+                        <span
+                          className="truncate"
+                          title={[row.buyerEntity?.name, row.buyerEntity?.gstNumber && `GST ${row.buyerEntity.gstNumber}`].filter(Boolean).join(" · ")}
+                        >
+                          <span className="font-semibold text-slate-900">{row.entityAlias}</span>
+                          {row.buyerEntity?.state && (
+                            <span className="text-slate-600">
+                              {" "}({row.buyerEntity.state}{row.buyerEntity.stateCode ? `-${row.buyerEntity.stateCode}` : ""})
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                      <StateChangeInfo change={row.stateChange} entityAlias={row.entityAlias} />
+                    </div>
+                    <div className="col-span-2 flex flex-wrap items-center justify-end gap-1.5">
+                      <ActionBar row={row} canReset={canReset} on={(type, r) => onAction(type, r, q)} />
                     </div>
                   </div>
                 );
@@ -968,11 +1091,8 @@ const PurchaseOrderPage = () => {
         </div>
       )}
 
-      {!loading && pagination.total > 0 && (
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs tabular-nums">
-            Showing {(page - 1) * limit + 1} to {Math.min(page * limit, pagination.total)} of {pagination.total} entries
-          </p>
+      {!loading && pagination.total > 10 && (
+        <div className="mt-5">
           <Pagination
             currentPage={page}
             totalItems={pagination.total}
@@ -983,8 +1103,15 @@ const PurchaseOrderPage = () => {
         </div>
       )}
 
+      {popup?.type === "reset" && (
+        <ResetOrderPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
+      {popup?.type === "history" && (
+        <OrderHistoryPopup row={popup.row} onClose={() => setPopup(null)} />
+      )}
       {popup?.type === "products" && <ProductsPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "info" && <InfoPopup row={popup.row} onClose={() => setPopup(null)} />}
+      {popup?.type === "mailInfo" && <MailInfoPopup row={popup.row} onClose={() => setPopup(null)} />}
       {popup?.type === "review" && <ReviewPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
       {popup?.type === "sendMail" && <SendMailPopup row={popup.row} onClose={() => setPopup(null)} onDone={refresh} />}
     </div>

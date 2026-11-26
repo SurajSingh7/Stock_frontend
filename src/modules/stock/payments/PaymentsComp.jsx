@@ -1,0 +1,999 @@
+"use client";
+
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { fetchPayments, fetchAdjustments, fetchDebitNoteQueue, sendForApproval, updateTds } from "@/modules/stock/invoiceList/invoiceListApi";
+import { fetchVendors } from "@/modules/stock/shared/lookupsApi";
+import Pagination from "@/shared/ui/pagination/Pagination";
+import {
+  RotateCcw, Send, Wallet, PlusCircle, Layers,
+  LayoutGrid, Clock, CheckCircle2, XCircle, CalendarClock,
+  Pencil, AlertTriangle, Percent, Lock,
+} from "lucide-react";
+import { SearchableSelect, Modal, inputCls, money } from "@/modules/stock/shared/StockSharedUI";
+import { paymentTermShort } from "@/modules/stock/shared/paymentTerms";
+import {
+  APPROVAL_STATUS, approvalMeta, PAYMENT_STATE, paymentStateMeta,
+  PAYABLE_FILTER,
+} from "@/modules/stock/shared/paymentStatus";
+import { usePermissions } from "@/context/PermissionContext";
+import { DebitNoteCell, DebitNoteHistoryPopup } from "@/modules/stock/invoiceList/DebitNoteParts";
+import DebitNoteQueue from "@/modules/stock/invoiceList/DebitNoteQueue";
+import RecordPaymentView from "@/modules/stock/payments/RecordPaymentView";
+import { AdjustmentCard } from "@/modules/stock/invoiceList/AdjustmentPopups";
+import MiscPopup from "@/modules/stock/shared/MiscPopup";
+
+/* ============================================================= */
+/* Payments — the account team's screen.                          */
+/*                                                                */
+/* The status bar is two INDEPENDENT groups, because they answer   */
+/* two independent questions: has this been cleared to pay, and    */
+/* how much of it has gone. Picking one from each is the filter    */
+/* accounts actually want — "approved but still unpaid".           */
+/*                                                                */
+/* Every "can I do this" flag on a row is computed server-side;    */
+/* this file renders them and never works the rule out a second    */
+/* time.                                                           */
+/* ============================================================= */
+
+/*
+  What moves the payable: misc charges, and debit notes once approved (one
+  with no status predates the approval chain and counts). A debit note still
+  in review or approval is shown on its own column, never in these sums.
+*/
+// Why a payment request is not offered yet (server decides; this only names it).
+const LOCK_REASON = {
+  DN_IN_PROGRESS: {
+    label: "DN in progress",
+    hint: (r) => `DN-${r.debitNote?.latest?.dnNumber} is still in review or approval`,
+  },
+  NOTHING_PAYABLE: { label: "Nothing payable", hint: () => "Net Payable is zero" },
+};
+
+const inPayable = (a) => a.type !== "DEBIT_NOTE" || !a.status || a.status === "APPROVED";
+
+const fmtDate = (d) =>
+  d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+const fmtDateTime = (d) =>
+  d ? new Date(d).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
+const th = "px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500";
+const thRight = th + " text-right";
+const td = "px-4 py-3 text-sm text-slate-700 align-middle";
+const tdRight = td + " text-right tabular-nums";
+
+/*
+  Each approval state carries its colour whether or not it is selected.
+
+  These used to be grey until clicked, which meant the one thing the row is
+  scanned for — is anything sitting in Rejected — took reading three labels to
+  find out. The colour IS the information; selection is shown by weight and a
+  ring on top of it, not by turning the colour on.
+*/
+const APPROVAL_CHIPS = [
+  // In the order a payment moves: not sent, waiting, sent back, cleared.
+  {
+    key: "NONE", label: "Not Sent", icon: Send, count: "NONE",
+    off: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100",
+    on: "border-slate-400 bg-slate-200 text-slate-900 ring-2 ring-slate-300",
+    badge: "bg-slate-200 text-slate-700",
+    badgeOn: "bg-white/70 text-slate-900",
+    // Joined "N ready" filter — see Chip.
+    ready: true,
+  },
+  {
+    key: APPROVAL_STATUS.PENDING, label: "Pending", icon: Clock, count: "PENDING",
+    off: "border-amber-200 bg-amber-50/70 text-amber-700 hover:bg-amber-50",
+    on: "border-amber-400 bg-amber-100 text-amber-900 ring-2 ring-amber-200",
+    badge: "bg-amber-100 text-amber-800",
+    badgeOn: "bg-white/70 text-amber-900",
+  },
+  {
+    key: APPROVAL_STATUS.REJECTED, label: "Rejected", icon: XCircle, count: "REJECTED",
+    off: "border-rose-200 bg-rose-50/70 text-rose-700 hover:bg-rose-50",
+    on: "border-rose-400 bg-rose-100 text-rose-900 ring-2 ring-rose-200",
+    badge: "bg-rose-100 text-rose-800",
+    badgeOn: "bg-white/70 text-rose-900",
+  },
+  {
+    key: APPROVAL_STATUS.APPROVED, label: "Approved", icon: CheckCircle2, count: "APPROVED",
+    off: "border-emerald-200 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-50",
+    on: "border-emerald-400 bg-emerald-100 text-emerald-900 ring-2 ring-emerald-200",
+    badge: "bg-emerald-100 text-emerald-800",
+    badgeOn: "bg-white/70 text-emerald-900",
+  },
+];
+
+/*
+  Module scope, not declared inside the page.
+
+  It was inside, which made it a brand-new component type on every render —
+  React tears the chip down and rebuilds it each time the list reloads. counts
+  and onPick come in as props for that reason.
+*/
+const Chip = ({ chip, group, value, onPick, counts }) => {
+  const active = value === chip.key;
+  const Icon = chip.icon;
+  const main = (
+    <button
+      type="button"
+      onClick={() => onPick(active ? "" : chip.key)}
+      className={`inline-flex items-center gap-1.5 border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
+        chip.ready ? "rounded-l-xl" : "rounded-xl"
+      } ${active ? chip.on : chip.off}`}
+      aria-pressed={active}
+      aria-label={`${group} ${chip.label}`}
+    >
+      <Icon className="h-4 w-4" />
+      {chip.label}
+      <span className={`rounded-full px-1.5 text-xs tabular-nums ${active ? chip.badgeOn : chip.badge}`}>
+        {counts[chip.count] ?? 0}
+      </span>
+    </button>
+  );
+  if (!chip.ready) return main;
+
+  /*
+    "Ready" is its own filter, joined to Not Sent: of the invoices not sent,
+    only those that can be sent right now — so 2 ready out of 60 are one
+    click away instead of hunted for.
+  */
+  const readyOn = value === "READY";
+  const n = counts.READY ?? 0;
+  return (
+    <span className="inline-flex">
+      {main}
+      <button
+        type="button"
+        onClick={() => onPick(readyOn ? "" : "READY")}
+        aria-pressed={readyOn}
+        title="Not sent yet, and can be sent for approval now"
+        className={`-ml-px inline-flex items-center gap-1 rounded-r-xl border px-2.5 py-1.5 text-xs font-semibold shadow-sm transition ${
+          readyOn
+            ? "border-emerald-500 bg-emerald-600 text-white ring-2 ring-emerald-200"
+            : n > 0
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+              : "border-slate-200 bg-white text-slate-400 hover:bg-slate-50"
+        }`}
+      >
+        {n} ready
+      </button>
+    </span>
+  );
+};
+
+/*
+  The payment side, as a dropdown rather than chips.
+
+  A dropdown that only filtered would have lost what the chips were for — how
+  many sit in each state — so every option carries its own count, the same way
+  the report pages do it. One control, both answers, and the row no longer
+  wraps on a laptop.
+
+  Kept as its own group from the approval chips beside it on purpose: "was
+  this cleared to pay" and "how much of it has gone" are two questions, which
+  is the whole reason they are two fields.
+*/
+const STATE_OPTIONS = [
+  // Only the VALUE takes the colour; the box stays neutral like the
+  // approval group beside it. hex is for the option list itself.
+  { key: "", label: "All", count: "STATE_ALL", dot: "bg-slate-400", text: "text-slate-700", hex: "#334155" },
+  { key: PAYMENT_STATE.UNPAID, label: "Unpaid", count: "UNPAID", dot: "bg-rose-500", text: "text-rose-600", hex: "#e11d48" },
+  { key: PAYMENT_STATE.PARTIAL, label: "Partly Paid", count: "PARTIAL", dot: "bg-amber-500", text: "text-amber-600", hex: "#d97706" },
+  { key: PAYMENT_STATE.PAID, label: "Paid", count: "PAID", dot: "bg-emerald-500", text: "text-emerald-600", hex: "#059669" },
+];
+
+/*
+  When the money is due. The dropdown takes the picked option's colour: Now
+  (green — act on it), Later (blue — for information), All (purple).
+*/
+const PAYABLE_SEGMENTS = [
+  { key: PAYABLE_FILTER.NOW, label: "Payable Now", count: "PAYABLE_NOW", box: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  { key: PAYABLE_FILTER.LATER, label: "Payable Later", count: "PAYABLE_LATER", box: "border-blue-200 bg-blue-50 text-blue-700" },
+  { key: PAYABLE_FILTER.ALL, label: "All", count: "PAYABLE_ALL", box: "border-violet-200 bg-violet-50 text-violet-700" },
+];
+
+/* ── Fix & resend, after the approver sent it back ─────────────── */
+/* The reason it came back, and a note (required) saying what was  */
+/* done about it — the approver reads the two side by side.        */
+const FixAndResendPopup = ({ invoice, onClose, onResent }) => {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const resend = async () => {
+    setBusy(true); setError(null);
+    try {
+      await sendForApproval(invoice._id, note.trim());
+      onResent();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={`Fix & resend · Invoice ${invoice.invoiceNumber}`}>
+      {error && (
+        <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>
+      )}
+
+      <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50/60 p-3">
+        <p className="flex items-center gap-1.5 text-sm font-semibold text-rose-800">
+          <AlertTriangle className="h-4 w-4" /> Sent back by {invoice.paymentApproval?.reviewedByName || "—"}
+          <span className="font-normal text-rose-600">· {fmtDateTime(invoice.paymentApproval?.reviewedAt)}</span>
+        </p>
+        <p className="mt-1 text-sm text-rose-900">{invoice.paymentApproval?.rejectedReason || "No reason given"}</p>
+      </div>
+
+      <div className="mb-4 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+        <span className="text-slate-500">Net Payable</span>
+        <span className="font-bold tabular-nums text-slate-900">{money(invoice.payable)}</span>
+      </div>
+
+      <label htmlFor="resend-note" className="mb-1.5 block text-xs font-semibold text-slate-700">
+        Note for the approver <span className="text-rose-500">*</span>
+      </label>
+      <textarea
+        id="resend-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+        placeholder="What was fixed, or why it should be paid as it is…" className={inputCls}
+      />
+      <p className="mt-1 text-[11px] text-slate-400">The approver sees this note beside the reason it was sent back.</p>
+
+      {invoice.debitNoteLive && (
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
+          A debit note on this invoice is still in review or approval — it can be sent again once that is settled.
+        </p>
+      )}
+
+      <div className="mt-5 flex justify-end gap-2">
+        <button
+          type="button" onClick={onClose} disabled={busy}
+          className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={resend} disabled={busy || !note.trim() || invoice.debitNoteLive}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          <Send className="h-4 w-4" /> {busy ? "Sending…" : "Send again"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+/* ── The last look before it goes to the approval team ────────── */
+/* Sending was a one-click button, and that was wrong: what the    */
+/* approval team is asked to release is the payable AFTER every    */
+/* debit note and misc charge, and the person sending it has no   */
+/* other place on this screen where those add up in front of them. */
+/*                                                                 */
+/* So the popup is the figure, itemised, with the send button      */
+/* underneath it — the same content the approval team will see,    */
+/* shown to the sender first.                                      */
+const SendForApprovalPopup = ({ invoice, onClose, onSent }) => {
+  const [rows, setRows] = useState(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      setRows((await fetchAdjustments("payments", invoice._id)).filter(inPayable));
+    } catch {
+      // Non-fatal: the totals below still come off the row itself, so a failed
+      // load costs the itemisation, not the figure being approved.
+      setRows([]);
+    }
+  }, [invoice._id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const send = async () => {
+    setBusy(true); setError(null);
+    try {
+      await sendForApproval(invoice._id, note.trim());
+      onSent();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const debits = (rows || []).filter((a) => a.type === "DEBIT_NOTE");
+  const miscs = (rows || []).filter((a) => a.type === "MISC");
+  const debitTotal = debits.reduce((s, a) => s + (a.amount || 0), 0);
+  const miscTotal = miscs.reduce((s, a) => s + (a.amount || 0), 0);
+
+  return (
+    <Modal onClose={onClose} title={`Send for approval · Invoice ${invoice.invoiceNumber}`} maxWidth="max-w-2xl">
+      {error && (
+        <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-100">{error}</div>
+      )}
+
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl bg-slate-50 px-4 py-3 text-sm sm:grid-cols-3">
+        <div>
+          <p className="text-xs text-slate-500">Vendor</p>
+          <p className="font-medium text-slate-900">{invoice.vendorName || "—"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">PO number</p>
+          <p className="font-medium text-slate-900">{invoice.poNumber || "—"}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Invoice date</p>
+          <p className="font-medium text-slate-900">{fmtDate(invoice.invoiceDate)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Terms</p>
+          <p className="font-medium text-slate-900">{paymentTermShort(invoice.paymentTerms)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Due on</p>
+          <p className="font-medium text-slate-900">{fmtDate(invoice.dueDate)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-slate-500">Payable on</p>
+          <p className="font-medium text-slate-900">{fmtDate(invoice.scheduledOn)}</p>
+          {/* Said out loud when the two differ, because a rescheduled invoice
+              arriving early is the one thing an approver would otherwise read
+              as a mistake. */}
+          {invoice.rescheduled && (
+            <p className={`text-[11px] font-semibold ${invoice.scheduleOffset < 0 ? "text-amber-600" : "text-violet-600"}`}>
+              {invoice.scheduleOffset < 0 ? "brought forward" : "deferred"} by {Math.abs(invoice.scheduleOffset)} days
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* ── What is being asked for, itemised ─────────────────── */}
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">What is being approved</p>
+
+        {rows === null ? (
+          <div className="h-16 animate-pulse rounded-xl bg-slate-100" />
+        ) : (
+          <div className="space-y-1.5 rounded-xl border border-slate-200 p-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-600">Invoice total</span>
+              <span className="tabular-nums text-slate-900">{money(invoice.grossAmount)}</span>
+            </div>
+
+            {invoice.tdsAmount > 0 && (
+              <div className="flex justify-between">
+                <span className="text-amber-700">
+                  TDS
+                  <span className="ml-1.5 text-xs text-slate-400">{invoice.tdsRate}% on basic</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-amber-700">&minus;{money(invoice.tdsAmount)}</span>
+              </div>
+            )}
+
+            {debits.map((a) => (
+              <div key={a._id} className="flex justify-between">
+                <span className="min-w-0 text-rose-700">
+                  Debit note
+                  <span className="ml-1.5 text-xs text-slate-400">{a.reason || "—"}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-rose-700">&minus;{money(a.amount)}</span>
+              </div>
+            ))}
+
+            {miscs.map((a) => (
+              <div key={a._id} className="flex justify-between">
+                <span className="min-w-0 text-sky-700">
+                  Misc charge
+                  <span className="ml-1.5 text-xs text-slate-400">{a.reason || "—"}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-sky-700">+{money(a.amount)}</span>
+              </div>
+            ))}
+
+            {rows.length === 0 && (
+              <p className="py-1 text-xs text-slate-400">No debit notes or misc charges on this invoice.</p>
+            )}
+
+            <div className="flex justify-between border-t border-slate-200 pt-1.5 text-base">
+              <span className="font-semibold text-slate-900">Payable</span>
+              <span className="font-bold tabular-nums text-slate-900">{money(invoice.payable)}</span>
+            </div>
+
+            {invoice.paidTotal > 0 && (
+              <div className="flex justify-between text-xs text-slate-500">
+                <span>Already paid</span>
+                <span className="tabular-nums">{money(invoice.paidTotal)} · balance {money(invoice.balance)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* The full cards underneath, because a one-line reason is enough to
+          recognise a debit note but not enough to check one — the units it
+          claimed are what somebody would query. */}
+      {rows !== null && rows.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-semibold text-indigo-600">
+            Show the {rows.length === 1 ? "adjustment" : `${rows.length} adjustments`} in full
+            <span className="ml-1.5 font-normal text-slate-400">
+              ({debits.length} debit {debits.length === 1 ? "note" : "notes"} &minus;{money(debitTotal)},
+              {" "}{miscs.length} misc +{money(miscTotal)})
+            </span>
+          </summary>
+          <div className="mt-2 space-y-3">
+            {rows.map((a) => <AdjustmentCard key={a._id} adjustment={a} />)}
+          </div>
+        </details>
+      )}
+
+      <label htmlFor="send-note" className="mb-1.5 mt-4 block text-xs font-semibold text-slate-700">
+        Note for the approval team
+      </label>
+      <textarea
+        id="send-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+        placeholder="Optional — anything the approver should know" className={inputCls}
+      />
+
+      <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 ring-1 ring-inset ring-amber-100">
+        Once sent, the debit notes, misc charges and the payable date are locked until the
+        approval team decides.
+      </p>
+
+      <div className="mt-5 flex justify-end gap-2">
+        <button
+          type="button" onClick={onClose} disabled={busy}
+          className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button" onClick={send} disabled={busy || rows === null}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          <Send className="h-4 w-4" /> {busy ? "Sending…" : `Send ${money(invoice.payable)} for approval`}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+/* ── TDS on one invoice — accounts only, no approval, never silent ── */
+const TdsEditPopup = ({ invoice, onClose, onDone }) => {
+  const [rate, setRate] = useState(String(invoice.tdsRate ?? 0));
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const basic = invoice.breakup?.basicAmount || 0;
+  const n = Number(rate);
+  const valid = rate !== "" && Number.isFinite(n) && n >= 0 && n <= 100;
+  const newTds = valid ? Math.round(basic * n) / 100 : 0;
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await updateTds(invoice._id, { rate: n, reason: reason.trim() });
+      onDone();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} title={`Edit TDS · Invoice ${invoice.invoiceNumber}`}>
+      <div className="mb-3 grid grid-cols-3 gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm">
+        <div><p className="text-xs text-slate-500">Basic</p><p className="font-semibold tabular-nums">{money(basic)}</p></div>
+        <div><p className="text-xs text-slate-500">Now</p><p className="font-semibold tabular-nums text-amber-700">{invoice.tdsRate || 0}% · {money(invoice.tdsAmount || 0)}</p></div>
+        <div><p className="text-xs text-slate-500">After</p><p className="font-semibold tabular-nums text-amber-700">{valid ? `${n}% · ${money(newTds)}` : "—"}</p></div>
+      </div>
+      <label className="mb-1 block text-xs font-semibold text-slate-600">New TDS rate (%)</label>
+      <input type="number" min="0" max="100" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} className={inputCls} />
+      <label className="mb-1 mt-3 block text-xs font-semibold text-slate-600">Reason <span className="text-rose-500">*</span></label>
+      <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputCls} placeholder="e.g. lower-deduction certificate" />
+      <p className="mt-2 text-xs text-slate-500">Changed by hand on this invoice only, with who and why kept on record. Locked once payment approval is asked for.</p>
+      {error && <p className="mt-2 text-sm text-rose-600">{error}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm hover:bg-slate-50">Cancel</button>
+        <button
+          type="button" onClick={save} disabled={busy || !valid || !reason.trim() || n === (invoice.tdsRate || 0)}
+          className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {busy ? "Saving…" : "Save TDS"}
+        </button>
+      </div>
+    </Modal>
+  );
+};
+
+/* ============================================================= */
+/* Main                                                           */
+/* ============================================================= */
+
+const PaymentsComp = () => {
+  const { permissions, isAdmin } = usePermissions();
+  const myActions = useMemo(() => {
+    if (isAdmin) return null;
+    const mod = (permissions || []).find((m) => m.moduleKey === "payments");
+    return new Set((mod?.actions || []).map((a) => String(a).toUpperCase()));
+  }, [permissions, isAdmin]);
+  const can = (a) => myActions === null || myActions.has(a);
+  const canManage = can("MANAGE_ADJUSTMENT");
+  const canRequest = can("REQUEST_PAYMENT_APPROVAL");
+  const canPay = can("ENTER_PAYMENT");
+  const canReviewDn = can("REVIEW_DEBIT_NOTE");
+
+  // Two views: the invoices themselves, and the debit notes waiting on review.
+  const [tab, setTab] = useState("invoices");
+  const [dnCounts, setDnCounts] = useState({});
+  // The review tab's badge, before that tab is ever opened.
+  useEffect(() => {
+    (async () => {
+      try {
+        const j = await fetchDebitNoteQueue("payments", { limit: 1, status: "REVIEW_PENDING" });
+        setDnCounts(j.data?.counts || {});
+      } catch {
+        // Non-fatal — the badge just stays empty.
+      }
+    })();
+  }, []);
+
+  const [rows, setRows] = useState([]);
+  const [counts, setCounts] = useState({});
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [actionError, setActionError] = useState(null);
+
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [vendorId, setVendorId] = useState("");
+  const [approvalStatus, setApprovalStatus] = useState("");
+  const [paymentState, setPaymentState] = useState("");
+  // Payable Now by default: it is what the desk opens the screen for.
+  const [payable, setPayable] = useState(PAYABLE_FILTER.NOW);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+
+  const [vendors, setVendors] = useState([]);
+  const [view, setView] = useState({ mode: "list" });
+  const [popup, setPopup] = useState(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        setVendors(await fetchVendors());
+      } catch {
+        // Non-fatal — the vendor filter just stays empty.
+      }
+    })();
+  }, []);
+
+  const loadList = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      if (vendorId) params.set("vendorId", vendorId);
+      if (approvalStatus) params.set("approvalStatus", approvalStatus);
+      if (paymentState) params.set("paymentState", paymentState);
+      if (payable && payable !== PAYABLE_FILTER.ALL) params.set("payable", payable);
+
+      const json = await fetchPayments(params);
+      setRows(json.data?.rows || []);
+      setCounts(json.data?.counts || {});
+      setTotal(json.pagination?.total || 0);
+    } catch (e) {
+      setError(e.message);
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, limit, debouncedSearch, vendorId, approvalStatus, paymentState, payable]);
+
+  useEffect(() => { loadList(); }, [loadList]);
+
+  const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v._id, label: v.name })), [vendors]);
+
+  const refresh = () => { setPopup(null); setView({ mode: "list" }); loadList(); };
+  /*
+    "All" clears the two CHIP groups and leaves the Payable dropdown alone —
+    because that is exactly what its count means. The count answers "how many
+    if I click this", and it is worked out with the dropdown still applied, so
+    clearing the dropdown too would show more rows than the button promised.
+  */
+  const clearChips = () => { setApprovalStatus(""); setPaymentState(""); setPage(1); };
+  // The Clear Filter button resets everything, dropdown included.
+  const clearEverything = () => {
+    setSearch(""); setVendorId(""); setApprovalStatus(""); setPaymentState("");
+    setPayable(PAYABLE_FILTER.ALL); setPage(1);
+  };
+
+  /*
+    Both of these replace the list rather than opening over it, for the same
+    reason: each is a form with a list inside it, and a popup holding a
+    scrollable list inside another scrollable list is unusable.
+
+    Debit note — picking units out of a 40-piece delivery needs the room.
+    Payment   — one settlement can be five bank entries, each with its own
+                reference and its own receipt files.
+  */
+  if (view.mode === "payment") {
+    return (
+      <RecordPaymentView
+        invoice={view.row}
+        onBack={() => setView({ mode: "list" })} onDone={refresh}
+      />
+    );
+  }
+
+
+  const anyFilter = !!approvalStatus || !!paymentState || payable !== PAYABLE_FILTER.ALL;
+  // "All" clears the approval and payment-status groups only (the Payable
+  // dropdown stays), so it reads as selected whenever those two are clear.
+  const allChipOn = !approvalStatus && !paymentState;
+
+  return (
+    <div className="min-h-screen bg-slate-50/60 p-6">
+      <div className="mb-5">
+        <h1 className="text-xl font-semibold tracking-tight text-slate-900">Payments</h1>
+        <p className="mt-0.5 text-sm text-slate-500">
+          Review debit notes, add misc charges and TDS, ask for payment approval once an invoice is due, then record what was paid.
+        </p>
+      </div>
+
+      <div className="mb-5 flex gap-1 border-b border-slate-200">
+        {[
+          { key: "invoices", label: "Invoices" },
+          { key: "dn", label: "Debit Note Review", badge: dnCounts.REVIEW_PENDING },
+        ].map((t) => (
+          <button
+            key={t.key} type="button" onClick={() => setTab(t.key)}
+            className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+              tab === t.key ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {t.label}
+            {t.badge > 0 && (
+              <span className="rounded-full bg-violet-100 px-1.5 text-xs tabular-nums text-violet-700">{t.badge}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === "dn" ? (
+        <DebitNoteQueue mode="review" canAct={canReviewDn} onCounts={setDnCounts} />
+      ) : (
+      <>
+
+      {(error || actionError) && (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <span>{error || actionError}</span>
+          <button type="button" onClick={() => { setError(null); setActionError(null); }} className="font-bold">&times;</button>
+        </div>
+      )}
+
+      {/* Search first, then the status bar.
+
+          The bar is where the eye lands and stays — it is the thing being
+          clicked all day — so it sits directly above the table it filters
+          rather than with a search box wedged between them. */}
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+          <div className="lg:col-span-2">
+            <input
+              type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search invoice number, PO number or vendor..." className={inputCls}
+            />
+          </div>
+          <SearchableSelect
+            value={vendorId} onChange={(v) => { setVendorId(v); setPage(1); }}
+            options={vendorOptions} placeholder="All vendors"
+          />
+          {(search || vendorId || anyFilter) && (
+            <button
+              type="button"
+              onClick={clearEverything}
+              className="inline-flex items-center justify-center gap-1 rounded-xl border border-rose-300 bg-rose-50 px-3.5 py-2 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100"
+            >
+              <RotateCcw className="h-4 w-4" /> Clear Filter
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Two independent groups. Picking one from each is the filter accounts
+          actually want — "approved but still unpaid". */}
+      <div className="mb-5 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <button
+          type="button" onClick={clearChips}
+          aria-pressed={allChipOn}
+          className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-sm font-semibold shadow-sm transition ${
+            !allChipOn
+              ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+              : "border-slate-800 bg-slate-800 text-white ring-2 ring-slate-300"
+          }`}
+        >
+          <LayoutGrid className="h-4 w-4" /> All
+          <span className={`rounded-full px-1.5 text-xs tabular-nums ${!allChipOn ? "bg-slate-100 text-slate-600" : "bg-white/25 text-white"}`}>
+            {counts.ALL ?? 0}
+          </span>
+        </button>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
+          <span className="mr-1 text-sm font-semibold text-slate-700">Payment Approval</span>
+          {APPROVAL_CHIPS.map((c) => (
+            <Chip
+              key={c.key} chip={c} group="Payment approval"
+              value={approvalStatus} counts={counts}
+              onPick={(v) => { setApprovalStatus(v); setPage(1); }}
+            />
+          ))}
+        </div>
+
+        {/* Dropdowns, coloured by what is picked so the state reads at a glance. */}
+        {(() => {
+          const st = STATE_OPTIONS.find((o) => o.key === paymentState) || STATE_OPTIONS[0];
+          const all = (counts.UNPAID ?? 0) + (counts.PARTIAL ?? 0) + (counts.PAID ?? 0);
+          return (
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-1.5">
+              <span className="text-sm font-semibold text-slate-700">Payment Status</span>
+              <select
+                value={paymentState}
+                onChange={(e) => { setPaymentState(e.target.value); setPage(1); }}
+                className={`cursor-pointer rounded-lg border-0 bg-transparent py-0.5 pr-7 text-sm font-bold focus:outline-none focus:ring-0 ${st.text}`}
+                aria-label="Payment status"
+              >
+                {STATE_OPTIONS.map((o) => (
+                  <option key={o.key || "all"} value={o.key} style={{ color: o.hex }}>
+                    {o.label} · {o.count === "STATE_ALL" ? all : counts[o.count] ?? 0}
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        })()}
+
+        {(() => {
+          const pv = PAYABLE_SEGMENTS.find((o) => o.key === payable) || PAYABLE_SEGMENTS[2];
+          return (
+            <label className={`ml-auto flex items-center gap-2 rounded-xl border px-3 py-1.5 transition ${pv.box}`}>
+              <CalendarClock className="h-4 w-4 opacity-80" />
+              <select
+                value={payable} onChange={(e) => { setPayable(e.target.value); setPage(1); }}
+                className="cursor-pointer rounded-lg border-0 bg-transparent py-0.5 pr-7 text-sm font-bold focus:outline-none focus:ring-0"
+                aria-label="Payable timing"
+              >
+                {PAYABLE_SEGMENTS.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label} · {counts[o.count] ?? 0}</option>
+                ))}
+              </select>
+            </label>
+          );
+        })()}
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-full divide-y divide-slate-200">
+          <thead className="bg-slate-50/60">
+            <tr>
+              <th className={th}>Invoice</th>
+              <th className={th}>Vendor</th>
+              <th className={thRight}>Payable</th>
+              <th className={thRight}>Paid</th>
+              <th className={thRight}>Balance</th>
+              <th className={th}>Terms</th>
+              <th className={th}>Payable On</th>
+              <th className={th}>Debit Note</th>
+              <th className={th}>Approval</th>
+              <th className={th}>Payment</th>
+              <th className={thRight}>Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {loading ? (
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">Loading…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
+                Nothing here with these filters.
+              </td></tr>
+            ) : (
+              rows.map((r) => {
+                const am = approvalMeta(r.approvalStatus);
+                const pm = paymentStateMeta(r.paymentState);
+                return (
+                  <tr key={r._id} className="transition hover:bg-slate-50/60">
+                    <td className={td}>
+                      <span className="block font-semibold text-slate-900">{r.invoiceNumber}</span>
+                      <span className="text-[11px] text-slate-400">{r.poNumber || "—"}</span>
+                    </td>
+                    <td className={td}>{r.vendorName || "—"}</td>
+                    <td className={tdRight + " font-semibold text-slate-900"}>
+                      {money(r.payable)}
+                      {r.tdsAmount > 0 && (
+                        <span className="ml-1 text-[11px] text-amber-600" title={`TDS ${r.tdsRate}% on basic`}>
+                          (TDS −{money(r.tdsAmount)})
+                        </span>
+                      )}
+                      {r.adjustmentTotal !== 0 && (
+                        <span className={`ml-1 text-[11px] ${r.adjustmentTotal < 0 ? "text-rose-600" : "text-sky-600"}`}>
+                          ({r.adjustmentTotal < 0 ? "−" : "+"}{money(Math.abs(r.adjustmentTotal))})
+                        </span>
+                      )}
+                    </td>
+                    <td className={tdRight}>{r.paidTotal > 0 ? money(r.paidTotal) : <span className="text-slate-300">—</span>}</td>
+                    <td className={tdRight + " font-medium text-indigo-700"}>{money(r.balance)}</td>
+                    <td className={td}>{paymentTermShort(r.paymentTerms)}</td>
+                    {/* The SCHEDULED date, because that is when this reaches
+                        the queue — which is what this screen is for. The
+                        contractual due date is shown underneath when the two
+                        differ, so a deferred invoice never looks like it simply
+                        arrived late. */}
+                    <td className={td}>
+                      <span className="block">{fmtDate(r.scheduledOn)}</span>
+                      {r.rescheduled ? (
+                        <span className={`text-[11px] font-semibold ${r.scheduleOffset < 0 ? "text-amber-600" : "text-violet-600"}`}>
+                          due {fmtDate(r.dueDate)}
+                        </span>
+                      ) : r.daysLeft < 0 ? (
+                        <span className="text-[11px] font-semibold text-rose-600">{Math.abs(r.daysLeft)} days overdue</span>
+                      ) : null}
+                    </td>
+                    <td className={td}>
+                      <DebitNoteCell summary={r.debitNote} onHistory={() => setPopup({ type: "dnHistory", row: r })} />
+                    </td>
+                    <td className={td}>
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${am.chip}`}>
+                        {am.label}
+                      </span>
+                      {/* Pulled back because a debit note landed while it waited. */}
+                      {!r.approvalStatus && r.paymentApproval?.pulledBackNote && (
+                        <span className="mt-0.5 block max-w-[170px] text-[11px] text-orange-600" title={r.paymentApproval.pulledBackNote}>
+                          Pulled back: {r.paymentApproval.pulledBackNote}
+                        </span>
+                      )}
+                      {r.approvalStatus === APPROVAL_STATUS.REJECTED && r.paymentApproval?.rejectedReason && (
+                        <span className="mt-0.5 block max-w-[170px] truncate text-[11px] text-slate-400" title={r.paymentApproval.rejectedReason}>
+                          {r.paymentApproval.rejectedReason}
+                        </span>
+                      )}
+                    </td>
+                    <td className={td}>
+                      <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${pm.chip}`}>
+                        {pm.label}
+                      </span>
+                      {/* A status that disagrees with the amounts has to say
+                          so, or the row looks like an arithmetic error. */}
+                      {r.stateOverridden && (
+                        <span
+                          className="mt-0.5 block text-[11px] font-semibold text-amber-600"
+                          title={r.paymentOverrideReason || ""}
+                        >
+                          set by hand
+                        </span>
+                      )}
+                      {r.writtenOff > 0 && (
+                        <span className="mt-0.5 block text-[11px] text-slate-400">
+                          {money(r.writtenOff)} written off
+                        </span>
+                      )}
+                    </td>
+                    <td className={tdRight}>
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                        {/* A rejection is one piece of work, not two screens:
+                            the reason, the adjustments and the resend live in
+                            one popup. */}
+                        {r.approvalStatus === APPROVAL_STATUS.REJECTED && canRequest && (
+                          <button
+                            type="button" onClick={() => setPopup({ type: "fix", row: r })}
+                            className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-500"
+                          >
+                            <Pencil className="h-3.5 w-3.5" /> Fix & resend
+                          </button>
+                        )}
+                        {canManage && r.canEditAdjustments && r.approvalStatus !== APPROVAL_STATUS.REJECTED && (
+                          <>
+                            <button
+                              type="button" onClick={() => setPopup({ type: "tds", row: r })}
+                              title={`Edit TDS (now ${r.tdsRate || 0}%)`}
+                              className="inline-flex items-center rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs font-semibold text-amber-600 shadow-sm transition hover:bg-amber-50"
+                            >
+                              <Percent className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button" onClick={() => setPopup({ type: "misc", row: r })}
+                              title="Misc (extra charges) — edit"
+                              className="inline-flex items-center rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-semibold text-sky-600 shadow-sm transition hover:bg-sky-50"
+                            >
+                              <PlusCircle className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                        {/* Opens the figure being approved rather than sending
+                            straight away — the payable after every debit note
+                            and misc charge is what the approver acts on, and
+                            this is the sender's only chance to see it. */}
+                        {/* Why there is no "Send for approval" yet — said, not left blank.
+                            Not-due is left out: the Payable On column already says it. */}
+                        {canRequest && !r.approvalStatus && LOCK_REASON[r.paymentLockReason] && (
+                          <span
+                            title={LOCK_REASON[r.paymentLockReason].hint(r)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-500"
+                          >
+                            <Lock className="h-3.5 w-3.5" /> {LOCK_REASON[r.paymentLockReason].label}
+                          </span>
+                        )}
+                        {canRequest && r.canSendForApproval && r.approvalStatus !== APPROVAL_STATUS.REJECTED && (
+                          <button
+                            type="button" onClick={() => setPopup({ type: "send", row: r })}
+                            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500"
+                          >
+                            <Send className="h-3.5 w-3.5" /> Send for approval
+                          </button>
+                        )}
+                        {canPay && r.canEnterPayment && (
+                          <button
+                            type="button" onClick={() => setView({ mode: "payment", row: r })}
+                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500"
+                          >
+                            <Wallet className="h-3.5 w-3.5" /> {r.paidTotal > 0 ? "Add payment" : "Enter payment"}
+                          </button>
+                        )}
+                        {/* Read-only look at misc when it cannot be edited here. */}
+                        {!(canManage && r.canEditAdjustments) && (r.extraCharges || []).length > 0 && (
+                        <button
+                          type="button" onClick={() => setPopup({ type: "misc", row: r, readOnly: true })}
+                          title="Misc on this invoice"
+                          className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-500 shadow-sm transition hover:bg-slate-50"
+                        >
+                          <Layers className="h-3.5 w-3.5" />
+                        </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+
+        <Pagination
+          currentPage={page} totalItems={total} itemsPerPage={limit} onPageChange={setPage}
+          onItemsPerPageChange={(n) => { setLimit(n); setPage(1); }}
+        />
+      </div>
+
+      </>
+      )}
+
+      {popup?.type === "fix" && (
+        <FixAndResendPopup invoice={popup.row} onClose={() => setPopup(null)} onResent={refresh} />
+      )}
+      {popup?.type === "misc" && (
+        <MiscPopup invoice={popup.row} readOnly={!!popup.readOnly} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
+      {popup?.type === "dnHistory" && (
+        <DebitNoteHistoryPopup invoice={popup.row} basePath="payments" onClose={() => setPopup(null)} />
+      )}
+      {popup?.type === "tds" && (
+        <TdsEditPopup invoice={popup.row} onClose={() => setPopup(null)} onDone={refresh} />
+      )}
+      {popup?.type === "send" && (
+        <SendForApprovalPopup
+          invoice={popup.row} onClose={() => setPopup(null)} onSent={refresh}
+        />
+      )}
+    </div>
+  );
+};
+
+export default PaymentsComp;

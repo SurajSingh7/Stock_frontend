@@ -1,15 +1,22 @@
 "use client";
 
 import React from "react";
+import { usePathname } from "next/navigation";
 import { Profile } from "./components/Profile";
 import { Navbar } from "./components/NavBar/Navbar";
 import { usePermissions } from "@/context/PermissionContext";
 import ZoomButtons from "./components/zoom/ZoomButton";
+import NotificationBell from "@/modules/alerts/inbox/NotificationBell";
+import SettingsMenu from "./components/NavBar/SettingsMenu";
 
 const Header = () => {
     const { userData } = usePermissions();
+    const pathname = usePathname();
 
-    if (!userData) {
+    // Never on the login page: an HRMS session can still be alive there (a
+    // page restored from history, or the app cookie gone), and the app's menu
+    // over a sign-in form reads as signed-in and signed-out at once.
+    if (!userData || pathname === "/") {
         return null;
     }
 
@@ -23,13 +30,12 @@ const Header = () => {
                     <div className="flex gap-2">
                         <div
                             className="text-lg font-bold cursor-pointer hover:text-orange-300 transition"
-                            onClick={() => (window.location.href = "/stock/purchase-orders")}
+                            onClick={() => (window.location.href = "/stock/accounts/po-approval")}
                         >
                             Netra Stock
                         </div>
                         <div
                             className="text-lg font-bold cursor-pointer hover:text-orange-300 transition" >
-                           {/* <ZoomButtons variant="inline" show={1} /> */}
                         </div>
                     </div>
 
@@ -37,6 +43,10 @@ const Header = () => {
                         <div className="flex-1 flex justify-center">
                             <Navbar />
                         </div>
+                        {/* ⚙ Settings (Alerts & Escalations, Access Control, Testing) */}
+                        <SettingsMenu />
+                        {/* Website bell — Alerts & Escalations In-App channel */}
+                        <NotificationBell />
                         <div>
                             <Profile />
                         </div>

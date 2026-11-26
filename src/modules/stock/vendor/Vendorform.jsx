@@ -4,12 +4,12 @@ import React, { useState, useEffect, useCallback, createContext, useContext } fr
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Save, Plus, Trash2, ShieldCheck, Loader2, ChevronUp, ChevronDown,
-  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check, Pencil,
+  Search, X, Lock, MapPin, User, FileText, Landmark, AlertCircle, Check,
   DeleteIcon,
   Delete,
   LucideDelete,
 } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchVendorList, fetchVendor, saveVendor, fetchProductsByCategory, fetchActiveBranches } from "./vendorApi";
 import { usePermissions } from "@/context/PermissionContext";
 import { PAYMENT_TERMS } from "./vendorConstants";
 import { STATE_OPTIONS } from "@/shared/constants/indianStates";
@@ -291,6 +291,17 @@ const emptyBankAccount = (label) => ({
   state: { key: "", name: "", code: "" }, city: "", accountNumber: "", rtgsCode: "", neftCode: "",
 });
 
+// Merge a saved record onto form defaults, skipping null/undefined so a
+// field stored as null keeps its "" default — a null `value` on a controlled
+// input triggers React's "value prop should not be null" warning.
+const withDefaults = (defaults, data) => {
+  const out = { ...defaults };
+  Object.entries(data || {}).forEach(([k, v]) => {
+    if (v !== null && v !== undefined) out[k] = v;
+  });
+  return out;
+};
+
 const defaultVendor = () => ({
   name: "",
   vendorCode: "",
@@ -302,6 +313,8 @@ const defaultVendor = () => ({
   panNumber: "",
   branchId: "",
   paymentTerms: "",
+  tdsRate: "",
+  parentVendorId: "",
   notes: "",
   contacts: [emptyContact("PRIMARY")],
   address: { fullAddress: "", area: "", city: "", pinCode: "", state: { key: "", name: "", code: "" } },
@@ -312,6 +325,43 @@ const defaultVendor = () => ({
 /* ------------------------------------------------------------------ */
 /* Card 1 — Basic Details (GST verified ⇒ name / PAN / state locked)   */
 /* ------------------------------------------------------------------ */
+
+/*
+  "Main Vendor": the main firm this vendor belongs to (same owner). Lists only
+  main vendors — one level, so a child is never offered — and never itself.
+*/
+const MainVendorField = ({ vendor, setVendor }) => {
+  const [options, setOptions] = useState([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const json = await fetchVendorList({ group: "mains", limit: 500 });
+        setOptions((json.data || []).filter((v) => v.isActive !== false));
+      } catch {
+        // Non-fatal — the field just offers nothing to pick.
+      }
+    })();
+  }, []);
+  const selfId = vendor._id ? String(vendor._id) : "";
+  return (
+    <Field label="Main Vendor">
+      <select
+        className={inputCls}
+        value={vendor.parentVendorId ? String(vendor.parentVendorId) : ""}
+        onChange={(e) => setVendor((v) => ({ ...v, parentVendorId: e.target.value }))}
+      >
+        <option value="">— This is a main vendor —</option>
+        {options
+          .filter((o) => String(o._id) !== selfId)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((o) => (
+            <option key={o._id} value={o._id}>{o.name}{o.vendorCode ? ` (${o.vendorCode})` : ""}</option>
+          ))}
+      </select>
+      <p className="text-xs text-slate-400">Pick one when this firm belongs to another vendor&apos;s owner — they show as one group.</p>
+    </Field>
+  );
+};
 
 const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, branches = [], isEdit = false, canChangeBranch = false, branchLabel = "" }) => {
   const [verifying, setVerifying] = useState(false);
@@ -529,6 +579,22 @@ const BasicDetailsCard = ({ vendor, setVendor, errors, gstLocked, onVerified, br
             ))}
           </select>
         </Field>
+
+        {/* TDS held back on this vendor's invoices, as % of Basic. Taken onto
+            each invoice when it is approved — changing it later does not move
+            invoices already approved. Blank = no TDS. */}
+        <Field label="TDS %" error={errors.tdsRate}>
+          <input
+            type="number" min="0" max="100" step="0.01"
+            className={errors.tdsRate ? inputErrCls : inputCls}
+            value={vendor.tdsRate ?? ""}
+            onChange={(e) => setVendor((v) => ({ ...v, tdsRate: e.target.value }))}
+            placeholder="e.g. 2 (blank = no TDS)"
+          />
+          <p className="text-xs text-slate-400">Deducted on the Basic of each invoice when it is approved.</p>
+        </Field>
+
+        <MainVendorField vendor={vendor} setVendor={setVendor} />
 
         <Field label="Notes">
           <textarea
@@ -840,9 +906,7 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
     async (categoryId) => {
       if (productsByCategory[categoryId]) return productsByCategory[categoryId];
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/by-category/${categoryId}`, { credentials: "include" });
-        const json = await res.json();
-        const list = json.success ? json.data || [] : [];
+        const list = await fetchProductsByCategory(categoryId);
         setProductsByCategory((prev) => ({ ...prev, [categoryId]: list }));
         return list;
       } catch {
@@ -1024,9 +1088,6 @@ const AssignProductsCard = ({ vendor, setVendor }) => {
                 <div className="mb-3 flex items-center justify-between">
                   <span className="inline-flex items-center gap-2 text-sm font-bold text-slate-900">
                     {ap.categoryName}
-                    {/* <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                      LEAF
-                    </span> */}
                   </span>
                   <div className="flex items-center gap-3">
                     {list && list.length > 0 && (
@@ -1230,6 +1291,10 @@ const validateVendor = (vendor, isEdit = false) => {
   }
 
   if (!vendor.paymentTerms) { f.paymentTerms = "Payment terms is required"; push(f.paymentTerms); }
+  if (vendor.tdsRate !== "" && vendor.tdsRate != null) {
+    const t = Number(vendor.tdsRate);
+    if (!Number.isFinite(t) || t < 0 || t > 100) { f.tdsRate = "TDS % must be between 0 and 100"; push(f.tdsRate); }
+  }
   // Only on edit — that is the only mode where the field is shown. On create
   // the backend fills it from the logged-in user and refuses if they have none.
   if (isEdit && !vendor.branchId) { f.branchId = "Branch is required"; push(f.branchId); }
@@ -1338,9 +1403,8 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
-        const json = await res.json();
-        if (!cancelled && res.ok) setBranches(json?.data || []);
+        const list = await fetchActiveBranches();
+        if (!cancelled) setBranches(list);
       } catch {
         // Non-fatal — the select stays empty and the existing branch is kept.
       }
@@ -1357,18 +1421,18 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
     try {
       // Only the read-only view asks for soft-deleted vendors — editing one has
       // to keep failing, so the edit path sends no flag.
-      const res = await fetch(
-        `${API_BACKEND_URL}/stock/vendors/${vendorId}${readOnly ? "?includeInactive=true" : ""}`,
-        { credentials: "include" }
-      );
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to load vendor");
-
-      const data = json.data;
+      const data = await fetchVendor(vendorId, { includeInactive: readOnly });
+      const base = defaultVendor();
       const loaded = {
-        ...defaultVendor(),
-        ...data,
-        gst: { ...defaultVendor().gst, ...data.gst },
+        ...withDefaults(base, data),
+        gst: withDefaults(base.gst, data.gst),
+        address: withDefaults(base.address, data.address),
+        contacts: data.contacts?.length
+          ? data.contacts.map((c) => withDefaults(emptyContact(c.label), c))
+          : base.contacts,
+        bankAccounts: data.bankAccounts?.length
+          ? data.bankAccounts.map((b) => withDefaults(emptyBankAccount(b.label), b))
+          : base.bankAccounts,
         // populate gives categoryId as an object ({_id, name, type}) — flatten
         // to id + name so the Assign Products card renders immediately.
         // Soft-deleted categories populate as null → filtered out safely.
@@ -1424,6 +1488,8 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
       const payload = {
         ...vendor,
         panNumber: vendor.panNumber?.toUpperCase() || "",
+        tdsRate: Number(vendor.tdsRate) || 0,
+        parentVendorId: vendor.parentVendorId || null,
         gst: { ...vendor.gst, gstNumber: vendor.gst.gstNumber?.toUpperCase() || "" },
         // strip the UI-only categoryName helper
         assignedProducts: vendor.assignedProducts.map((ap) => ({
@@ -1443,14 +1509,7 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
       // vendorCode is immutable — never send it on update (Rule 10 pattern)
       if (isEdit) delete payload.vendorCode;
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors${isEdit ? `/${vendorId}` : ""}`, {
-        method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to save vendor");
+      await saveVendor(isEdit ? vendorId : null, payload);
       router.push("/stock/vendors");
     } catch (err) {
       setFormErrors([err.message]);
@@ -1500,16 +1559,8 @@ const VendorForm = ({ vendorId = null, readOnly = false }) => {
           </div>
           
           <div className="flex items-center gap-3">
-            {readOnly ? (
-              <button
-                type="button" onClick={() => router.push(`/stock/vendors/${vendorId}/edit`)}
-                className="inline-flex items-center gap-2 rounded-lg border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-600 shadow-sm transition hover:border-orange-300 hover:bg-orange-50"
-              >
-                <Pencil className="h-4 w-4" /> Edit Vendor
-              </button>
-            ) : (
-              <SaveBtn className="px-4 py-2" />
-            )}
+            {/* The detail view is read-only — editing starts from the list. */}
+            {!readOnly && <SaveBtn className="px-4 py-2" />}
           </div>
         </div>
 

@@ -2,8 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, Lock, Sun, Moon, LineChart, Users, Network, Store, Wifi, Briefcase } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { API_PORTAL_BACKEND_URL } from '@/config/getEnvVariables';
-// import ForgotPasswordNotice from '@/component/common/modal/ForgotPasswordNotice';
+import { login } from '@/modules/core/auth/authApi';
 
 const LoginComponent = () => {
     const [loading, setLoading] = useState(false);
@@ -41,18 +40,9 @@ const LoginComponent = () => {
         setLoading(true);
 
         try {
-            const response = await fetch(`${API_PORTAL_BACKEND_URL}/hrms/login`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                credentials: "include",
-                body: JSON.stringify({ username, password, forceReplace }),
-            });
+            const { ok, result } = await login({ username, password, forceReplace });
 
-            const result = await response.json();
-
-            if (response.ok) {
+            if (ok) {
                 if (result.key === "redir-to-broken") {
                     window.location.href = "/error/server-error";
                     return;
@@ -70,7 +60,7 @@ const LoginComponent = () => {
                     }
 
                     toast.success(result.message);
-                    window.location.href = "/home";
+                    window.location.href = "/stock/home";
                 } else {
                     toast.error(result.message || "Login failed");
                 }
@@ -112,22 +102,6 @@ const LoginComponent = () => {
                         : 'from-[#000000] to-[#000000]'
                     }`}
             >
-
-                {/* Theme Toggle */}
-                {/* <button
-                    onClick={toggleTheme}
-                    className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-2 rounded-md border text-sm font-medium transition-colors ${theme === 'light'
-                        ? 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                        : 'bg-gray-800 border-gray-600 text-white hover:bg-gray-700'
-                        }`}
-                >
-                    {theme === 'light' ? (
-                        <Moon className="w-4 h-4" />
-                    ) : (
-                        <Sun className="w-4 h-4" />
-                    )}
-                    <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
-                </button> */}
 
                 {/* Main Container - Optimized for laptop screens */}
                 <div className="w-full max-w-5xl mx-auto">
@@ -269,12 +243,6 @@ const LoginComponent = () => {
                                                 Remember me
                                             </label>
                                         </div>
-                                        {/* <button
-                                            type="button"
-                                            className="text-sm font-semibold text-black hover:text-gray-700"
-                                        >
-                                            <ForgotPasswordNotice />
-                                        </button> */}
                                     </div>
 
                                     <button

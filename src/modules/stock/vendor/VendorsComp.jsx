@@ -3,11 +3,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
+import toast from "react-hot-toast";
 import {
   Search, Plus, Pencil, Trash2, RotateCcw, ShieldCheck, ShieldAlert,
-  Building2, Phone, X, ChevronDown, MoreVertical, Eye,
+  Building2, Phone, X, ChevronDown, MoreVertical, Eye, Users, ArrowLeft, Info, Mail, CornerDownRight,
 } from "lucide-react";
-import { API_BACKEND_URL } from "@/config/getEnvVariables";
+import { fetchVendorList, fetchVendor, fetchVendorGroup, deleteVendor, restoreVendor, fetchCategory } from "./vendorApi";
+import { fetchLeafCategories, fetchProductDefinitions, fetchScopedBranches } from "@/modules/stock/shared/lookupsApi";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { formatWarrantyShort } from "@/shared/warranty/warranty";
 
@@ -239,10 +241,10 @@ const ActiveBadge = ({ isActive }) => (
 );
 
 /* ============================================================= */
-/* Assigned-products popup                                        */
+/* Assigned-products page                                         */
 /* ============================================================= */
 
-const AssignedProductsPopup = ({ vendor, onClose }) => {
+const AssignedProductsPage = ({ vendor, onBack }) => {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [pathMap, setPathMap] = useState({});
@@ -250,14 +252,15 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${vendor._id}`, { credentials: "include" });
-        const json = await res.json();
-        if (json.success) setDetail(json.data);
+        // A deleted vendor (Inactive tab) can still be inspected.
+        setDetail(await fetchVendor(vendor._id, { includeInactive: !vendor.isActive }));
+      } catch {
+        // Non-fatal — the panel just shows no assigned products.
       } finally {
         setLoading(false);
       }
     })();
-  }, [vendor._id]);
+  }, [vendor._id, vendor.isActive]);
 
   const groups = (detail?.assignedProducts || [])
     .filter((ap) => ap.categoryId)
@@ -281,9 +284,8 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
       const entries = await Promise.all(
         missing.map(async (id) => {
           try {
-            const res = await fetch(`${API_BACKEND_URL}/stock/categories/${id}`, { credentials: "include" });
-            const json = await res.json();
-            return [id, json.success ? json.data?.displayPath || json.data?.name || "" : ""];
+            const cat = await fetchCategory(id);
+            return [id, cat?.displayPath || cat?.name || ""];
           } catch {
             return [id, ""];
           }
@@ -294,24 +296,43 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
 
+  const productTotal = groups.reduce((n, g) => n + g.products.length, 0);
+
   return (
-      <Modal onClose={onClose} title={`${vendor.name} · assigned products`} maxWidth="max-w-2xl">
+    <div className="min-h-screen bg-slate-50/60 p-6">
+      <div className="mx-auto max-w-5xl">
+      <div className="mb-6 flex flex-wrap items-center gap-4">
+        <button
+          type="button" onClick={onBack}
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <div className="min-w-0">
+          <h1 className="break-words text-xl font-semibold tracking-tight text-slate-900">{vendor.name}</h1>
+          <p className="mt-0.5 text-sm text-slate-500">
+            Assigned products
+            {!loading && ` · ${groups.length} categor${groups.length === 1 ? "y" : "ies"} · ${productTotal} product${productTotal === 1 ? "" : "s"}`}
+          </p>
+        </div>
+      </div>
+
         {loading ? (
-          <div className="space-y-3">
-            {Array.from({ length: 2 }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-xl bg-slate-100" />)}
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-100" />)}
           </div>
         ) : groups.length === 0 ? (
-          <p className="py-8 text-center text-sm text-slate-400">No products assigned to this vendor.</p>
+          <div className="rounded-2xl border border-slate-200 bg-white py-16 text-center shadow-sm">
+            <Building2 className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+            <p className="text-sm text-slate-400">No products assigned to this vendor.</p>
+          </div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {groups.map((g) => (
-              <div key={g.categoryId} className="rounded-xl border border-slate-200 bg-white">
-                <div className="flex items-center justify-between rounded-t-xl border-b border-slate-100 bg-slate-50/60 px-4 py-2.5">
-                  <span className="inline-flex items-center gap-1.5 text-sm font-bold text-slate-900">
+              <div key={g.categoryId} className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between gap-3 rounded-t-2xl border-b border-slate-100 bg-slate-50/60 px-4 py-3">
+                  <span className="min-w-0 break-words text-sm font-bold text-slate-900">
                     {pathMap[g.categoryId] || g.categoryName}
-                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                      LEAF
-                    </span>
                   </span>
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 tabular-nums">
                     {g.products.length}
@@ -322,7 +343,7 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
                     <span className="text-xs text-slate-400">No products selected in this category</span>
                   ) : (
                     g.products.map((p) => (
-                      <span key={p._id} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                      <span key={p._id} className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-100">
                         {p.name}
                         {p.warrantyMonths ? ` · ${formatWarrantyShort(p.warrantyMonths)}` : ""}
                       </span>
@@ -333,7 +354,8 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
             ))}
           </div>
         )}
-      </Modal>
+      </div>
+    </div>
   );
 };
 
@@ -341,29 +363,24 @@ const AssignedProductsPopup = ({ vendor, onClose }) => {
 /* Misc bits                                                      */
 /* ============================================================= */
 
-const Toast = ({ toast, onClose }) => {
-  if (!toast) return null;
-  return (
-    <div
-      className={`fixed bottom-6 right-6 z-[60] flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${
-        toast.type === "error" ? "bg-rose-600 text-white" : "bg-slate-900 text-white"
-      }`}
-    >
-      {toast.message}
-      <button onClick={onClose} className="opacity-70 transition hover:opacity-100">
-        <X className="h-4 w-4" />
-      </button>
-    </div>
-  );
-};
-
-const ConfirmDeleteModal = ({ vendor, onConfirm, onCancel, deleting }) => {
+// Delete (rose) or Restore (emerald) — one confirm for both.
+const ConfirmVendorModal = ({ vendor, mode = "delete", onConfirm, onCancel, busy }) => {
   if (!vendor) return null;
+  const restore = mode === "restore";
   return (
-    <Modal onClose={onCancel} title="Delete vendor?" maxWidth="max-w-md">
-      <p className="text-sm text-slate-500">
-        This will deactivate <span className="font-semibold text-slate-800">{vendor.name}</span>. You can restore it later from the Inactive tab.
-      </p>
+    <Modal onClose={onCancel} title={restore ? "Restore vendor?" : "Delete vendor?"} maxWidth="max-w-md">
+      <div className="flex items-start gap-3">
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${restore ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-500"}`}>
+          {restore ? <RotateCcw className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+        </span>
+        <p className="text-sm leading-relaxed text-slate-500">
+          {restore ? (
+            <><span className="font-semibold text-slate-800">{vendor.name}</span> will be active again and show up in every vendor picker.</>
+          ) : (
+            <>This will deactivate <span className="font-semibold text-slate-800">{vendor.name}</span>. You can restore it later from the Inactive tab.</>
+          )}
+        </p>
+      </div>
       <div className="mt-5 flex justify-end gap-2.5">
         <button
           type="button" onClick={onCancel}
@@ -372,10 +389,12 @@ const ConfirmDeleteModal = ({ vendor, onConfirm, onCancel, deleting }) => {
           Cancel
         </button>
         <button
-          type="button" onClick={onConfirm} disabled={deleting}
-          className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-60"
+          type="button" onClick={onConfirm} disabled={busy}
+          className={`rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+            restore ? "bg-emerald-600 hover:bg-emerald-500" : "bg-rose-600 hover:bg-rose-500"
+          }`}
         >
-          {deleting ? "Deleting..." : "Delete"}
+          {restore ? (busy ? "Restoring..." : "Restore") : busy ? "Deleting..." : "Delete"}
         </button>
       </div>
     </Modal>
@@ -386,7 +405,7 @@ const SkeletonRows = () => (
   <>
     {Array.from({ length: 5 }).map((_, i) => (
       <tr key={i} className="animate-pulse">
-        {Array.from({ length: 7 }).map((__, j) => (
+        {Array.from({ length: 10 }).map((__, j) => (
           <td key={j} className="px-4 py-4"><div className="h-3 w-full max-w-[120px] rounded bg-slate-100" /></td>
         ))}
       </tr>
@@ -498,6 +517,64 @@ const RowMenu = ({ items }) => {
 /* Main                                                           */
 /* ============================================================= */
 
+const GroupMemberRow = ({ v, main }) => (
+  <div className={`rounded-xl border px-3 py-2.5 ${v.isCurrent ? "border-indigo-200 bg-indigo-50/50" : "border-slate-200 bg-white"}`}>
+    <div className="flex flex-wrap items-center gap-2">
+      {main ? (
+        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700">Main</span>
+      ) : (
+        <CornerDownRight className="h-3.5 w-3.5 text-slate-400" />
+      )}
+      <span className="text-sm font-semibold text-slate-900">{v.name}</span>
+      {v.vendorCode && <span className="text-xs text-slate-400">{v.vendorCode}</span>}
+      {v.isCurrent && <span className="text-[11px] font-semibold text-indigo-600">· this vendor</span>}
+    </div>
+    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+      {v.contactName && <span>{v.contactName}</span>}
+      <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3 text-slate-400" />{v.phone || "—"}</span>
+      <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3 text-slate-400" />{v.email || "—"}</span>
+      {v.gstNumber && <span className="text-slate-400">GST {v.gstNumber}</span>}
+    </div>
+  </div>
+);
+
+
+/* ── A vendor's group: its main vendor and every child firm ───────── */
+/* So when one firm is a problem, the owner's other firms are one     */
+/* click away — with whom to call.                                    */
+const VendorGroupPopup = ({ vendorId, onClose }) => {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        setData(await fetchVendorGroup(vendorId));
+      } catch (e) {
+        setError(e.message);
+      }
+    })();
+  }, [vendorId]);
+
+  return (
+    <Modal onClose={onClose} title="Vendor group" maxWidth="max-w-xl">
+      {error ? (
+        <p className="text-sm text-rose-600">{error}</p>
+      ) : !data ? (
+        <p className="py-6 text-center text-sm text-slate-400">Loading…</p>
+      ) : (
+        <div className="space-y-2">
+          {data.main && <GroupMemberRow v={data.main} main />}
+          {data.children.length === 0 ? (
+            <p className="px-1 text-sm text-slate-400">No other vendor under this main vendor yet.</p>
+          ) : (
+            <div className="space-y-2 pl-4">{data.children.map((c) => <GroupMemberRow key={c._id} v={c} />)}</div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 const VendorsComp = () => {
   const router = useRouter();
 
@@ -509,7 +586,17 @@ const VendorsComp = () => {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [productId, setProductId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [branches, setBranches] = useState([]);
   const [status, setStatus] = useState("ACTIVE");
+  // "all" = every vendor in its own row (a child says "under X");
+  // "top" = main / stand-alone vendors, children opened under their main;
+  // "groups" = only main vendors that have child vendors.
+  // "top" = every main/standalone vendor, each main vendor's child firms listed
+  // right under it. "groups" = only main vendors that have child firms.
+  const [groupView, setGroupView] = useState("top");
+  const [childrenOf, setChildrenOf] = useState({});     // mainId -> rows | "loading"
+  const [groupPopup, setGroupPopup] = useState(null);   // vendorId
 
   const [categories, setCategories] = useState([]);
   const [productOptions, setProductOptions] = useState([]);
@@ -521,12 +608,8 @@ const VendorsComp = () => {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [toast, setToast] = useState(null);
-
-  const showToast = (message, type = "success") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3000);
-  };
+  const [restoreTarget, setRestoreTarget] = useState(null);
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => setDebouncedSearch(search), 350); return () => clearTimeout(t); }, [search]);
 
@@ -534,9 +617,7 @@ const VendorsComp = () => {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/categories/flat?type=LEAF&hasProducts=true&limit=500`, { credentials: "include" });
-        const j = await r.json();
-        if (j.success) setCategories(j.data || []);
+        setCategories(await fetchLeafCategories());
       } catch {}
     })();
   }, []);
@@ -544,44 +625,61 @@ const VendorsComp = () => {
   // Product filter = DEPENDENT dropdown, scoped to the selected category (server-side)
   useEffect(() => {
     (async () => {
-      if (!categoryId) { setProductOptions([]); return; }
+      // That category's products, or every product when none is chosen.
       try {
-        const r = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=1000`, { credentials: "include" });
-        const j = await r.json();
-        setProductOptions(j.success ? (j.data || []).map((p) => ({ value: p._id, label: p.name })) : []);
+        setProductOptions(await fetchProductDefinitions({ categoryId: categoryId || undefined }));
       } catch { setProductOptions([]); }
     })();
   }, [categoryId]);
+
+  // Branches this user may see vendors of.
+  useEffect(() => {
+    fetchScopedBranches("vendors").then(setBranches).catch(() => setBranches([]));
+  }, []);
 
   // RULE 07: stable useCallback loader, never fetch in the component body.
   const loadVendors = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setChildrenOf({});
     try {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(limit),
-        showInactive: "true",
+        status, // ACTIVE | INACTIVE — filtered on the server so paging is right
       });
       if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (categoryId) params.set("categoryId", categoryId);
       if (productId) params.set("productId", productId);
+      if (branchId) params.set("branchId", branchId);
+      params.set("group", groupView);
 
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors?${params.toString()}`, { credentials: "include" });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Failed to fetch vendors");
+      const json = await fetchVendorList(params);
 
-      const rows = json.data || [];
-      const filtered = rows.filter((v) => (status === "ACTIVE" ? v.isActive : !v.isActive));
+      const filtered = json.data || [];
 
       setVendors(filtered);
       setTotal(json.pagination?.total ?? filtered.length);
+
+      // Child firms are always shown under their main vendor — fetch them with the page.
+      const mains = filtered.filter((v) => !v.parentVendorId && v.childCount > 0);
+      if (mains.length) {
+        setChildrenOf(Object.fromEntries(mains.map((m) => [m._id, "loading"])));
+        const loaded = await Promise.all(
+          mains.map((m) =>
+            fetchVendorList({ parentId: m._id, limit: 200 })
+              .then((j) => [m._id, j.data || []])
+              .catch(() => [m._id, []])
+          )
+        );
+        setChildrenOf(Object.fromEntries(loaded));
+      }
     } catch (err) {
       setError(err.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
-  }, [page, limit, debouncedSearch, categoryId, productId, status]);
+  }, [page, limit, debouncedSearch, categoryId, productId, branchId, status, groupView]);
 
   useEffect(() => { loadVendors(); }, [loadVendors]);
 
@@ -589,45 +687,74 @@ const VendorsComp = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${deleteTarget._id}`, {
-        method: "DELETE", credentials: "include",
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Delete failed");
-      showToast("Vendor deleted successfully");
+      await deleteVendor(deleteTarget._id);
+      toast.success(`"${deleteTarget.name}" was deleted.`);
       setDeleteTarget(null);
       loadVendors();
     } catch (err) {
-      showToast(err.message, "error");
+      toast.error(err.message || "Failed to delete vendor");
     } finally {
       setDeleting(false);
     }
   };
 
-  const handleRestore = async (vendor) => {
+  const handleRestore = async () => {
+    if (!restoreTarget) return;
+    setRestoring(true);
     try {
-      const res = await fetch(`${API_BACKEND_URL}/stock/vendors/${vendor._id}/restore`, {
-        method: "PATCH", credentials: "include",
-      });
-      const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.message || "Restore failed");
-      showToast("Vendor restored successfully");
+      await restoreVendor(restoreTarget._id);
+      toast.success(`"${restoreTarget.name}" was restored.`);
+      setRestoreTarget(null);
       loadVendors();
     } catch (err) {
-      showToast(err.message, "error");
+      toast.error(err.message || "Failed to restore vendor");
+    } finally {
+      setRestoring(false);
     }
   };
+
+  const productCategoryId = (p) => String(p?.categoryId?._id || p?.categoryId || "");
+  const categoryPathById = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c._id, c.displayPath || c.name])),
+    [categories]
+  );
+  const productSelectOptions = useMemo(
+    () =>
+      productOptions.map((p) => ({
+        value: p._id,
+        // Across all categories the same name can repeat — say which one.
+        label: categoryId || !categoryPathById[productCategoryId(p)] ? p.name : `${p.name} — ${categoryPathById[productCategoryId(p)]}`,
+      })),
+    [productOptions, categoryId, categoryPathById]
+  );
+  // A product picked without a category fills in its category too.
+  const pickProduct = (v) => {
+    setProductId(v);
+    setPage(1);
+    if (!v || categoryId) return;
+    const cat = productCategoryId(productOptions.find((p) => String(p._id) === String(v)));
+    if (cat) setCategoryId(cat);
+  };
+  const branchOptions = useMemo(
+    () => branches.map((b) => ({ value: b._id, label: b.code ? `${b.name} (${b.code})` : b.name })),
+    [branches]
+  );
 
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ value: c._id, label: c.displayPath || c.name })),
     [categories]
   );
 
-  const hasActiveFilters = !!search || !!categoryId || !!productId || status !== "ACTIVE";
+  const hasActiveFilters = !!search || !!categoryId || !!productId || !!branchId || status !== "ACTIVE" || groupView !== "top";
 
   const clearFilters = () => {
-    setSearch(""); setCategoryId(""); setProductId(""); setStatus("ACTIVE"); setPage(1);
+    setSearch(""); setCategoryId(""); setProductId(""); setBranchId(""); setStatus("ACTIVE"); setGroupView("top"); setPage(1);
   };
+
+  // Assigned products open as a page in place of the list; Back returns to it.
+  if (productsPopup) {
+    return <AssignedProductsPage vendor={productsPopup} onBack={() => setProductsPopup(null)} />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-50/60 p-6">
@@ -649,7 +776,7 @@ const VendorsComp = () => {
 
       {/* ROW 1 — search + Category + Product + Status + Reset, all in one row */}
       <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
           <div className="relative lg:col-span-2">
             <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
               <Search className="h-4 w-4" />
@@ -657,7 +784,7 @@ const VendorsComp = () => {
             <input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              placeholder="Search name, vendor code, GST number..."
+              placeholder="Search name, code, GST or mobile..."
               className={`${inputCls} pl-9`}
             />
           </div>
@@ -670,10 +797,16 @@ const VendorsComp = () => {
           </div>
           <div className="lg:col-span-1">
             <SearchableSelect
-              value={productId} onChange={(v) => { setProductId(v); setPage(1); }}
-              options={productOptions}
-              placeholder={categoryId ? "All products" : "Select a category first"}
-              disabled={!categoryId}
+              value={productId} onChange={pickProduct}
+              options={productSelectOptions}
+              placeholder="All products"
+            />
+          </div>
+          <div className="lg:col-span-1">
+            <SearchableSelect
+              value={branchId}
+              onChange={(v) => { setBranchId(v); setPage(1); }}
+              options={branchOptions} placeholder="All branches"
             />
           </div>
           <div className="lg:col-span-1">
@@ -703,15 +836,41 @@ const VendorsComp = () => {
         </div>
       </div>
 
+      {/* Every vendor (child firms folded under their main vendor), or only the groups. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-slate-700">Show</span>
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5 shadow-sm">
+          {[
+            { key: "top", label: "All Vendors" },
+            { key: "groups", label: "Vendor Groups" },
+          ].map((o) => (
+            <button
+              key={o.key} type="button" onClick={() => { setGroupView(o.key); setPage(1); }}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                groupView === o.key ? "bg-slate-800 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-slate-400">
+          Child vendors are listed under their main vendor.
+        </span>
+      </div>
+
       {/* table */}
       <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50/60">
             <tr>
               <th className={th}>Vendor Name</th>
+              <th className={th}>Alias</th>
+              <th className={th}>Branch</th>
               <th className={th}>GST Status</th>
               <th className={th}>Phone</th>
               <th className={th}>Payment Term</th>
+              <th className={th}>TDS</th>
               <th className={th}>Assigned Products</th>
               <th className={th}>Status</th>
               <th className={thRight}>Actions</th>
@@ -721,29 +880,77 @@ const VendorsComp = () => {
             {loading ? (
               <SkeletonRows />
             ) : error ? (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-rose-600">{error}</td></tr>
+              <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-rose-600">{error}</td></tr>
             ) : vendors.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-16 text-center">
+                <td colSpan={10} className="px-4 py-16 text-center">
                   <Building2 className="mx-auto mb-3 h-10 w-10 text-slate-300" />
                   <p className="text-sm font-medium text-slate-700">No vendors found</p>
                   <p className="mt-1 text-sm text-slate-400">Adjust the filters above, or add a new vendor.</p>
                 </td>
               </tr>
             ) : (
-              vendors.map((vendor) => {
+              vendors
+                // A search can match a child firm on its own; it already shows
+                // under its main vendor when that one is on the page too.
+                .filter((v) => !(v.parentVendorId && childrenOf[String(v.parentVendorId)]))
+                .flatMap((top) => {
+                const kids = childrenOf[top._id] || null;
+                return [
+                  { vendor: top, child: false },
+                  ...(kids === "loading" ? [{ loadingFor: top._id }] : (kids || []).map((k) => ({ vendor: k, child: true }))),
+                ];
+              }).map((entry) => {
+                if (entry.loadingFor) {
+                  return (
+                    <tr key={`loading-${entry.loadingFor}`}>
+                      <td colSpan={10} className="bg-slate-50/50 px-10 py-2.5 text-xs text-slate-400">Loading child vendors…</td>
+                    </tr>
+                  );
+                }
+                const { vendor, child } = entry;
                 const primaryContact = vendor.contacts?.find((c) => c.label === "PRIMARY") || vendor.contacts?.[0];
                 const productCount = (vendor.assignedProducts || []).reduce((sum, ap) => sum + (ap.products?.length || 0), 0);
+                const isMain = !vendor.parentVendorId && vendor.childCount > 0;
                 return (
-                  <tr key={vendor._id} className="transition hover:bg-slate-50/60">
-                    <td className="px-4 py-3.5">
-                      <div className="text-sm font-medium text-slate-900">
+                  <tr key={vendor._id} className={`transition hover:bg-slate-50/60 ${child ? "bg-slate-50/40" : ""}`}>
+                    <td className={`py-3.5 pr-4 ${child ? "pl-10" : "pl-4"}`}>
+                      <div className="flex items-center gap-1.5 text-sm font-medium text-slate-900">
+                        {child && <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-slate-400" />}
                         <TruncateText text={vendor.name} title="Vendor name" />
+                        {isMain && (
+                          <button
+                            type="button" onClick={() => setGroupPopup(vendor._id)} title="Vendor group"
+                            className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-700 transition hover:bg-violet-200"
+                          >
+                            <Users className="h-3 w-3" /> Main · {vendor.childCount}
+                          </button>
+                        )}
+                        {vendor.parentVendorId && (
+                          <button
+                            type="button" onClick={() => setGroupPopup(vendor._id)} title="See the whole group"
+                            className="rounded-md p-0.5 text-violet-500 transition hover:bg-violet-50"
+                          >
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
-                      {vendor.vendorAlias && (
-                        <div className="mt-0.5 text-xs text-slate-400">
-                          <TruncateText text={vendor.vendorAlias} max={20} title="Vendor alias" />
-                        </div>
+                      {vendor.parentVendorId && !child && vendor.parentVendorName && (
+                        <div className="mt-0.5 text-xs text-violet-600">under {vendor.parentVendorName}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5 text-sm text-slate-600">
+                      {vendor.vendorAlias ? (
+                        <TruncateText text={vendor.vendorAlias} max={20} title="Vendor alias" />
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 text-sm text-slate-600">
+                      {vendor.branchName ? (
+                        <TruncateText text={vendor.branchName} max={20} title="Branch" />
+                      ) : (
+                        <span className="text-slate-300">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3.5"><GstBadge gst={vendor.gst} /></td>
@@ -755,6 +962,15 @@ const VendorsComp = () => {
                     </td>
                     <td className="px-4 py-3.5 text-sm text-slate-700">
                       {vendor.paymentTerms?.replace(/_/g, " ") || "—"}
+                    </td>
+                    <td className="px-4 py-3.5 text-sm">
+                      {vendor.tdsRate > 0 ? (
+                        <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+                          {vendor.tdsRate}%
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5">
                       {productCount === 0 ? (
@@ -787,7 +1003,7 @@ const VendorsComp = () => {
                           items={
                             vendor.isActive
                               ? [{ label: "Delete", tone: "red", onClick: () => setDeleteTarget(vendor) }]
-                              : [{ label: "Restore", onClick: () => handleRestore(vendor) }]
+                              : [{ label: "Restore", onClick: () => setRestoreTarget(vendor) }]
                           }
                         />
                       </div>
@@ -811,13 +1027,17 @@ const VendorsComp = () => {
         </div>
       </div>
 
-      {productsPopup && <AssignedProductsPopup vendor={productsPopup} onClose={() => setProductsPopup(null)} />}
 
-      <ConfirmDeleteModal
-        vendor={deleteTarget} deleting={deleting}
+      {groupPopup && <VendorGroupPopup vendorId={groupPopup} onClose={() => setGroupPopup(null)} />}
+
+      <ConfirmVendorModal
+        vendor={deleteTarget} mode="delete" busy={deleting}
         onCancel={() => setDeleteTarget(null)} onConfirm={handleDelete}
       />
-      <Toast toast={toast} onClose={() => setToast(null)} />
+      <ConfirmVendorModal
+        vendor={restoreTarget} mode="restore" busy={restoring}
+        onCancel={() => setRestoreTarget(null)} onConfirm={handleRestore}
+      />
     </div>
   );
 };

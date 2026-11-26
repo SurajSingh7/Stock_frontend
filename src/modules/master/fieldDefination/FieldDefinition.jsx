@@ -1,5 +1,6 @@
 'use client'
-import { API_BACKEND_URL } from '@/config/getEnvVariables';
+import { api } from '@/lib/apiClient';
+import { API_ENDPOINTS } from '@/constants/api';
 import Pagination from '@/shared/ui/pagination/Pagination';
 import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
@@ -7,7 +8,7 @@ import toast from 'react-hot-toast';
 
 /* ======================== CONSTANTS ======================== */
 
-const FIELD_DEFINITIONS_API = `${API_BACKEND_URL}/stock/field-definitions`;
+const EP = API_ENDPOINTS.master.fieldDefinitions;
 
 const INPUT_TYPES = [
   { value: 'text', label: 'Text' },
@@ -42,6 +43,10 @@ const DEFAULT_ITEMS_PER_PAGE = 10;
 // Requirement 5: max characters shown inline before "...more" kicks in
 const TRUNCATE_LIMIT = 30;
 
+// Same rule as the backend validator: a dropdown, date or colour is shared by
+// design, so only free-typed Text / Number values can identify one unit.
+const UNIQUE_INPUT_TYPES = ['text', 'number'];
+
 const EMPTY_FORM = {
   code: '',
   label: '',
@@ -50,6 +55,7 @@ const EMPTY_FORM = {
   isRequired: false,
   isFilterable: false,
   showList: false,
+  isUnique: false,
   order: 0,
   // Nothing pre-selected — the user must tick at least one before submitting.
   applicableTrackingMethods: [],
@@ -75,6 +81,7 @@ const FIELD_TABLE_COLUMNS = [
   { key: 'isRequired', label: 'Required', show: true, render: (item) => <BooleanDot value={item.isRequired} /> },
   // { key: 'isFilterable', label: 'Filterable', show: true, render: (item) => <BooleanDot value={item.isFilterable} /> },
   { key: 'showList', label: 'Show in list', show: true, render: (item) => <BooleanDot value={item.showList} /> },
+  { key: 'isUnique', label: 'Unique', show: true, render: (item) => <BooleanDot value={item.isUnique} /> },
   { key: 'isActive', label: 'Status', show: true, render: (item) => <StatusBadge isActive={item.isActive} /> },
   { key: 'actions', label: 'Action', show: true, render: null }, // rendered separately (icon buttons)
 ];
@@ -84,65 +91,19 @@ const FIELD_TABLE_COLUMNS = [
 // NOTE: the backend only exposes a single `showInactive` boolean
 // (false => active only, true => everything). There is no
 // "inactive only" query, so that case is filtered client-side below.
-const getFieldDefinitions = async ({ page, limit, search, inputType, showInactive }) => {
-  const params = new URLSearchParams();
-  params.set('page', page);
-  params.set('limit', limit);
-  if (search) params.set('search', search);
-  if (inputType) params.set('inputType', inputType);
-  if (showInactive) params.set('showInactive', 'true');
-
-  const response = await fetch(`${FIELD_DEFINITIONS_API}?${params.toString()}`, {
-    method: 'GET',
-    credentials: 'include',
+const getFieldDefinitions = ({ page, limit, search, inputType, showInactive }) =>
+  api.get(EP.list, {
+    query: { page, limit, search, inputType, showInactive: showInactive ? 'true' : undefined },
+    fallback: 'Failed to fetch field definitions',
   });
-  if (!response.ok) throw new Error('Failed to fetch field definitions');
-  return response.json();
-};
 
-const createFieldDefinition = async (payload) => {
-  const response = await fetch(FIELD_DEFINITIONS_API, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to create field definition');
-  return data;
-};
+const createFieldDefinition = (payload) => api.post(EP.list, payload, { fallback: 'Failed to create field definition' });
 
-const updateFieldDefinition = async (id, payload) => {
-  const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}`, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to update field definition');
-  return data;
-};
+const updateFieldDefinition = (id, payload) => api.put(EP.byId(id), payload, { fallback: 'Failed to update field definition' });
 
-const deleteFieldDefinition = async (id) => {
-  const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}`, {
-    method: 'DELETE',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to delete field definition');
-  return data;
-};
+const deleteFieldDefinition = (id) => api.delete(EP.byId(id), { fallback: 'Failed to delete field definition' });
 
-const restoreFieldDefinition = async (id) => {
-  const response = await fetch(`${FIELD_DEFINITIONS_API}/${id}/restore`, {
-    method: 'PATCH',
-    credentials: 'include',
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data?.message || 'Failed to restore field definition');
-  return data;
-};
+const restoreFieldDefinition = (id) => api.patch(EP.restore(id), undefined, { fallback: 'Failed to restore field definition' });
 
 /* ======================== UTILITY FUNCTIONS ======================== */
 
@@ -155,6 +116,7 @@ const mapFieldDefinitionResponse = (item) => ({
   isRequired: !!item.isRequired,
   isFilterable: !!item.isFilterable,
   showList: !!item.showList,
+  isUnique: !!item.isUnique,
   isActive: item.isActive !== false,
   order: item.order ?? 0,
   applicableTrackingMethods:
@@ -243,6 +205,11 @@ const Icon = {
   filter: (
     <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
       <path d="M3 4.5h14L11.5 10.8V16l-3-1.6v-3.6L3 4.5Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  ),
+  fingerprint: (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4.5 w-4.5">
+      <path d="M6 8.5a4 4 0 0 1 8 0v1.5M10 8.5v4.5M7.5 16c.8-1.2 1-2.6 1-4M12.5 16c-.4-1-.5-2-.5-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
   list: (
@@ -862,6 +829,19 @@ const Form = ({ mode, formData, onChange, onSubmit, onCancel, submitting, errors
             color="indigo"
             icon={Icon.list}
           />
+          <ToggleCard
+            label="Unique identifier"
+            hint={
+              UNIQUE_INPUT_TYPES.includes(formData.inputType)
+                ? 'Serial / MAC / IMEI — never repeats across units, and every unit needs at least one unique field.'
+                : 'Only Text or Number fields can be unique.'
+            }
+            checked={UNIQUE_INPUT_TYPES.includes(formData.inputType) && !!formData.isUnique}
+            onChange={(value) => onChange('isUnique', value)}
+            disabled={isView || !UNIQUE_INPUT_TYPES.includes(formData.inputType)}
+            color="violet"
+            icon={Icon.fingerprint}
+          />
         </div>
 
         {/* Row 4 — Applicable to (Tracking Method): check either or both */}
@@ -1005,6 +985,7 @@ const FieldDefinition = () => {
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
       showList: item.showList,
+      isUnique: item.isUnique,
       order: item.order ?? 0,
       applicableTrackingMethods: item.applicableTrackingMethods,
     });
@@ -1022,6 +1003,7 @@ const FieldDefinition = () => {
       isRequired: item.isRequired,
       isFilterable: item.isFilterable,
       showList: item.showList,
+      isUnique: item.isUnique,
       order: item.order ?? 0,
       applicableTrackingMethods: item.applicableTrackingMethods,
     });
@@ -1080,6 +1062,8 @@ const FieldDefinition = () => {
         isRequired: formData.isRequired,
         isFilterable: formData.isFilterable,
         showList: formData.showList,
+        // Only a typed-in value can name one unit — see UNIQUE_INPUT_TYPES.
+        isUnique: UNIQUE_INPUT_TYPES.includes(formData.inputType) ? !!formData.isUnique : false,
         order: formData.order === '' ? 0 : Number(formData.order),
         applicableTrackingMethods: formData.applicableTrackingMethods,
       };

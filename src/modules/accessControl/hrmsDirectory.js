@@ -1,4 +1,5 @@
-import { API_PORTAL_BACKEND_URL } from '@/config/getEnvVariables';
+import { api, ApiError } from '@/lib/apiClient';
+import { API_ENDPOINTS } from '@/constants/api';
 
 // Talks directly to HRMS (portal-backend), the same way erp-sales already
 // does — see erp-sales/src/components/core/admin/roleModulePermission and
@@ -7,48 +8,39 @@ import { API_PORTAL_BACKEND_URL } from '@/config/getEnvVariables';
 // read this from HRMS itself. portal-backend's allowedOrigins already covers
 // http://localhost:3000, so the browser's userSession cookie carries over.
 
-// Same endpoint family the staff-registration form uses for its department
-// dropdown, so the two can never show different departments.
-export const searchHrmsDepartments = async (search = '') => {
-  const params = new URLSearchParams({ page: '1', limit: '100' });
-  if (search) params.set('search', search);
-  const res = await fetch(`${API_PORTAL_BACKEND_URL}/api/role-management/department/get-all?${params}`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  if (res.status === 404) return [];
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.message || 'Failed to load departments');
-  return (data.data || []).map((d) => ({ id: d._id, label: d.name, description: d.description || '' }));
+const HRMS = API_ENDPOINTS.admin.hrms;
+
+// A missing endpoint (older HRMS) reads as an empty list, not an error.
+const list = async (url, query, fallback) => {
+  try {
+    return (await api.get(url, { query, fallback })).data || [];
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return [];
+    throw e;
+  }
 };
 
-export const searchHrmsRoles = async (search = '') => {
-  const params = new URLSearchParams({ page: '1', limit: '50' });
-  if (search) params.set('search', search);
-  const res = await fetch(`${API_PORTAL_BACKEND_URL}/api/role-management/roles/get-all?${params}`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  if (res.status === 404) return [];
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.message || 'Failed to load roles');
-  return (data.data || []).map((r) => ({ id: r._id, label: r.name, description: r.description || '' }));
-};
+// Same endpoint family the staff-registration form uses for its department
+// dropdown, so the two can never show different departments.
+export const searchHrmsDepartments = async (search = '') =>
+  (await list(HRMS.departments, { page: 1, limit: 100, search }, 'Failed to load departments')).map((d) => ({
+    id: d._id,
+    label: d.name,
+    description: d.description || '',
+  }));
+
+export const searchHrmsRoles = async (search = '') =>
+  (await list(HRMS.roles, { page: 1, limit: 50, search }, 'Failed to load roles')).map((r) => ({
+    id: r._id,
+    label: r.name,
+    description: r.description || '',
+  }));
 
 // Requires an HRMS admin session (protectAdmin) — same as erp-sales's own
 // AbacPolicyComp. A non-admin picker gracefully falls back to manual entry;
 // see UserPicker's `allowManualId`.
-export const searchHrmsUsers = async (search = '') => {
-  const params = new URLSearchParams({ page: '1', limit: '50' });
-  if (search) params.set('search', search);
-  const res = await fetch(`${API_PORTAL_BACKEND_URL}/api/admin/data/user-data?${params}`, {
-    method: 'GET',
-    credentials: 'include',
-  });
-  if (res.status === 404) return [];
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.message || 'Failed to load users');
-  return (data.data || [])
+export const searchHrmsUsers = async (search = '') =>
+  (await list(HRMS.users, { page: 1, limit: 50, search }, 'Failed to load users'))
     .filter((u) => u.login_id?._id)
     .map((u) => ({
       id: u.login_id._id,
@@ -57,4 +49,3 @@ export const searchHrmsUsers = async (search = '') => {
       roleId: u.login_id.role?._id || '',
       roleName: u.login_id.role?.name || '',
     }));
-};

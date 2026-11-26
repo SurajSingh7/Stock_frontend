@@ -1,4 +1,3 @@
-// constants/vendorConstants.js
 // No API currently for payment terms — frontend constants only, same posture
 // as constants/stockFieldOptions.js (Section 11 of the spec).
 

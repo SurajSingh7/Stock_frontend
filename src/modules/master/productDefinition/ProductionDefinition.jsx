@@ -3,13 +3,15 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
+import toast from "react-hot-toast";
 import {
   ChevronDown, Search, Check, Loader2, X, Plus, Pencil, Trash2, RotateCcw,
   PackageSearch, AlertTriangle, ArrowLeft, Eye, ImagePlus, ImageOff, FileText,
-  MoreVertical,
+  ExternalLink, Layers, Ruler, Percent, ShieldCheck, BellRing, ListChecks, Building2, Hash,
 } from "lucide-react";
 import { API_BACKEND_URL } from "@/config/getEnvVariables";
-
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 import Pagination from "@/shared/ui/pagination/Pagination";
 import { fetchAllLeafCategories } from "@/shared/category/categoryPath";
 import WarrantyInput from "@/shared/warranty/WarrantyInput";
@@ -20,6 +22,9 @@ import {
 /* ================================================================== */
 /* Constants                                                           */
 /* ================================================================== */
+
+const M = API_ENDPOINTS.master;
+const PD = M.productDefinitions;
 
 // The backend serves uploaded files from /uploads/... (static, NOT under
 // /api/v1) — see server.js. API_BACKEND_URL already ends in /api/v1, so strip
@@ -79,11 +84,6 @@ const TRACKING_FILTER_OPTIONS = [
 
 const TRACKING_METHOD_LABELS = Object.fromEntries(TRACKING_METHODS.map((m) => [m.value, m.label]));
 
-const PRODUCT_STATUS = [
-  { value: "ACTIVE", label: "Active" },
-  { value: "DRAFT", label: "Draft" },
-];
-
 // Active / Inactive is a DROPDOWN now (was a pill group)
 const RECORD_STATUS_OPTIONS = [
   { value: "active", label: "Active" },
@@ -109,7 +109,6 @@ const emptyForm = {
   // flattened to the API's [{ branchId, threshold }] array on submit.
   branchThresholds: {},
   trackingMethod: "",
-  status: "ACTIVE",
   selectedFields: [],
   image: null,     // existing stored path (string) when editing — image OR pdf
   imageFile: null, // new File selected by the user, not yet uploaded
@@ -141,19 +140,14 @@ const thRight = `${th} text-right`;
 // AND by the lockCategory prop flow, so a locked category can show its real
 // name/path instead of just holding onto the raw id.
 async function apiGetLeafCategoryById(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/categories/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load category");
-  return json.data;
+  return (await api.get(M.categories.byId(id), { fallback: "Failed to load category" })).data;
 }
 
 // GST slabs are their own master now (Master > GST Rates), not a constant
 // hardcoded in the backend. /active is authenticate-only, so filling this
 // dropdown never requires the GST Rates management permission.
 async function apiFetchGstRates() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/gst-rates/active`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load GST rates");
+  const json = await api.get(M.gstRates.active, { fallback: "Failed to load GST rates" });
   // Flattened to the {value,label} shape the <select> below already speaks.
   // `value` is the NUMBER — it is what gets persisted, and what quotations and
   // purchase orders have always stored.
@@ -161,9 +155,7 @@ async function apiFetchGstRates() {
 }
 
 async function apiFetchFieldDefinitions() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/field-definitions?limit=200`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load field definitions");
+  const json = await api.get(M.fieldDefinitions.list, { query: { limit: 200 }, fallback: "Failed to load field definitions" });
   return json.data?.data || json.data || [];
 }
 
@@ -172,10 +164,7 @@ async function apiFetchFieldDefinitions() {
 // unfiltered /active list (not branch-scoped): thresholds are master data
 // covering the whole network, not just the editor's own branch.
 async function apiFetchActiveBranches() {
-  const res = await fetch(`${API_BACKEND_URL}/stock/branches/active`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load branches");
-  return json.data || [];
+  return (await api.get(M.branches.active, { fallback: "Failed to load branches" })).data || [];
 }
 
 // Create/update send multipart/form-data so the optional file travels with the
@@ -190,28 +179,17 @@ function buildProductDefinitionFormData(payload, uploadFile) {
 }
 
 async function apiCreateProductDefinition(payload, uploadFile) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions`, {
-    method: "POST", credentials: "include", body: buildProductDefinitionFormData(payload, uploadFile),
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to create product definition");
-  return json.data;
+  const form = buildProductDefinitionFormData(payload, uploadFile);
+  return (await api.post(PD.list, form, { fallback: "Failed to create product definition" })).data;
 }
 
 async function apiUpdateProductDefinition(id, payload, uploadFile) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, {
-    method: "PUT", credentials: "include", body: buildProductDefinitionFormData(payload, uploadFile),
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to update product definition");
-  return json.data;
+  const form = buildProductDefinitionFormData(payload, uploadFile);
+  return (await api.put(PD.byId(id), form, { fallback: "Failed to update product definition" })).data;
 }
 
 async function apiGetProductDefinitionById(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product definition");
-  return json.data;
+  return (await api.get(PD.byId(id), { fallback: "Failed to load product definition" })).data;
 }
 
 /*
@@ -222,27 +200,24 @@ async function apiGetProductDefinitionById(id) {
   breaks limit/total (a page of 10 would render 3 while the count still says 10).
 */
 async function apiListProductDefinitions({ page, limit, search, categoryId, productId, trackingMethod, showInactive }) {
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-  if (search) params.set("search", search);
-  if (categoryId) params.set("categoryId", categoryId);
-  if (productId) params.set("productId", productId);
-  if (trackingMethod) params.set("trackingMethod", trackingMethod);
-  if (showInactive) params.set("showInactive", "true");
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions?${params.toString()}`, { credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to load product definitions");
+  const json = await api.get(PD.list, {
+    query: { page, limit, search, categoryId, productId, trackingMethod, showInactive: showInactive ? "true" : undefined },
+    fallback: "Failed to load product definitions",
+  });
   const items = Array.isArray(json.data) ? json.data : json.data?.data || [];
   const total = json.pagination?.total ?? json.data?.pagination?.total ?? items.length;
   return { items, total };
 }
 
 // Products of one category — powers the dependent Product filter dropdown.
+// No categoryId → every product (the Product filter before a category is picked).
 async function apiProductsByCategory(categoryId) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions?categoryId=${categoryId}&limit=500`, {
-    credentials: "include",
-  });
-  const json = await res.json();
-  if (!res.ok || !json.success) return [];
+  let json;
+  try {
+    json = await api.get(PD.list, { query: { categoryId, limit: categoryId ? 500 : 1000 } });
+  } catch {
+    return [];
+  }
   return Array.isArray(json.data) ? json.data : json.data?.data || [];
 }
 
@@ -260,17 +235,11 @@ async function apiNameExistsInCategory(categoryId, name, excludeId) {
 }
 
 async function apiSoftDeleteProductDefinition(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}`, { method: "DELETE", credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to delete product definition");
-  return json.data;
+  return (await api.delete(PD.byId(id), { fallback: "Failed to delete product definition" })).data;
 }
 
 async function apiRestoreProductDefinition(id) {
-  const res = await fetch(`${API_BACKEND_URL}/stock/product-definitions/${id}/restore`, { method: "PATCH", credentials: "include" });
-  const json = await res.json();
-  if (!res.ok || !json.success) throw new Error(json.message || "Failed to restore product definition");
-  return json.data;
+  return (await api.patch(PD.restore(id), undefined, { fallback: "Failed to restore product definition" })).data;
 }
 
 /* ================================================================== */
@@ -348,6 +317,30 @@ function Modal({ onClose, title, children, maxWidth = "max-w-lg" }) {
   );
 }
 
+/* The product's image or PDF, large — from the form, the table and the detail page. */
+function FilePreviewModal({ file, onClose }) {
+  if (!file) return null;
+  return (
+    <Modal onClose={onClose} title={file.name || (file.isPdf ? "PDF" : "Image")} maxWidth="max-w-4xl">
+      <div className="flex items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-slate-50">
+        {file.isPdf ? (
+          <iframe src={file.url} title={file.name || "PDF"} className="h-[75vh] w-full border-0" />
+        ) : (
+          <img src={file.url} alt={file.name || "Product image"} className="max-h-[75vh] w-auto max-w-full object-contain" />
+        )}
+      </div>
+      <div className="mt-4 flex justify-end">
+        <a
+          href={file.url} target="_blank" rel="noreferrer"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3.5 py-2 text-xs font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50"
+        >
+          <ExternalLink size={14} /> Open in new tab
+        </a>
+      </div>
+    </Modal>
+  );
+}
+
 /* Truncate + "...more" popup — same as PurchaseOrderPage */
 function TruncateText({ text, max = TRUNCATE_LIMIT, title = "Full details", className = "" }) {
   const [open, setOpen] = useState(false);
@@ -387,16 +380,16 @@ function CategoryLabel({ name, path, className = "" }) {
   );
 }
 
-function StatusPill({ value }) {
-  const map = {
-    ACTIVE: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-    DRAFT: "bg-amber-50 text-amber-700 ring-amber-200",
-  };
-  const dot = { ACTIVE: "bg-emerald-500", DRAFT: "bg-amber-500" };
+// Active / Inactive (deleted) — the same badge as every other master.
+function StatusPill({ isActive }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${map[value] || "bg-slate-50 text-slate-600 ring-slate-200"}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${dot[value] || "bg-slate-400"}`} />
-      {value}
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset ${
+        isActive ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-rose-50 text-rose-700 ring-rose-200"
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-rose-500"}`} />
+      {isActive ? "Active" : "Inactive"}
     </span>
   );
 }
@@ -641,19 +634,22 @@ function FieldDefinitionMultiSelect({ fields, loading, selectedFields, onToggle,
 /* Attachment picker — IMAGE or PDF, up to 5 MB (validated here AND by multer) */
 function AttachmentUploadField({ existingFile, file, onFileChange, onRemoveExisting, error, onError }) {
   const inputRef = useRef(null);
-  const [localPreviewUrl, setLocalPreviewUrl] = useState(null);
+  const [localUrl, setLocalUrl] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
+  // A picked file (image or PDF) gets a blob URL, so it can be previewed before saving.
   useEffect(() => {
-    if (!file || file.type === "application/pdf") { setLocalPreviewUrl(null); return; }
+    if (!file) { setLocalUrl(null); return; }
     const url = URL.createObjectURL(file);
-    setLocalPreviewUrl(url);
+    setLocalUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
-  const existingIsPdf = existingFile && isPdfPath(existingFile);
-  const showingPdf = (file && file.type === "application/pdf") || (!file && existingIsPdf);
-  const previewUrl = localPreviewUrl || (existingFile && !existingIsPdf ? resolveAssetUrl(existingFile) : null);
   const hasSomething = Boolean(file || existingFile);
+  const isPdf = file ? file.type === "application/pdf" : Boolean(existingFile && isPdfPath(existingFile));
+  const showingPdf = hasSomething && isPdf;
+  const fileUrl = localUrl || (existingFile ? resolveAssetUrl(existingFile) : null);
+  const previewUrl = !isPdf ? fileUrl : null;
 
   const handlePick = (e) => {
     const picked = e.target.files?.[0];
@@ -676,7 +672,20 @@ function AttachmentUploadField({ existingFile, file, onFileChange, onRemoveExist
     <div>
       <label className={labelCls}>Product Image / PDF</label>
       <div className="flex items-center gap-4">
-        <div className={`relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed bg-slate-50 ${error ? "border-rose-400" : "border-slate-300"}`}>
+        <button
+          type="button"
+          disabled={!hasSomething}
+          onClick={() => setPreviewOpen(true)}
+          title={hasSomething ? "Click to view" : undefined}
+          className={`group relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-slate-50 transition disabled:cursor-default ${
+            error ? "border-dashed border-rose-400" : hasSomething ? "border-solid border-slate-200 hover:border-indigo-300 hover:shadow-md" : "border-dashed border-slate-300"
+          }`}
+        >
+          {hasSomething && (
+            <span className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/0 text-white opacity-0 transition group-hover:bg-slate-900/40 group-hover:opacity-100">
+              <Eye size={20} />
+            </span>
+          )}
           {previewUrl ? (
             <img src={previewUrl} alt="Product preview" className="h-full w-full object-cover" />
           ) : showingPdf ? (
@@ -687,7 +696,7 @@ function AttachmentUploadField({ existingFile, file, onFileChange, onRemoveExist
           ) : (
             <ImageOff size={22} className="text-slate-300" />
           )}
-        </div>
+        </button>
 
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-2">
@@ -698,13 +707,13 @@ function AttachmentUploadField({ existingFile, file, onFileChange, onRemoveExist
               <ImagePlus size={14} />
               {hasSomething ? "Replace File" : "Upload File"}
             </button>
-            {hasSomething && !file && existingFile && (
-              <a
-                href={resolveAssetUrl(existingFile)} target="_blank" rel="noreferrer"
+            {hasSomething && (
+              <button
+                type="button" onClick={() => setPreviewOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3.5 py-2 text-xs font-semibold text-indigo-600 shadow-sm transition hover:bg-indigo-50"
               >
-                <Eye size={14} /> Open
-              </a>
+                <Eye size={14} /> View
+              </button>
             )}
             {hasSomething && (
               <button
@@ -728,17 +737,24 @@ function AttachmentUploadField({ existingFile, file, onFileChange, onRemoveExist
         />
       </div>
       <FieldError message={error} />
+      {previewOpen && fileUrl && (
+        <FilePreviewModal
+          file={{ url: fileUrl, isPdf, name: file?.name || "Product file" }}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-function ConfirmDialog({ open, title, description, confirmLabel, loading, onConfirm, onCancel }) {
+function ConfirmDialog({ open, title, description, confirmLabel, loading, onConfirm, onCancel, tone = "danger" }) {
   if (!open) return null;
+  const success = tone === "success";
   return (
     <Modal onClose={loading ? () => {} : onCancel} title={title} maxWidth="max-w-sm">
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-500">
-          <AlertTriangle size={18} />
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${success ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-500"}`}>
+          {success ? <RotateCcw size={18} /> : <AlertTriangle size={18} />}
         </span>
         <p className="text-sm text-slate-500">{description}</p>
       </div>
@@ -751,7 +767,9 @@ function ConfirmDialog({ open, title, description, confirmLabel, loading, onConf
         </button>
         <button
           type="button" disabled={loading} onClick={onConfirm}
-          className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-rose-500 disabled:opacity-60"
+          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:opacity-60 ${
+            success ? "bg-emerald-600 hover:bg-emerald-500" : "bg-rose-600 hover:bg-rose-500"
+          }`}
         >
           {loading && <Loader2 size={14} className="animate-spin" />}
           {confirmLabel}
@@ -804,26 +822,42 @@ function FieldsPopup({ row, fieldLabelMap, onClose }) {
   );
 }
 
-function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
-  if (!row) return null;
+// One colour per fact, so the page reads at a glance.
+const FACT_TONE = {
+  indigo: "border-indigo-100 bg-indigo-50/60 [&_.fact-icon]:bg-indigo-100 [&_.fact-icon]:text-indigo-600 [&_.fact-label]:text-indigo-500",
+  sky: "border-sky-100 bg-sky-50/60 [&_.fact-icon]:bg-sky-100 [&_.fact-icon]:text-sky-600 [&_.fact-label]:text-sky-600",
+  violet: "border-violet-100 bg-violet-50/60 [&_.fact-icon]:bg-violet-100 [&_.fact-icon]:text-violet-600 [&_.fact-label]:text-violet-500",
+  amber: "border-amber-100 bg-amber-50/60 [&_.fact-icon]:bg-amber-100 [&_.fact-icon]:text-amber-600 [&_.fact-label]:text-amber-600",
+  emerald: "border-emerald-100 bg-emerald-50/60 [&_.fact-icon]:bg-emerald-100 [&_.fact-icon]:text-emerald-600 [&_.fact-label]:text-emerald-600",
+  rose: "border-rose-100 bg-rose-50/60 [&_.fact-icon]:bg-rose-100 [&_.fact-icon]:text-rose-600 [&_.fact-label]:text-rose-500",
+};
+
+function Fact({ icon: FIcon, label, tone = "indigo", children }) {
+  return (
+    <div className={`flex min-w-0 items-start gap-3 rounded-xl border px-4 py-3 ${FACT_TONE[tone]}`}>
+      <span className="fact-icon mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg">
+        <FIcon size={17} />
+      </span>
+      <div className="min-w-0">
+        <p className="fact-label text-[11px] font-semibold uppercase tracking-wider">{label}</p>
+        <div className="mt-0.5 break-words text-sm font-semibold text-slate-900">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/* View: every detail of one product, as a page in place of the list (Back returns to it). */
+function ProductDetailPage({ row, categoryName, categoryPath, fieldLabelMap, onBack, onPreview }) {
   const attachment = row.image;
   const pdf = isPdfPath(attachment);
-
-  const rows = [
-    ["Tracking Method", TRACKING_METHOD_LABELS[row.trackingMethod] || row.trackingMethod],
-    ["Fields Count", row.selectedFields?.length ?? 0],
-    ["GST Rate", row.gstRate ? `${row.gstRate}%` : "\u2014"],
-    ["Warranty", formatWarranty(row.warrantyMonths)],
-    ["Unit", unitLabel(row.unit) || "\u2014"],
-    ["Default Alert Threshold", row.defaultStockAlertThreshold ?? "\u2014"],
-    ["Status", row.status],
-    ["Active", row.isActive ? "Yes" : "No"],
-    ["Product ID", row._id],
-  ];
-
-  // The API populates branchId to { _id, name, code } — fall back to the
-  // raw id in case an unpopulated row is ever handed in.
-  const thresholdRows = (row.branchThresholds || []).map((t) => ({
+  const fields = (row.selectedFields || [])
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((sf) => {
+      const id = sf.fieldDefId?._id || sf.fieldDefId;
+      return { id, label: sf.fieldDefId?.label || fieldLabelMap[id] || "Unknown field", isRequired: Boolean(sf.isRequired) };
+    });
+  const thresholds = (row.branchThresholds || []).map((t) => ({
     id: String(t.branchId?._id || t.branchId),
     name: t.branchId?.name || String(t.branchId),
     code: t.branchId?.code || "",
@@ -831,65 +865,121 @@ function RowDetailModal({ row, categoryName, categoryPath, onClose }) {
   }));
 
   return (
-    <Modal onClose={onClose} title={row.name} maxWidth="max-w-lg">
-      <div className="mb-4 flex h-40 w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-        {attachment ? (
-          pdf ? (
-            <a
-              href={resolveAssetUrl(attachment)} target="_blank" rel="noreferrer"
-              className="flex flex-col items-center gap-2 text-rose-500 transition hover:text-rose-600"
-            >
-              <FileText size={30} />
-              <span className="text-xs font-semibold">Open PDF</span>
-            </a>
-          ) : (
-            <img src={resolveAssetUrl(attachment)} alt={row.name} className="h-full w-full object-cover" />
-          )
-        ) : (
-          <div className="flex flex-col items-center gap-1.5 text-slate-300">
-            <ImageOff size={26} />
-            <span className="text-xs">No file</span>
+    <div>
+      <div className="mb-6 flex flex-wrap items-center gap-4">
+        <button
+          type="button" onClick={onBack}
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50"
+        >
+          <ArrowLeft size={16} /> Back
+        </button>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="break-words text-xl font-semibold tracking-tight text-slate-900">{row.name}</h1>
+            <StatusPill isActive={row.isActive} />
           </div>
-        )}
-      </div>
-
-      <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2">
-        <span className="w-40 shrink-0 text-xs font-bold uppercase tracking-wide text-slate-500">Category</span>
-        <span className="text-right text-sm text-slate-800">
-          <CategoryLabel name={categoryName} path={categoryPath} />
-        </span>
-      </div>
-
-      {rows.map(([label, val]) => (
-        <div key={label} className="flex items-start justify-between gap-4 border-b border-slate-100 py-2 last:border-0">
-          <span className="w-40 shrink-0 text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
-          <span className="break-all text-right text-sm text-slate-800">
-            <TruncateText text={val} title={label} />
-          </span>
-        </div>
-      ))}
-
-      {thresholdRows.length > 0 && (
-        <div className="mt-4">
-          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">
-            Stock Alert Threshold — Per Branch
+          <p className="mt-0.5 text-sm text-slate-500">
+            <CategoryLabel name={categoryName} path={categoryPath} />
           </p>
-          <div className="rounded-lg border border-slate-200">
-            {thresholdRows.map((t) => (
-              <div key={t.id} className="flex items-center justify-between gap-4 border-b border-slate-100 px-3 py-2 last:border-0">
-                <span className="min-w-0 truncate text-sm text-slate-700">
-                  {t.name}
-                  {t.code && <span className="ml-1.5 text-xs text-slate-400">({t.code})</span>}
-                </span>
-                <span className="shrink-0 text-sm font-semibold text-slate-900">{t.threshold}</span>
-              </div>
-            ))}
-          </div>
         </div>
-      )}
-    </Modal>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Image / PDF */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Image / PDF</p>
+          {attachment ? (
+            <button
+              type="button" onClick={() => onPreview({ url: resolveAssetUrl(attachment), isPdf: pdf, name: row.name })}
+              className="group relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-slate-50"
+            >
+              {pdf ? (
+                <span className="flex flex-col items-center gap-2 text-rose-500">
+                  <FileText size={40} />
+                  <span className="text-sm font-semibold">PDF document</span>
+                </span>
+              ) : (
+                <img src={resolveAssetUrl(attachment)} alt={row.name} className="h-full w-full object-contain" />
+              )}
+              <span className="absolute inset-0 flex items-center justify-center gap-2 bg-slate-900/0 text-sm font-semibold text-white opacity-0 transition group-hover:bg-slate-900/40 group-hover:opacity-100">
+                <Eye size={18} /> View
+              </span>
+            </button>
+          ) : (
+            <div className="flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 text-slate-300">
+              <ImageOff size={32} />
+              <span className="text-xs">No file</span>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-5 lg:col-span-2">
+          {/* Key facts */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <Fact icon={Layers} label="Tracking" tone="indigo">{TRACKING_METHOD_LABELS[row.trackingMethod] || row.trackingMethod || "\u2014"}</Fact>
+            <Fact icon={Ruler} label="Unit" tone="sky">{unitLabel(row.unit) || "\u2014"}</Fact>
+            <Fact icon={Percent} label="GST rate" tone="violet">{row.gstRate || row.gstRate === 0 ? `${row.gstRate}%` : "\u2014"}</Fact>
+            <Fact icon={ShieldCheck} label="Warranty" tone="emerald">{formatWarranty(row.warrantyMonths)}</Fact>
+            <Fact icon={BellRing} label="Default alert threshold" tone="amber">{row.defaultStockAlertThreshold ?? "\u2014"}</Fact>
+            <Fact icon={ListChecks} label="Fields" tone="rose">{fields.length}</Fact>
+          </div>
+
+          {/* Fields */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Fields captured per unit</p>
+            {fields.length === 0 ? (
+              <p className="text-sm text-slate-400">No fields selected on this product.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {fields.map((f, i) => (
+                  <span
+                    key={f.id || i}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800"
+                  >
+                    {f.label}
+                    {f.isRequired && (
+                      <span className="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold uppercase text-indigo-600 ring-1 ring-inset ring-indigo-200">
+                        Required
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Branch thresholds */}
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">Stock alert threshold per branch</p>
+            {thresholds.length === 0 ? (
+              <p className="text-sm text-slate-400">No branch thresholds saved.</p>
+            ) : (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {thresholds.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3.5 py-2.5">
+                    <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
+                      <Building2 size={15} className="shrink-0 text-slate-400" />
+                      <span className="truncate">{t.name}</span>
+                      {t.code && <span className="shrink-0 font-mono text-xs text-slate-400">{t.code}</span>}
+                    </span>
+                    <span className="shrink-0 rounded-lg bg-white px-2.5 py-0.5 text-sm font-bold tabular-nums text-slate-900 ring-1 ring-inset ring-slate-200">
+                      {t.threshold}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <p className="flex items-center gap-1.5 text-xs text-slate-400">
+            <Hash size={12} /> Product ID <span className="font-mono">{row._id}</span>
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
+
 
 function TableSkeletonRows({ rows = 6, cols = 7 }) {
   return (
@@ -933,7 +1023,9 @@ function EmptyState({ onCreate }) {
 /* Form                                                                */
 /* ================================================================== */
 
-function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved }) {
+// embedded: shown inside the Category page, under its header and breadcrumb —
+// no page-height wrapper or page padding of its own.
+function ProductDefinitionForm({ initialData, categoryLocked, embedded = false, onCancel, onSaved }) {
   const [form, setForm] = useState(initialData);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -1085,19 +1177,13 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     }));
   };
 
-  // form.branchThresholds only holds branches the user (or a previous
-  // save) set EXPLICITLY. Anything else — most importantly a branch created
-  // since this product was last saved — falls back to the product default here,
-  // which is the same rule the backend applies between saves. Derived rather
-  // than backfilled into state, so editing the default still flows through to
-  // every row nobody has overridden yet.
-  const thresholdFor = (branchId) => {
-    const explicit = form.branchThresholds[branchId];
-    return explicit === undefined ? String(form.defaultStockAlertThreshold ?? "") : explicit;
-  };
+  // A branch row shows only what was set for it — typed in, saved before, or
+  // copied by "Apply default to all". Typing the default fills nothing by
+  // itself; the button is the one way to copy it to every branch.
+  const thresholdFor = (branchId) => form.branchThresholds[branchId] ?? "";
 
   // Header counter — the fastest way for the user to see the section is complete
-  // without scanning every row (it jumps to N of N as soon as a default is typed).
+  // without scanning every row.
   const filledThresholdCount = branches.filter((w) => thresholdFor(w._id) !== "").length;
 
   const updateBranchThreshold = (branchId, value) => {
@@ -1170,7 +1256,11 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
     if (!form.name.trim()) next.name = "Product name is required";
     if (!form.trackingMethod) next.trackingMethod = "Please select a tracking method";
     if (!form.unit) next.unit = "Please select a unit";
-    if (!form.selectedFields.length) next.selectedFields = "Select at least one field";
+    // Individual only: each unit is identified BY its field values, so a
+    // product with none of them can never be received. Group records a
+    // quantity, and its batch fields are optional.
+    if (form.trackingMethod === "individual" && !form.selectedFields.length)
+      next.selectedFields = "Select at least one field";
     // Every product is billed, so it needs a slab. 0% is a real answer here
     // (exempt goods) — "" is the only "not chosen" state, which is why this is
     // an explicit empty-check rather than a falsy one.
@@ -1239,7 +1329,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
       const basePayload = {
         name: form.name.trim(),
         trackingMethod: form.trackingMethod,
-        status: form.status,
         selectedFields: form.selectedFields.map((sf, index) => ({
           fieldDefId: sf.fieldDefId,
           isRequired: sf.isRequired,
@@ -1277,6 +1366,7 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
         setErrors((e) => ({ ...e, name: "A product with this name already exists in this category" }));
       } else {
         setSubmitError(msg);
+        toast.error(msg);
       }
     } finally {
       setSubmitting(false);
@@ -1286,14 +1376,14 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
   const categoryPath = form.category?.displayPath || form.category?.name || "";
 
   return (
-    <div className="min-h-screen bg-slate-50/60">
-      <div className="mx-auto max-w-4xl px-4 py-8">
-        <div className="mb-6 flex items-center gap-3">
+    <div className={embedded ? "" : "min-h-screen bg-slate-50/60"}>
+      <div className={embedded ? "mx-auto max-w-4xl" : "mx-auto max-w-4xl px-4 py-8"}>
+        <div className={`flex items-center gap-4 ${embedded ? "mb-5" : "mb-6"}`}>
           <button
             type="button" onClick={onCancel} disabled={submitting}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
           >
-            <ArrowLeft size={14} /> Back
+            <ArrowLeft size={16} /> Back
           </button>
           <div>
             <h1 className="text-lg font-semibold tracking-tight text-slate-900">
@@ -1376,22 +1466,6 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
               error={errors.imageFile}
               onError={(msg) => setErrors((e) => ({ ...e, imageFile: msg }))}
             />
-
-            <div>
-              <label className={labelCls}>Status</label>
-              <div className="inline-flex gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
-                {PRODUCT_STATUS.map((s) => (
-                  <button
-                    key={s.value} type="button" onClick={() => updateField("status", s.value)}
-                    className={`rounded-md px-4 py-1.5 text-sm font-medium transition ${
-                      form.status === s.value ? "bg-indigo-600 text-white" : "text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
 
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-4">
               <div>
@@ -1587,7 +1661,14 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
               <div>
                 <label className={labelCls}>
                   Applicable Fields
-                  <RequiredMark />
+                  {/* Required for Individual, where the field values ARE the
+                      unit's identity. Group is a counted quantity, so its
+                      batch fields are a bonus and picking none is valid. */}
+                  {form.trackingMethod === "individual" ? (
+                    <RequiredMark />
+                  ) : (
+                    <span className="ml-1.5 text-xs font-normal text-slate-400">(optional)</span>
+                  )}
                   <span className="ml-2 text-xs font-normal text-slate-400">({form.selectedFields.length} selected)</span>
                 </label>
                 <FieldDefinitionMultiSelect
@@ -1656,46 +1737,18 @@ function ProductDefinitionForm({ initialData, categoryLocked, onCancel, onSaved 
 /* Row actions — icon buttons + overflow menu                          */
 /* ================================================================== */
 
-function RowMenu({ items }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-  if (!items.length) return null;
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        type="button" title="More actions" onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
-      >
-        <MoreVertical size={16} />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-30 mt-1.5 w-40 overflow-hidden rounded-xl border border-slate-200 bg-white py-1.5 shadow-xl ring-1 ring-slate-900/5">
-          {items.map((it) => (
-            <button
-              key={it.label} type="button" onClick={() => { setOpen(false); it.onClick(); }}
-              className={`block w-full px-4 py-2 text-left text-sm transition ${
-                it.tone === "red" ? "text-rose-600 hover:bg-rose-50" : "text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ================================================================== */
 /* List                                                                */
 /* ================================================================== */
 
-export default function ProductDefinition({ categoryId, lockCategory }) {
+/*
+  Embedded in Category (lockCategory):
+    onFormToggle(open)  the add/edit form replaced the list, or left it
+    addSignal           bumped by the page's "Add Product" — opens the create form here
+    onChanged()         a product was created/updated/deleted/restored, so the
+                        page can refresh the category's product count
+*/
+export default function ProductDefinition({ categoryId, lockCategory, onFormToggle, addSignal = 0, onChanged }) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -1716,7 +1769,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
   const [categoryFilter, setCategoryFilter] = useState(
     isCategoryLocked ? categoryId : searchParams.get("categoryId") || ""
   );
-  const [productFilter, setProductFilter] = useState("");     // dependent on category
+  const [productFilter, setProductFilter] = useState("");     // narrowed by category when set
   const [trackingFilter, setTrackingFilter] = useState("");   // dropdown now
 
   const [leafCategories, setLeafCategories] = useState([]);
@@ -1732,6 +1785,12 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
   const [fieldLabelMap, setFieldLabelMap] = useState({});
 
   const [view, setView] = useState("list");
+  // Embedded in Category: tell the page when the form takes over, and that it
+  // is gone when this unmounts (moving to another category).
+  useEffect(() => {
+    onFormToggle?.(view !== "list");
+  }, [view, onFormToggle]);
+  useEffect(() => () => onFormToggle?.(false), [onFormToggle]);
   const [formMode, setFormMode] = useState("create");
   const [formInitialData, setFormInitialData] = useState(emptyForm);
   const [formLoadingRow, setFormLoadingRow] = useState(null);
@@ -1741,8 +1800,25 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState(null);
   const [restoringId, setRestoringId] = useState(null);
-  const [toast, setToast] = useState(null);
+  // { url, isPdf, name } — the image/PDF opened large.
+  const [previewFile, setPreviewFile] = useState(null);
+
+  const productCategoryId = (p) => String(p?.categoryId?._id || p?.categoryId || "");
+
+  const pickProduct = (productId) => {
+    setProductFilter(productId);
+    setPage(1);
+    if (!productId || categoryFilter || isCategoryLocked) return;
+    // Chosen without a category: show its category too (without clearing the product).
+    const catId = productCategoryId(productOptions.find((p) => String(p._id) === String(productId)));
+    if (!catId) return;
+    setCategoryFilter(catId);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("categoryId", catId);
+    router.replace(`?${params.toString()}`, { scroll: false });
+  };
 
   const updateCategoryFilter = (nextCategoryId) => {
     // Locked mode: the category can never change away from the passed-in id.
@@ -1826,10 +1902,10 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
     })();
   }, []);
 
-  // Product filter is DEPENDENT: options only exist once a category is chosen.
+  // Product filter: that category's products, or every product when none is
+  // chosen (picking one then fills in its category — see pickProduct).
   useEffect(() => {
     (async () => {
-      if (!categoryFilter) { setProductOptions([]); return; }
       setProductOptionsLoading(true);
       try {
         setProductOptions(await apiProductsByCategory(categoryFilter));
@@ -1888,12 +1964,6 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
   useEffect(() => { loadList(); }, [loadList]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
-
   const openCreate = () => {
     setFormMode("create");
     // Locked mode: pre-fill AND lock the category on the create form too.
@@ -1906,6 +1976,16 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
     });
     setView("form");
   };
+
+  // The Category page's "Add Product" asks for the create form in place.
+  const lastAddSignal = useRef(addSignal);
+  useEffect(() => {
+    if (addSignal === lastAddSignal.current) return;
+    lastAddSignal.current = addSignal;
+    openCreate();
+    // Only a new signal may open the form — openCreate is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addSignal]);
 
   // ------------------------------------------------------------------
   // Auto-open: ?redirect=category&categoryId=XXXX
@@ -1986,7 +2066,6 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
           ])
         ),
         trackingMethod: full.trackingMethod || "",
-        status: full.status || "ACTIVE",
         image: full.image || null,
         imageFile: null,
         selectedFields: (full.selectedFields || [])
@@ -2000,7 +2079,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
       setFormMode("edit");
       setView("form");
     } catch (err) {
-      setToast({ type: "error", message: err.message || "Failed to load product definition" });
+      toast.error(err.message || "Failed to load product definition");
     } finally {
       setFormLoadingRow(null);
     }
@@ -2010,12 +2089,10 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
   const handleSaved = (_saved, action) => {
     setView("list");
-    setToast({
-      type: "success",
-      message: action === "created" ? "Product definition created successfully." : "Product definition updated successfully.",
-    });
+    toast.success(action === "created" ? "Product definition created successfully." : "Product definition updated successfully.");
     if (action === "created") setPage(1);
     loadList();
+    onChanged?.();
   };
 
   const handleDelete = async () => {
@@ -2023,27 +2100,37 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
     setDeleteLoading(true);
     try {
       await apiSoftDeleteProductDefinition(deleteTarget._id);
-      setToast({ type: "success", message: `"${deleteTarget.name}" was deleted.` });
+      toast.success(`"${deleteTarget.name}" was deleted.`);
       setDeleteTarget(null);
       loadList();
+      onChanged?.();
     } catch (err) {
-      setToast({ type: "error", message: err.message || "Failed to delete product definition" });
+      toast.error(err.message || "Failed to delete product definition");
     } finally {
       setDeleteLoading(false);
     }
   };
 
-  const handleRestore = async (row) => {
+  const handleRestore = async () => {
+    const row = restoreTarget;
+    if (!row) return;
     setRestoringId(row._id);
     try {
       await apiRestoreProductDefinition(row._id);
-      setToast({ type: "success", message: `"${row.name}" was restored.` });
+      toast.success(`"${row.name}" was restored.`);
+      setRestoreTarget(null);
       loadList();
+      onChanged?.();
     } catch (err) {
-      setToast({ type: "error", message: err.message || "Failed to restore product definition" });
+      toast.error(err.message || "Failed to restore product definition");
     } finally {
       setRestoringId(null);
     }
+  };
+
+  const openDetail = (row) => {
+    setDetailRow(row);
+    setView("detail");
   };
 
   // Locked mode: the locked category itself never counts as an "active filter".
@@ -2074,9 +2161,26 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
         key={formInitialData.id || "create"}
         initialData={formInitialData}
         categoryLocked={formMode === "edit" || (formMode === "create" && isCategoryLocked)}
+        embedded={Boolean(lockCategory)}
         onCancel={closeForm}
         onSaved={handleSaved}
       />
+    );
+  }
+
+  if (view === "detail" && detailRow) {
+    return (
+      <div className={lockCategory ? "" : "min-h-screen bg-slate-50/60 p-6"}>
+        <ProductDetailPage
+          row={detailRow}
+          categoryName={categoryMap[detailRow.categoryId]?.name}
+          categoryPath={categoryMap[detailRow.categoryId]?.path}
+          fieldLabelMap={fieldLabelMap}
+          onBack={() => setView("list")}
+          onPreview={setPreviewFile}
+        />
+        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      </div>
     );
   }
 
@@ -2100,12 +2204,6 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
       </div>
       )}
     
-      {toast && (
-        <div className="mb-4">
-          <Banner type={toast.type} onClose={() => setToast(null)}>{toast.message}</Banner>
-        </div>
-      )}
-
       {/* SINGLE FILTER ROW — search · category · product · type · active/inactive · reset */}
       <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
@@ -2141,15 +2239,20 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
             />
           </div>
 
-          {/* Product — DEPENDENT on the category */}
+          {/* Product — narrowed by the category when one is chosen */}
           <div className="min-w-0 flex-1 xl:basis-48">
             <SearchableSelect
               value={productFilter}
-              onChange={(v) => { setProductFilter(v); setPage(1); }}
-              options={productOptions.map((p) => ({ value: p._id, label: p.name }))}
+              onChange={pickProduct}
+              options={productOptions.map((p) => ({
+                value: p._id,
+                // Across all categories the same name can repeat — say which one.
+                label: categoryFilter
+                  ? p.name
+                  : `${p.name}${categoryMap[productCategoryId(p)] ? ` — ${categoryMap[productCategoryId(p)].path}` : ""}`,
+              }))}
               loading={productOptionsLoading}
-              disabled={!categoryFilter}
-              placeholder={categoryFilter ? "All products" : "Select a category first"}
+              placeholder="All products"
             />
           </div>
 
@@ -2221,28 +2324,12 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
                 const cat = categoryMap[row.categoryId];
                 const fieldCount = row.selectedFields?.length ?? 0;
                 return (
-                  <tr
-                    key={row._id}
-                    onClick={() => setDetailRow(row)}
-                    className="cursor-pointer transition hover:bg-slate-50/60"
-                  >
+                  <tr key={row._id} className="transition hover:bg-slate-50/60">
+                    {/* Name only — the image/PDF is on the View page. */}
                     <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                          {row.image ? (
-                            isPdfPath(row.image) ? (
-                              <FileText size={15} className="text-rose-500" />
-                            ) : (
-                              <img src={resolveAssetUrl(row.image)} alt={row.name} className="h-full w-full object-cover" />
-                            )
-                          ) : (
-                            <ImageOff size={14} className="text-slate-300" />
-                          )}
-                        </div>
-                        <span className="font-medium text-slate-900">
-                          <TruncateText text={row.name} title="Product name" />
-                        </span>
-                      </div>
+                      <span className="font-medium text-slate-900">
+                        <TruncateText text={row.name} title="Product name" />
+                      </span>
                     </td>
 
                     {/* Category — always the full breadcrumb path */}
@@ -2279,42 +2366,35 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
 
                     <td className="px-4 py-3.5">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <StatusPill value={row.status} />
-                        {!row.isActive && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-inset ring-slate-200">
-                            <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> Deleted
-                          </span>
-                        )}
+                        <StatusPill isActive={row.isActive} />
                       </div>
                     </td>
 
                     <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1.5">
                         {/* View works on active AND soft-deleted rows — a deleted
                             product still has to be inspectable before restoring it. */}
-                        <button
-                          type="button" onClick={() => setDetailRow(row)} title="View"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600"
-                        >
+                        <button type="button" onClick={() => openDetail(row)} title="View" className="inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-inset transition disabled:opacity-50 bg-indigo-50 text-indigo-600 ring-indigo-100 hover:bg-indigo-100 hover:text-indigo-700">
                           <Eye size={15} />
                         </button>
                         {row.isActive ? (
                           <>
                             <button
                               type="button" onClick={() => openEdit(row)} disabled={formLoadingRow === row._id} title="Edit"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 disabled:opacity-50"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-inset transition disabled:opacity-50 bg-amber-50 text-amber-600 ring-amber-100 hover:bg-amber-100 hover:text-amber-700"
                             >
                               {formLoadingRow === row._id ? <Loader2 size={15} className="animate-spin" /> : <Pencil size={15} />}
                             </button>
-                            <RowMenu items={[{ label: "Delete", tone: "red", onClick: () => setDeleteTarget(row) }]} />
+                            <button type="button" onClick={() => setDeleteTarget(row)} title="Delete" className="inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-inset transition disabled:opacity-50 bg-rose-50 text-rose-600 ring-rose-100 hover:bg-rose-100 hover:text-rose-700">
+                              <Trash2 size={15} />
+                            </button>
                           </>
                         ) : (
                           <button
-                            type="button" onClick={() => handleRestore(row)} disabled={restoringId === row._id} title="Restore"
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-indigo-600 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 disabled:opacity-50"
+                            type="button" onClick={() => setRestoreTarget(row)} disabled={restoringId === row._id} title="Restore"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg ring-1 ring-inset transition disabled:opacity-50 bg-emerald-50 text-emerald-600 ring-emerald-100 hover:bg-emerald-100 hover:text-emerald-700"
                           >
-                            {restoringId === row._id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
-                            Restore
+                            {restoringId === row._id ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
                           </button>
                         )}
                       </div>
@@ -2338,14 +2418,7 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
         )}
       </div>
 
-      {detailRow && (
-        <RowDetailModal
-          row={detailRow}
-          categoryName={categoryMap[detailRow.categoryId]?.name}
-          categoryPath={categoryMap[detailRow.categoryId]?.path}
-          onClose={() => setDetailRow(null)}
-        />
-      )}
+      <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
 
       {fieldsPopupRow && (
         <FieldsPopup row={fieldsPopupRow} fieldLabelMap={fieldLabelMap} onClose={() => setFieldsPopupRow(null)} />
@@ -2363,6 +2436,17 @@ export default function ProductDefinition({ categoryId, lockCategory }) {
         loading={deleteLoading}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(restoreTarget)}
+        tone="success"
+        title="Restore product definition?"
+        description={restoreTarget ? `"${restoreTarget.name}" will be active again and show up in every product picker.` : ""}
+        confirmLabel="Restore"
+        loading={Boolean(restoringId)}
+        onConfirm={handleRestore}
+        onCancel={() => setRestoreTarget(null)}
       />
     </div>
   );

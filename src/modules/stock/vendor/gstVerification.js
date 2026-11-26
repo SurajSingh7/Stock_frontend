@@ -9,8 +9,8 @@
 // is needed here.
 
 import { STATE_OPTIONS } from "@/shared/constants/indianStates";
-
-const GST_VERIFY_URL = "/erp-api/third-party/gst/verify";
+import { api } from "@/lib/apiClient";
+import { API_ENDPOINTS } from "@/constants/api";
 
 const GSTIN_RX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 
@@ -36,22 +36,14 @@ export const verifyGST = async (gstNumber) => {
     throw new Error("Enter a valid 15-character GST number before verifying");
   }
 
-  const res = await fetch(GST_VERIFY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ gstNumber: gstin }),
-  });
-
-  let json;
-  try {
-    json = await res.json();
-  } catch {
-    throw new Error("GST verification is unavailable right now — please try again");
-  }
-
-  if (!res.ok || !json.success) {
-    throw new Error(json?.message || "GST verification failed");
+  const json = await api.post(
+    API_ENDPOINTS.admin.erp.gstVerify,
+    { gstNumber: gstin },
+    { base: "", fallback: "GST verification is unavailable right now — please try again" }
+  );
+  // An ok response without the envelope is still not a verification.
+  if (!json.success) {
+    throw new Error(json.message || "GST verification failed");
   }
 
   const d = json.data || {};
