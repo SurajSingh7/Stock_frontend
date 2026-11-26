@@ -4,10 +4,10 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 const eslintConfig = defineConfig([
   ...nextVitals,
   // All HTTP goes through src/lib/apiClient.js (paths in src/constants/api).
-  // middleware.js runs on the edge before any page and keeps its own fetch.
+  // proxy.js (Next 16's name for middleware) runs before any page and keeps its own fetch.
   {
     files: ["src/**/*.{js,jsx}"],
-    ignores: ["src/lib/apiClient.js", "src/middleware.js"],
+    ignores: ["src/lib/apiClient.js", "src/proxy.js"],
     rules: {
       "no-restricted-globals": [
         "error",
